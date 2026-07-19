@@ -5,9 +5,11 @@
 
 use std::time::Duration;
 
+use bluer::Address;
 use bridgething::{ClientMode, TappedFrame};
 use bridgething_iap2::{SessionEvent, csm::telephony::CallStateUpdate};
 use bridgething_test_harness::Harness;
+use libbridgething::{Device, DeviceType, PeerIap2Status};
 use serde_json::Value;
 
 const CONVERGE: Duration = Duration::from_secs(3);
@@ -21,6 +23,29 @@ fn ringing_incoming(call_id: &str) -> CallStateUpdate {
     call_uuid: Some(call_id.into()),
     ..Default::default()
   }
+}
+
+async fn identify_ios_peer(harness: &Harness, mac: Address) {
+  let peers = harness.state().peers.clone();
+  peers
+    .ensure_exists(
+      mac,
+      Device {
+        name: "test-iphone".into(),
+        device_type: DeviceType::Ios,
+        mac: mac.to_string(),
+        default: false,
+      },
+    )
+    .await;
+  peers.set_iap2(mac, PeerIap2Status::Identified).await;
+  let up = harness
+    .wait_for(
+      |s| s.peers.snapshot().peers.get(&mac).is_some_and(|p| p.has_useful_link()),
+      CONVERGE,
+    )
+    .await;
+  assert!(up, "iap2 peer never reached a useful link");
 }
 
 fn stock_call_info(frame: &TappedFrame) -> Option<Value> {
@@ -44,8 +69,6 @@ fn modern_phone_event(frame: &TappedFrame, event: &str) -> Option<Value> {
   (msg.get("event")?.as_str()? == event).then(|| msg.get("data").cloned().unwrap_or(Value::Null))
 }
 
-/// The stock webapp compares status/call_dir against PascalCase strings
-/// ('Ringing', 'Incoming'); camelCase values render the overlay dead.
 #[tokio::test]
 async fn iap2_incoming_call_reaches_stock_with_pascal_case_fields() {
   let harness = Harness::start().await.expect("harness start");
@@ -58,6 +81,7 @@ async fn iap2_incoming_call_reaches_stock_with_pascal_case_fields() {
   assert!(registered, "stock client never registered");
 
   let phone = harness.iap2_peer();
+  identify_ios_peer(&harness, phone).await;
   harness
     .inject_iap2(phone, SessionEvent::CallStateUpdate(ringing_incoming("call-1")))
     .await
@@ -72,14 +96,10 @@ async fn iap2_incoming_call_reaches_stock_with_pascal_case_fields() {
   assert_eq!(info["call_dir"].as_str(), Some("Incoming"));
   assert_eq!(info["display_name"].as_str(), Some("Test Caller"));
   assert_eq!(info["remote_id"].as_str(), Some("(555) 555-0100"));
-  // service is daemon-internal; the translation substitutes display_name for the
-  // remote_id on unknown-service calls instead of surfacing the field to stock.
   assert!(info.get("service").is_none(), "service must not cross to stock");
   assert_eq!(info["call_id"].as_str(), Some("call-1"));
 }
 
-/// First delta announces (callStarted), repeats update (callUpdated), and an
-/// explicit Disconnected delta ends the call and evicts it from state.
 #[tokio::test]
 async fn iap2_call_lifecycle_started_updated_ended() {
   let harness = Harness::start().await.expect("harness start");
@@ -154,8 +174,6 @@ async fn iap2_call_lifecycle_started_updated_ended() {
   }
 }
 
-/// iOS deltas are sparse and can omit the CallUUID on a status transition;
-/// with exactly one tracked call the delta must still advance it.
 #[tokio::test]
 async fn iap2_uuid_less_delta_advances_the_single_tracked_call() {
   let harness = Harness::start().await.expect("harness start");
@@ -198,8 +216,6 @@ async fn iap2_uuid_less_delta_advances_the_single_tracked_call() {
   assert!(updated.is_some(), "uuid-less delta did not advance the tracked call");
 }
 
-/// An unanswered incoming ring that disconnects with reason 0 is a missed
-/// call, not a remote hangup.
 #[tokio::test]
 async fn iap2_unanswered_ring_ends_as_missed() {
   let harness = Harness::start().await.expect("harness start");

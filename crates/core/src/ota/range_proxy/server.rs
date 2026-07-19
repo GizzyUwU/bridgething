@@ -40,6 +40,7 @@ use crate::{
 };
 
 const INGEST_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const RANGE_ACK_MAX_INTERVAL: Duration = Duration::from_millis(300);
 const SPOOL_READ_MAX: usize = 64 * 1024;
 
 #[derive(Clone)]
@@ -105,7 +106,6 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
   };
 
   let request_id = Uuid::now_v7();
-  // bind before the wire request so fragments racing the reply are kept
   let body_rx = state.sinks.bind_forward(request_id);
   let begin = match state.proxy.begin_range_active(request_id).await {
     Ok(begin) => begin,
@@ -334,9 +334,35 @@ async fn ingest_pump(
 ) {
   let mut received: u64 = 0;
   let mut last_acked: u64 = 0;
+  let mut last_ack_at = std::time::Instant::now();
   loop {
-    let (offset, bytes) = match tokio::time::timeout(INGEST_IDLE_TIMEOUT, rx.recv()).await {
-      Err(_) => {
+    let event = loop {
+      let flush_in = (received > last_acked)
+        .then(|| RANGE_ACK_MAX_INTERVAL.saturating_sub(last_ack_at.elapsed()))
+        .unwrap_or(INGEST_IDLE_TIMEOUT);
+      match tokio::time::timeout(flush_in.min(INGEST_IDLE_TIMEOUT), rx.recv()).await {
+        Ok(ev) => break Ok(ev),
+        Err(_) if received > last_acked => {
+          last_acked = received;
+          last_ack_at = std::time::Instant::now();
+          tracing::trace!(%request_id, received, expected, "range receipt ack (timer flush)");
+          if let Some(addr) = peer {
+            gateway_man
+              .send_event(
+                addr,
+                BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
+                  transfer_id: request_id,
+                  received: received as u32,
+                }),
+              )
+              .await;
+          }
+        }
+        Err(_) => break Err(()),
+      }
+    };
+    let (offset, bytes) = match event {
+      Err(()) => {
         tracing::warn!(%request_id, received, expected, "range ingest idle timeout; failing pull");
         writer.fail("range ingest idle timeout");
         return;
@@ -371,6 +397,7 @@ async fn ingest_pump(
     tally.add_served(bytes.len() as u64);
     if received - last_acked >= FORWARD_ACK_INTERVAL as u64 || received == expected {
       last_acked = received;
+      last_ack_at = std::time::Instant::now();
       tracing::trace!(%request_id, received, expected, "range receipt ack");
       if let Some(addr) = peer {
         gateway_man
@@ -399,7 +426,6 @@ fn build_headers(meta: ResponseMeta, expected: u64) -> axum::http::response::Bui
       HeaderValue::from_str(&format!("multipart/byteranges; boundary={MULTIPART_BOUNDARY}")).unwrap(),
     );
   } else {
-    // single raw range: the resume offset shifts the start; content-length is what remains
     let p = meta.single.expect("single-range response carries its part");
     let start = p.start + meta.resume_offset as u32;
     let end_inclusive = p.start + p.length - 1;
@@ -522,9 +548,6 @@ mod tests {
     std::env::temp_dir().join(format!("bridgething-range-serve-test-{}", Uuid::now_v7()))
   }
 
-  // the regression at the heart of the BT deadlock: receipt acks must flow while
-  // swupdate reads NOTHING (an emmc write burst), and the full body must still be
-  // servable from the spool afterwards.
   #[tokio::test]
   async fn acks_flow_on_receipt_while_reader_stalls() {
     let sinks = TransferSinks::default();
@@ -556,7 +579,6 @@ mod tests {
       tally.clone(),
     ));
 
-    // feed the full stream in 4 KiB fragments with NO reader draining the spool
     let body: Vec<u8> = (0..expected).map(|i| (i % 251) as u8).collect();
     for (i, chunk) in body.chunks(4096).enumerate() {
       sinks.fragment(request_id, (i * 4096) as u32, Bytes::copy_from_slice(chunk));
@@ -572,7 +594,6 @@ mod tests {
     assert_eq!(got.last().unwrap().received as u64, expected);
     assert_eq!(tally.snapshot().0, expected);
 
-    // the stalled reader can still drain the complete body afterwards
     let mut drained = Vec::new();
     while (drained.len() as u64) < expected {
       let piece = reader.next(SPOOL_READ_MAX).await.unwrap();

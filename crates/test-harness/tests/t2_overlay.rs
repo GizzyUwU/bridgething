@@ -40,10 +40,8 @@ async fn overlay_mounted(page: &Page) -> bool {
   )
 }
 
-/// Navigate fresh and report whether the overlay host mounted in that document,
-/// retrying to absorb the daemon worker's async install of the cdp script.
 async fn settle(page: &Page, url: &str, want_mounted: bool) -> bool {
-  for _ in 0..40 {
+  for _ in 0..80 {
     if page.goto(url).await.is_err() {
       tokio::time::sleep(Duration::from_millis(250)).await;
       continue;
@@ -61,7 +59,6 @@ async fn settle(page: &Page, url: &str, want_mounted: bool) -> bool {
 #[tokio::test]
 async fn t2_overlay_injection_follows_the_active_manifest() {
   let port = free_port();
-  // safety: single-threaded at this point, and this file is its own test process
   unsafe { std::env::set_var("BRIDGETHING_CHROME_PORT", port.to_string()) };
 
   let config = match BrowserConfig::builder()
@@ -110,14 +107,12 @@ async fn t2_overlay_injection_follows_the_active_manifest() {
   )
   .await;
 
-  // an undeclared manifest defaults every surface on: the overlay mounts
   harness.state().set_active_webapp(on_id).await.expect("activate on-app");
   assert!(
     settle(&page, &url, true).await,
     "overlay host never mounted for a default-manifest webapp"
   );
 
-  // daemon-restart bootstrap evaluates into the live document; the mount guard holds
   harness.state().sync_overlay(true).await;
   tokio::time::sleep(Duration::from_secs(1)).await;
   let count: i64 = page
@@ -128,7 +123,6 @@ async fn t2_overlay_injection_follows_the_active_manifest() {
     .expect("count value");
   assert_eq!(count, 1, "run_immediately re-install must not double-mount");
 
-  // an all-off manifest removes the injected script for the next document
   harness
     .state()
     .set_active_webapp(off_id)

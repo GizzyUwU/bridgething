@@ -234,7 +234,7 @@ async fn retransmit_resends_unacked_packet_after_timeout() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn max_retransmissions_drives_link_down() {
+async fn max_retransmissions_announces_rst_and_restarts_detection() {
   let mut e = establish(PeerProposal {
     retransmission_timeout_ms: 30,
     max_retransmissions: 2,
@@ -258,15 +258,119 @@ async fn max_retransmissions_drives_link_down() {
     .await
     .unwrap();
   match event {
-    Iap2Event::LinkDown(reason) => assert!(reason.contains("retransmit"), "got reason {:?}", reason),
-    other => panic!("expected LinkDown, got {:?}", other),
+    Iap2Event::LinkRestarting { reason } => assert!(reason.contains("retransmit"), "got reason {:?}", reason),
+    other => panic!("expected LinkRestarting, got {:?}", other),
   }
 
-  let result = tokio::time::timeout(Duration::from_secs(2), e.link)
+  let rst = read_link(&mut e.peer, &mut e.peer_buf, &mut e.peer_codec).await;
+  assert!(rst.header.control.contains(ControlBits::RST));
+
+  let (peer_buf, peer_codec, _psn) = drive_peer_handshake(&mut e.peer, PeerProposal::default().into_lsp()).await;
+  e.peer_buf = peer_buf;
+  e.peer_codec = peer_codec;
+  let event = recv_with_timeout(&mut e.events_rx, Duration::from_secs(2))
     .await
-    .unwrap()
     .unwrap();
-  assert!(matches!(result, Err(Error::RetransmitLimit)));
+  assert!(matches!(event, Iap2Event::Established(_)));
+  assert!(!e.link.is_finished(), "link task must survive the reset");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn peer_rst_restarts_detection_in_place_and_reestablishes() {
+  let mut e = establish(PeerProposal::default()).await;
+
+  let rst = LinkPacket::header_only(ControlBits::RST, PEER_INITIAL_PSN, 0);
+  write_link(&mut e.peer, &mut e.peer_codec, rst).await;
+
+  let event = recv_with_timeout(&mut e.events_rx, Duration::from_secs(2))
+    .await
+    .unwrap();
+  match event {
+    Iap2Event::LinkRestarting { reason } => assert!(reason.contains("RST"), "got reason {:?}", reason),
+    other => panic!("expected LinkRestarting, got {:?}", other),
+  }
+
+  let (peer_buf, peer_codec, our_psn) = drive_peer_handshake(&mut e.peer, PeerProposal::default().into_lsp()).await;
+  e.peer_buf = peer_buf;
+  e.peer_codec = peer_codec;
+  let event = recv_with_timeout(&mut e.events_rx, Duration::from_secs(2))
+    .await
+    .unwrap();
+  assert!(matches!(event, Iap2Event::Established(_)));
+
+  e.cmd_tx
+    .send(Iap2Command::Send {
+      session_id: SESSION_ID,
+      payload: Bytes::from_static(b"alive"),
+    })
+    .await
+    .unwrap();
+  let pkt = read_link(&mut e.peer, &mut e.peer_buf, &mut e.peer_codec).await;
+  assert_eq!(pkt.header.seq, our_psn.wrapping_add(1));
+  assert_eq!(pkt.payload.as_ref(), b"alive");
+
+  let inbound = LinkPacket::with_payload(
+    ControlBits::ACK,
+    PEER_INITIAL_PSN.wrapping_add(1),
+    pkt.header.seq,
+    SESSION_ID,
+    Bytes::from_static(b"hello again"),
+  );
+  write_link(&mut e.peer, &mut e.peer_codec, inbound).await;
+  let event = recv_with_timeout(&mut e.events_rx, Duration::from_secs(2))
+    .await
+    .unwrap();
+  match event {
+    Iap2Event::DataReceived { session_id, payload } => {
+      assert_eq!(session_id, SESSION_ID);
+      assert_eq!(payload.as_ref(), b"hello again");
+    }
+    other => panic!("expected DataReceived, got {:?}", other),
+  }
+  assert!(!e.link.is_finished(), "link task must survive the reset");
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn sustained_rst_flood_exhausts_the_restart_budget() {
+  let mut e = establish(PeerProposal::default()).await;
+
+  let rst = LinkPacket::header_only(ControlBits::RST, PEER_INITIAL_PSN, 0);
+  write_link(&mut e.peer, &mut e.peer_codec, rst).await;
+  let event = recv_with_timeout(&mut e.events_rx, Duration::from_secs(2))
+    .await
+    .unwrap();
+  assert!(matches!(event, Iap2Event::LinkRestarting { .. }));
+
+  let feeder = {
+    let mut peer = e.peer;
+    let mut codec = e.peer_codec;
+    tokio::spawn(async move {
+      loop {
+        let rst = LinkPacket::header_only(ControlBits::RST, PEER_INITIAL_PSN, 0);
+        let mut wire = BytesMut::new();
+        use tokio_util::codec::Encoder;
+        if codec.encode(rst, &mut wire).is_err() {
+          return;
+        }
+        use tokio::io::AsyncWriteExt;
+        if peer.write_all(&wire).await.is_err() || peer.flush().await.is_err() {
+          return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+      }
+    })
+  };
+
+  let down = recv_with_timeout(&mut e.events_rx, Duration::from_secs(60))
+    .await
+    .expect("LinkDown after the restart budget closes");
+  assert!(matches!(down, Iap2Event::LinkDown(_)), "got {:?}", down);
+  let result = tokio::time::timeout(Duration::from_secs(5), e.link)
+    .await
+    .expect("link task exits after budget exhaustion")
+    .expect("link task must not panic");
+  assert!(matches!(result, Err(Error::PeerReset)));
+  feeder.abort();
 }
 
 #[tokio::test(flavor = "current_thread")]

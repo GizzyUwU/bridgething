@@ -70,7 +70,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2
-        versionName "0.2.0"
+        versionName "0.2.3"
 
         manifestPlaceholders = [appAuthRedirectScheme: 'bridgething']
 

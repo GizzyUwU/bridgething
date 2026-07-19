@@ -7,17 +7,14 @@ import XCTest
 
 @testable import BridgethingCompanion
 
-/// Regression coverage for the OTA push pump: fragments are small and stay within one ack window
-/// (the slow-link responsiveness + stale-fragment-collision fix), and a daemon error mid-stream
-/// cancels the stream and abandons the transfer instead of draining bytes into the next attempt.
 final class OtaStreamTests: XCTestCase {
     private struct Harness {
         let companion: BridgethingCompanion
         let driver: WireDriver
     }
 
-    private static let fragmentBytes = 16 * 1024
-    private static let windowBytes = 64 * 1024
+    private static let fragmentBytes = TransferPacer.largeFragmentBytes
+    private static let windowBytes = Int(TransferPacer.maxWindowBytes)
 
     private func boot() async throws -> Harness {
         let adapter = InMemoryAdapter()
@@ -41,7 +38,6 @@ final class OtaStreamTests: XCTestCase {
         return url
     }
 
-    /// Answer the companion's `OtaBegin` request with a resume offset; returns the per-attempt transfer id.
     private func answerBegin(_ driver: WireDriver, resumeFromOffset: UInt32 = 0) async throws -> UUID {
         let msg = try await driver.waitOutbound(timeout: .seconds(3)) { m in
             if case .system(.otaBegin) = m.data { return true }
@@ -74,7 +70,6 @@ final class OtaStreamTests: XCTestCase {
 
     func testOtaPushWindowsAndUsesSmallFragments() async throws {
         let h = try await boot()
-        // must exceed the ack window or phase A's expected stall never happens
         let payloadSize = 96 * 1024
         let artifact = try writeTempArtifact(payloadSize)
         defer { try? FileManager.default.removeItem(at: artifact) }
@@ -91,24 +86,18 @@ final class OtaStreamTests: XCTestCase {
 
         let transferId = try await answerBegin(h.driver)
 
-        // phase A: without an ack, the sender fills exactly one window then stalls. offset >= window is
-        // NOT < acked(0) + window, so the fragment at the window boundary must not arrive.
         var assembled = Data()
-        let inWindow = Self.windowBytes / Self.fragmentBytes
-        for i in 0 ..< inWindow {
-            let f = try await nextFragment(h.driver, transferId)
-            XCTAssertEqual(Int(f.offset), i * Self.fragmentBytes, "fragments must arrive in offset order")
-            XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes, "ota fragments must stay within one frame")
-            assembled.append(f.bytes)
-        }
+        let first = try await nextFragment(h.driver, transferId)
+        XCTAssertEqual(Int(first.offset), 0)
+        XCTAssertLessThanOrEqual(first.bytes.count, Self.fragmentBytes, "ota fragments must stay within one frame")
+        assembled.append(first.bytes)
         do {
             _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
-            XCTFail("sender ran past the ack window without an ack")
+            XCTFail("sender ran past the initial one-fragment window without an ack")
         } catch is WireDriverError {
             // expected: window full, sender blocked on the ack.
         }
 
-        // phase B: acking unblocks; the stream runs to completion staying within one window of acked.
         var acked = UInt32(assembled.count)
         try await ack(h.driver, transferId, acked)
 
@@ -116,14 +105,13 @@ final class OtaStreamTests: XCTestCase {
             let f = try await nextFragment(h.driver, transferId)
             XCTAssertEqual(Int(f.offset), assembled.count, "fragments must arrive in offset order")
             XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes)
-            XCTAssertLessThan(Int(f.offset), Int(acked) + Self.windowBytes, "sender must stay within one window of acked")
+            XCTAssertLessThan(Int(f.offset), Int(acked) + Self.windowBytes, "sender must stay within the max window of acked")
             assembled.append(f.bytes)
             acked = f.offset + UInt32(f.bytes.count)
             try await ack(h.driver, transferId, acked)
         }
         XCTAssertEqual(assembled.count, payloadSize)
 
-        // drive the stage -> activate -> reboot terminal so pushDaemon returns cleanly.
         try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
             if case .system(.otaActivate) = m.data { return true }
@@ -157,17 +145,13 @@ final class OtaStreamTests: XCTestCase {
 
         let transferId = try await answerBegin(h.driver)
 
-        // let a couple fragments flow (acked, so the stream is mid-flight rather than window-blocked).
         for _ in 0 ..< 2 {
             let f = try await nextFragment(h.driver, transferId)
             try await ack(h.driver, transferId, f.offset + UInt32(f.bytes.count))
         }
 
-        // daemon reports a fatal error mid-stream.
         try await h.driver.send(.system(.otaError(OtaError(code: .offsetMismatch, msg: "synthetic"))), meta: .event)
 
-        // the companion must abandon the transfer: cancel the stream + unbind the daemon-side sink so
-        // no stale fragment can survive into the next attempt.
         let abandon = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
             if case let .transfer(.abandon(a)) = m.data, a.transferId == transferId { return true }
             return false
@@ -193,8 +177,6 @@ final class OtaStreamTests: XCTestCase {
         return url
     }
 
-    /// A range request routes by `req.asset`: the boot asset is served from the boot zck, the system
-    /// asset from the system zck, and an unregistered asset is rejected.
     func testRangeRequestRoutesByAsset() async throws {
         let h = try await boot()
         let systemZck = try writeFilledZck(256, fill: 0xAA)
@@ -237,19 +219,14 @@ final class OtaStreamTests: XCTestCase {
         await h.companion.stop()
     }
 
-    /// The delta range-serve path is ack-windowed like the push path: without acks it fills exactly one
-    /// window then blocks, and acking lets the remainder stream while staying within one window of acked.
-    /// Regression for the old naked loop that flooded `.background` fragments and dropped the link.
     func testRangeStreamWindowsAgainstAcks() async throws {
         let h = try await boot()
         let size = 256 * 1024
-        let chunk = 16 * 1024
-        let window = 64 * 1024
+        let window = Int(TransferPacer.maxWindowBytes)
         let zck = try writeTempArtifact(size)
         defer { try? FileManager.default.removeItem(at: zck) }
         await h.companion.ota.setLocalZcks([OtaService.systemZckAsset: zck])
 
-        // a range larger than the 16KB inline cap comes back as a fragment stream.
         let reply = try await h.driver.request(.system(.otaAssetRange(OtaAssetRange(
             updateId: "u1", asset: OtaService.systemZckAsset, ranges: [RangeSpec(start: 0, length: UInt32(size))]
         ))))
@@ -258,28 +235,23 @@ final class OtaStreamTests: XCTestCase {
         }
         let transferId = ref.id
 
-        // phase A: without an ack the range sender fills exactly one window then stalls.
         var assembled = Data()
-        let inWindow = window / chunk
-        for i in 0 ..< inWindow {
-            let f = try await nextFragment(h.driver, transferId)
-            XCTAssertEqual(Int(f.offset), i * chunk, "range fragments must arrive in offset order")
-            assembled.append(f.bytes)
-        }
+        let first = try await nextFragment(h.driver, transferId)
+        XCTAssertEqual(Int(first.offset), 0)
+        assembled.append(first.bytes)
         do {
             _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
-            XCTFail("range sender ran past the ack window without an ack")
+            XCTFail("range sender ran past the initial one-fragment window without an ack")
         } catch is WireDriverError {
             // expected: window full, sender blocked on the ack.
         }
 
-        // phase B: acking unblocks; the remainder streams staying within one window of acked.
         var acked = UInt32(assembled.count)
         try await ack(h.driver, transferId, acked)
         while assembled.count < size {
             let f = try await nextFragment(h.driver, transferId)
             XCTAssertEqual(Int(f.offset), assembled.count, "range fragments must arrive contiguous in offset order")
-            XCTAssertLessThan(Int(f.offset), Int(acked) + window, "range sender must stay within one window of acked")
+            XCTAssertLessThan(Int(f.offset), Int(acked) + window, "range sender must stay within the max window of acked")
             assembled.append(f.bytes)
             acked = f.offset + UInt32(f.bytes.count)
             try await ack(h.driver, transferId, acked)
@@ -306,12 +278,8 @@ final class OtaStreamTests: XCTestCase {
             )
         }
 
-        // the daemon already holds resumeOffset bytes and reports it as the resume point.
         let transferId = try await answerBegin(h.driver, resumeFromOffset: resumeOffset)
 
-        // regression: the first resume fragment must actually be sent. daemon acks are absolute file
-        // offsets, so before the ack-window baseline was seeded to resumeOffset the sender gated the
-        // absolute offset against acked(0)+window, deadlocked, and emitted zero fragments.
         let first = try await nextFragment(h.driver, transferId)
         XCTAssertEqual(first.offset, resumeOffset, "first fragment must resume at the daemon's offset, not 0")
         var expected = first.offset + UInt32(first.bytes.count)
@@ -386,9 +354,6 @@ final class OtaStreamTests: XCTestCase {
         return (msg.id, begin)
     }
 
-    /// When the target composite bumps BOTH the image and the daemon, applyVersion must run the image OTA
-    /// only. The image slot carries its own matching daemon (adopted on boot), so the standalone daemon
-    /// bandaid must never be pushed: the first (and only) OtaBegin is `.image`, never `.daemon`.
     func testApplyVersionImageChangeRunsImageOnly() async throws {
         let h = try await boot()
         let channel = "stable"
@@ -396,8 +361,6 @@ final class OtaStreamTests: XCTestCase {
         let swu = try seedArtifact(dir, "image-\(channel)-2026.05.0.swu", bytes: 2048)
         let zck = try seedArtifact(dir, "image-\(channel)-2026.05.0.zck", bytes: 256)
         let bootZck = try seedArtifact(dir, "image-\(channel)-2026.05.0-boot.zck", bytes: 256)
-        // seed the daemon artifact too so it is a live cache hit: proving the code path, not a missing
-        // download, is what keeps the daemon bandaid from being pushed.
         let daemon = try seedArtifact(dir, "daemon-\(channel)-0.8.4", bytes: 512)
         defer { for u in [swu, zck, bootZck, daemon] { try? FileManager.default.removeItem(at: u) } }
 
@@ -413,8 +376,6 @@ final class OtaStreamTests: XCTestCase {
         let (beginId, begin) = try await nextOtaBegin(h.driver)
         XCTAssertEqual(begin.kind, .image, "an image change must run the image OTA, not the daemon bandaid")
 
-        // drive the image OTA to its reboot terminal. exchanging a fragment first guarantees the terminal
-        // subscription is live before we drive the reboot phase, so applyVersion returns promptly.
         try await h.driver.send(
             .system(.otaBeginAck(OtaBeginAck(resumeFromOffset: 0))),
             meta: .response(ResponseMeta(requestId: beginId))
@@ -431,8 +392,6 @@ final class OtaStreamTests: XCTestCase {
         await h.companion.stop()
     }
 
-    /// When only the daemon differs (image already matches the target), applyVersion still runs the daemon
-    /// bandaid: the first OtaBegin is `.daemon` and no image OTA is started.
     func testApplyVersionDaemonOnlyRunsBandaid() async throws {
         let h = try await boot()
         let channel = "stable"
@@ -452,7 +411,6 @@ final class OtaStreamTests: XCTestCase {
         let (beginId, begin) = try await nextOtaBegin(h.driver)
         XCTAssertEqual(begin.kind, .daemon, "a daemon-only delta must run the daemon bandaid")
 
-        // stage the daemon piece, then commit (activate) and reboot so applyVersion returns cleanly.
         try await h.driver.send(
             .system(.otaBeginAck(OtaBeginAck(resumeFromOffset: 0))),
             meta: .response(ResponseMeta(requestId: beginId))

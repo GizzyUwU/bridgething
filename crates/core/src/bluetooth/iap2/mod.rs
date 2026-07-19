@@ -57,6 +57,7 @@ const COMPANION_EA_PROTOCOL_ID: u8 = 1;
 
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+const RECONNECT_DIAL_SETTLE: Duration = Duration::from_secs(8);
 const RECONNECT_KICK_CAPACITY: usize = 16;
 const SESSION_DEAD_CAPACITY: usize = 16;
 
@@ -617,7 +618,15 @@ async fn reconnect_loop(adapter: Adapter, active_sessions: Iap2ActiveSessions, m
     match device.connect_profile(&IAP2_DEVICE_UUID).await {
       Ok(()) => {
         tracing::info!(%mac, "iAP2 connect_profile dial succeeded; awaiting NewConnection");
-        return;
+        tokio::time::sleep(RECONNECT_DIAL_SETTLE).await;
+        if !still_should_reconnect(&adapter, &active_sessions, mac).await {
+          return;
+        }
+        tracing::warn!(%mac, "no iAP2 session after successful dial; disconnecting profile and retrying");
+        if let Err(err) = device.disconnect_profile(&IAP2_DEVICE_UUID).await {
+          tracing::debug!(%mac, ?err, "iAP2 disconnect_profile failed");
+        }
+        delay = (delay * 2).min(RECONNECT_MAX_DELAY);
       }
       Err(err) => {
         tracing::debug!(%mac, ?err, "iAP2 connect_profile dial failed; backing off");

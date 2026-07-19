@@ -1051,15 +1051,17 @@ public class OtaService(
             }
 
             var streamOffset: UInt = 0u
+            val pacer = TransferPacer()
             try {
                 for (part in parts) {
                     raf.seek(part.start.toLong())
                     var produced: UInt = 0u
                     while (produced < part.length) {
+                        pacer.observe(transferAcks.receivedBytes(handle.requestId).toLong())
                         transferAcks.awaitWindow(
-                            handle.requestId, streamOffset.toLong(), OTA_RANGE_WINDOW_BYTES, OTA_RANGE_ACK_TIMEOUT_MS,
+                            handle.requestId, streamOffset.toLong(), pacer.windowBytes, OTA_RANGE_ACK_TIMEOUT_MS,
                         )
-                        val want = minOf(OTA_RANGE_CHUNK_BYTES.toLong(), (part.length - produced).toLong()).toInt()
+                        val want = minOf(pacer.fragmentBytes.toLong(), (part.length - produced).toLong()).toInt()
                         val buf = ByteArray(want)
                         val read = raf.read(buf)
                         if (read <= 0) throw IOException("EOF at ${part.start + produced} before range end")
@@ -1293,18 +1295,19 @@ public class OtaService(
                     raf.seek(startOffset)
                     transferAcks.note(transferId, startOffset.toUInt())
                 }
+                val pacer = TransferPacer(startOffset)
                 var offset = startOffset
                 while (offset < totalSize) {
-                    // hold no more than OTA_WINDOW_BYTES unacked so a cancelled attempt leaves nothing in flight.
                     while (true) {
                         val acked = transferAcks.receivedBytes(transferId).toLong()
+                        pacer.observe(acked)
                         emitStreaming(acked)
-                        if (offset < acked + OTA_WINDOW_BYTES) break
+                        if (offset < acked + pacer.windowBytes) break
                         if (!transferAcks.waitForProgress(transferId, acked.toUInt(), OTA_ACK_TIMEOUT_MS)) {
                             throw IOException("transfer stalled: fragment acks stopped at $offset/$totalSize")
                         }
                     }
-                    val want = minOf(OTA_FRAGMENT_BYTES.toLong(), totalSize - offset).toInt()
+                    val want = minOf(pacer.fragmentBytes.toLong(), totalSize - offset).toInt()
                     val buf = ByteArray(want)
                     val read = raf.read(buf)
                     if (read <= 0) throw IOException("EOF at $offset/$totalSize before last fragment")
@@ -1352,11 +1355,7 @@ public class OtaService(
 
         val INLINE_RANGE_MAX_BYTES: UInt = 16u * 1024u
 
-        const val OTA_FRAGMENT_BYTES = 16 * 1024
-        const val OTA_WINDOW_BYTES = 64 * 1024L
         const val OTA_ACK_TIMEOUT_MS = 15_000L
-        const val OTA_RANGE_CHUNK_BYTES = 16 * 1024
-        const val OTA_RANGE_WINDOW_BYTES = 64 * 1024L
         const val OTA_RANGE_ACK_TIMEOUT_MS = 30_000L
 
         const val AUTO_PUSH_BACKOFF_BASE_MS = 120_000L

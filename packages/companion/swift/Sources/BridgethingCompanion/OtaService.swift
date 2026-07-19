@@ -120,7 +120,7 @@ public actor OtaService {
     private var pollConfig: OtaPollConfig?
     private var deviceMeta: [String: BridgeThingMeta] = [:]
     private var inFlight: Set<String> = []
-    
+
     private var imageInstallTargets: [String: String] = [:]
     private var autoPushNextAt: [String: Date] = [:]
     private var autoPushFailures: [String: Int] = [:]
@@ -133,11 +133,7 @@ public actor OtaService {
     static let systemZckAsset = "system.img.zck"
     static let bootZckAsset = "boot.vfat.zck"
 
-    private static let otaFragmentBytes: UInt64 = 16 * 1024
-    private static let otaWindowBytes: UInt64 = 64 * 1024
     private static let otaAckTimeoutSeconds: Double = 15
-    private static let otaRangeChunkBytes: UInt32 = 16 * 1024
-    private static let otaRangeWindowBytes: UInt32 = 64 * 1024
     private static let otaRangeAckTimeoutSeconds: Double = 30
     private static let autoPushBackoffBase: TimeInterval = 120
     private static let autoPushBackoffMax: TimeInterval = 15 * 60
@@ -1110,18 +1106,20 @@ public actor OtaService {
         }
 
         var streamOffset: UInt32 = 0
+        var pacer = TransferPacer()
         do {
             for part in parts {
                 try fileHandle.seek(toOffset: UInt64(part.start))
                 var produced: UInt32 = 0
                 while produced < part.length {
+                    pacer.observe(ackedBytes: UInt64(await transferAcks.receivedBytes(handle.requestId)))
                     try await transferAcks.awaitWindow(
                         handle.requestId,
                         offset: streamOffset,
-                        windowBytes: Self.otaRangeWindowBytes,
+                        windowBytes: UInt32(pacer.windowBytes),
                         timeoutSeconds: Self.otaRangeAckTimeoutSeconds
                     )
-                    let want = Int(min(Self.otaRangeChunkBytes, part.length - produced))
+                    let want = Int(min(UInt32(pacer.fragmentBytes), part.length - produced))
                     let data = try fileHandle.read(upToCount: want) ?? Data()
                     if data.isEmpty {
                         throw OtaServiceError.unexpectedEof(
@@ -1397,19 +1395,20 @@ public actor OtaService {
             try fh.seek(toOffset: startOffset)
             await transferAcks.note(transferId: transferId, received: UInt32(startOffset))
         }
+        var pacer = TransferPacer(startOffset: startOffset)
         var offset = startOffset
         while offset < totalSize {
             try Task.checkCancellation()
-            // hold no more than otaWindowBytes unacked so a cancelled attempt leaves nothing in flight.
             while true {
                 let acked = UInt64(await transferAcks.receivedBytes(transferId))
+                pacer.observe(ackedBytes: acked)
                 emitStreaming(acked)
-                if offset < acked + Self.otaWindowBytes { break }
+                if offset < acked + pacer.windowBytes { break }
                 if !(await transferAcks.waitForProgress(transferId, beyond: UInt32(acked), timeoutSeconds: Self.otaAckTimeoutSeconds)) {
                     throw TransferStalled()
                 }
             }
-            let want = Int(min(Self.otaFragmentBytes, totalSize - offset))
+            let want = Int(min(UInt64(pacer.fragmentBytes), totalSize - offset))
             let data = try fh.read(upToCount: want) ?? Data()
             if data.isEmpty {
                 throw OtaServiceError.unexpectedEof(at: offset, total: totalSize)

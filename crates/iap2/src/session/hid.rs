@@ -31,30 +31,19 @@ use crate::{
   link::Iap2Command,
 };
 
-/// Edge gap between the press frame and the release frame for one tap.
 const TAP_RELEASE_DELAY: Duration = Duration::from_millis(10);
-
-/// Inter-tap gap when the controller asks for multiple sequential toggles. Long enough that iOS
-/// registers each as a discrete press, not a held-button repeat.
 const INTER_TAP_DELAY: Duration = Duration::from_millis(60);
 
-/// One outbound HID command; the flow expands it into the right number of HID press frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HidCommand {
-  /// Single press+release pulse with `mask` held during the press frame. `mask` is any combination
-  /// of [`super::super::csm::hid::report_bit`] flags; the all-zero mask is a no-op.
   Pulse(u8),
-  /// `count` sequential pulses of `mask`, separated by [`INTER_TAP_DELAY`].
   Sequence { mask: u8, count: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HidState {
-  /// Identification has not yet been Accepted; StartHID has not been sent.
   Idle,
-  /// StartHID has been sent and acknowledged by iOS reaching Accepted.
   Started,
-  /// StopHID has been sent (session teardown).
   Stopped,
 }
 
@@ -75,8 +64,6 @@ impl HidFlow {
     matches!(msg_id, 0x6801 | 0x6806 | 0x6807)
   }
 
-  /// Process one inbound HID-range CSM. The HID surface is outbound-only; these are decoded
-  /// (which still validates the wire shape) and logged, never acted on.
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,
@@ -108,7 +95,6 @@ impl HidFlow {
     Ok(None)
   }
 
-  /// Send `StartHID` if we haven't yet. Idempotent.
   pub(super) async fn ensure_started(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, HidState::Idle) {
       tracing::debug!("iap2 hid: sending StartHID");
@@ -124,13 +110,14 @@ impl HidFlow {
     Ok(())
   }
 
-  /// Pull the next command from the controller. `None` means the controller's sender was dropped.
+  pub(super) fn reset(&mut self) {
+    self.state = HidState::Idle;
+  }
+
   pub(super) async fn recv(&mut self) -> Option<HidCommand> {
     self.rx.recv().await
   }
 
-  /// Translate a controller command into one or more press+release HID report pairs. No-op (logged
-  /// at warn) if `StartHID` has not been sent.
   pub(super) async fn handle_command(
     &mut self,
     cmd: HidCommand,
@@ -163,8 +150,6 @@ impl HidFlow {
     }
   }
 
-  /// Send `StopHID` for the transport component. Best-effort; called
-  /// during session teardown.
   pub(super) async fn shutdown(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, HidState::Started) {
       let stop = StopHID {

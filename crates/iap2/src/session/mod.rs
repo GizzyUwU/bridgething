@@ -65,30 +65,20 @@ use crate::{
   link::{Iap2Command, Iap2Event},
 };
 
-/// Result alias for `MfiAccess` ops, using the mfi crate's error type directly.
 pub type MfiResult<T> = std::result::Result<T, MfiError>;
 
-/// Async-trait surface over the MFi coprocessor.
 #[async_trait]
 pub trait MfiAccess: Send + 'static {
   async fn cert(&mut self) -> MfiResult<Bytes>;
   async fn sign(&mut self, challenge: [u8; CHALLENGE_LEN]) -> MfiResult<[u8; RESPONSE_LEN]>;
 }
 
-/// iAP2 control-session id. Must match the entry declared in our `Lsp::accessory_default`
-/// and must NOT be 0: session_id 0 in the link header is reserved for header-only / pure-control
-/// packets, and the iPhone RSTs the link if the declared control session collides with it.
 pub(crate) const CONTROL_SESSION_ID: u8 = 1;
 
-/// Events the session emits upstream. `LinkEstablished` carries the peer's negotiated LSP.
-/// `LinkDown` is always the final event before the task exits.
-///
-/// `EaStreamOpened` carries the byte channels for the EA stream the iPhone just opened:
-/// `inbound_rx` yields per-stream chunks after reassembly + EA-stream-id demux, and `outbound`
-/// is a pre-bound sender the consumer uses to push frames.
 #[derive(Debug)]
 pub enum SessionEvent {
   LinkEstablished(Lsp),
+  LinkRestarting(String),
   Authenticated,
   Identified,
   AuthFailed,
@@ -122,8 +112,6 @@ pub enum SessionEvent {
   LinkDown(String),
 }
 
-/// Top-level iAP2 session task; drive with `run().await`. Always emits a terminal
-/// `SessionEvent::LinkDown` before returning, on any success or failure path.
 pub struct Iap2Session<M: MfiAccess> {
   identification: IdentificationConfig,
   app_launch_bundle_id: Option<String>,
@@ -293,6 +281,21 @@ impl<M: MfiAccess> Iap2Session<M> {
             } else {
               tracing::trace!(session_id, "iap2 session: ignoring data on non-control session");
             }
+          }
+          Some(Iap2Event::LinkRestarting { reason }) => {
+            tracing::info!(reason = %reason, "iap2 session: link restarting; resetting per-link state");
+            control_buf.clear();
+            self.auth = AuthFlow::new();
+            self.ident = IdentificationFlow::new();
+            self.device = DeviceFlow::new();
+            self.file_transfer.reset();
+            self.now_playing.reset();
+            self.hid.reset();
+            self.telephony.reset();
+            if let Some(mut ea) = self.ea.take() {
+              ea.teardown(&self.session_events_tx).await;
+            }
+            emit(&self.session_events_tx, SessionEvent::LinkRestarting(reason)).await;
           }
           Some(Iap2Event::LinkDown(reason)) => {
             tracing::info!(reason = %reason, "iap2 session: link down");

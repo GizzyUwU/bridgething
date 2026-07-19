@@ -32,9 +32,8 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.UUID
 
-/** regression coverage for the OTA resume path: a non-zero resume offset must still stream. */
 class OtaStreamTest {
-    private val fragmentBytes = 16 * 1024
+    private val fragmentBytes = TransferPacer.LARGE_FRAGMENT_BYTES
 
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -107,17 +106,11 @@ class OtaStreamTest {
         companion.stop()
     }
 
-    /**
-     * The delta range-serve path is ack-windowed like the push path: without acks it fills exactly one
-     * window then blocks, and acking lets the remainder stream while staying within one window of acked.
-     * Regression for the old naked loop that flooded Background fragments and dropped the link.
-     */
     @Test
     fun `range stream windows against acks`() = runBlocking {
         val (companion, driver) = boot(this)
         val size = 256 * 1024
-        val chunk = 16 * 1024
-        val window = 64 * 1024
+        val window = TransferPacer.MAX_WINDOW_BYTES.toInt()
         val zck = writeTempArtifact(size)
         companion.ota.setLocalZcks(mapOf("system.img.zck" to zck))
 
@@ -145,24 +138,19 @@ class OtaStreamTest {
             meta = MsgMeta.Event,
         )
 
-        // phase A: without an ack the range sender fills exactly one window then stalls.
         var assembled = 0
-        val inWindow = window / chunk
-        for (i in 0 until inWindow) {
-            val f = nextFragment()
-            assertEquals(i * chunk, f.offset.toInt(), "range fragments must arrive in offset order")
-            assembled += f.bytes.size
-        }
+        val first = nextFragment()
+        assertEquals(0, first.offset.toInt())
+        assembled += first.bytes.size
         val past = runCatching { withTimeout(600) { nextFragment() } }
-        assertTrue(past.isFailure, "range sender ran past the ack window without an ack")
+        assertTrue(past.isFailure, "range sender ran past the initial one-fragment window without an ack")
 
-        // phase B: acking unblocks; the remainder streams staying within one window of acked.
         var acked = assembled
         ack(acked)
         while (assembled < size) {
             val f = nextFragment()
             assertEquals(assembled, f.offset.toInt(), "range fragments must arrive contiguous in offset order")
-            assertTrue(f.offset.toInt() < acked + window, "range sender must stay within one window of acked")
+            assertTrue(f.offset.toInt() < acked + window, "range sender must stay within the max window of acked")
             assembled += f.bytes.size
             acked = f.offset.toInt() + f.bytes.size
             ack(acked)
@@ -183,7 +171,6 @@ class OtaStreamTest {
             companion.ota.pushDaemon(gateway = companion.gateway, deviceId = driver.deviceId, binaryPath = artifact).toList()
         }
 
-        // the daemon already holds resumeOffset bytes and reports it as the resume point.
         val begin = driver.waitOutbound { msg ->
             ((msg.data as? GatewayToBridgeMsgData.System)?.data as? GatewayToBridgeSystemMsg.OtaBegin) != null
         }
@@ -193,9 +180,6 @@ class OtaStreamTest {
             meta = MsgMeta.Response(ResponseMeta(requestId = begin.id)),
         )
 
-        // regression: the first resume fragment must actually be sent. daemon acks are absolute file
-        // offsets, so before the ack-window baseline was seeded to resumeOffset the sender gated the
-        // absolute offset against acked(0)+window, deadlocked, and emitted zero fragments.
         var expected = resumeOffset
         var first = true
         while (expected < payloadSize) {
@@ -218,8 +202,6 @@ class OtaStreamTest {
         }
         assertEquals(payloadSize, expected, "the whole remainder past resumeOffset must stream")
 
-        // the resume regression is fully asserted above; the daemon-side stage/activate/reboot terminal
-        // is out of scope here, so tear the in-flight push down cleanly rather than driving it.
         pushJob.cancelAndJoin()
         artifact.delete()
         companion.stop()
@@ -257,11 +239,6 @@ class OtaStreamTest {
         return frame.id to begin
     }
 
-    /**
-     * When the target composite bumps BOTH the image and the daemon, applyVersion must run the image OTA
-     * only. The image slot carries its own matching daemon (adopted on boot), so the standalone daemon
-     * bandaid must never be pushed: the first (and only) OtaBegin is Image, never Daemon.
-     */
     @Test
     fun `apply-version image change runs image only`() = runBlocking {
         val (companion, driver) = boot(this)
@@ -270,8 +247,6 @@ class OtaStreamTest {
         val swu = seedArtifact(dir, "image-$channel-2026.05.0.swu", 2048)
         val zck = seedArtifact(dir, "image-$channel-2026.05.0.zck", 256)
         val bootZck = seedArtifact(dir, "image-$channel-2026.05.0-boot.zck", 256)
-        // seed the daemon artifact too so it is a live cache hit: proving the code path, not a missing
-        // download, is what keeps the daemon bandaid from being pushed.
         val daemon = seedArtifact(dir, "daemon-$channel-0.8.4", 512)
 
         injectMeta(companion, driver, makeMeta(appVersion = "0.8.3", imageVersion = "2026.04.0", channel = channel))
@@ -286,8 +261,6 @@ class OtaStreamTest {
         val (beginId, begin) = nextOtaBegin(driver)
         assertEquals(OtaKind.Image, begin.kind, "an image change must run the image OTA, not the daemon bandaid")
 
-        // ack so the stream side settles (resume==totalSize means no fragments), then confirm no further
-        // OtaBegin (least of all a daemon bandaid) leaves the wire while the image is changing.
         driver.send(
             BridgeToGatewayMsgData.System(BridgeToGatewaySystemMsg.OtaBeginAck(OtaBeginAck(resumeFromOffset = begin.transfer.totalSize))),
             meta = MsgMeta.Response(ResponseMeta(requestId = beginId)),
@@ -300,10 +273,6 @@ class OtaStreamTest {
         companion.stop()
     }
 
-    /**
-     * When only the daemon differs (image already matches the target), applyVersion still runs the daemon
-     * bandaid: the first OtaBegin is Daemon and no image OTA is started.
-     */
     @Test
     fun `apply-version daemon only runs bandaid`() = runBlocking {
         val (companion, driver) = boot(this)
@@ -323,7 +292,6 @@ class OtaStreamTest {
         val (beginId, begin) = nextOtaBegin(driver)
         assertEquals(OtaKind.Daemon, begin.kind, "a daemon-only delta must run the daemon bandaid")
 
-        // ack the staged piece, then confirm no image OtaBegin is ever started for a daemon-only delta.
         driver.send(
             BridgeToGatewayMsgData.System(BridgeToGatewaySystemMsg.OtaBeginAck(OtaBeginAck(resumeFromOffset = begin.transfer.totalSize))),
             meta = MsgMeta.Response(ResponseMeta(requestId = beginId)),

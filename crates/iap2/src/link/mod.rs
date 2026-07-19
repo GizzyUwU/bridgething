@@ -29,17 +29,15 @@ use crate::{
 };
 
 const READ_CAPACITY: usize = 16384;
+const RESTART_BUDGET_WINDOW: Duration = Duration::from_secs(30);
+const RESTART_HEALTHY_RESET: Duration = Duration::from_secs(60);
+const RESTART_PAUSE: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 pub struct LinkConfig {
-  /// First sequence number we'll stamp on outbound packets. SYN consumes
-  /// this PSN; the first DATA send increments and uses `initial_psn + 1`.
   pub initial_psn: u8,
-  /// What we propose in our SYN. The peer's proposal replaces this on receipt.
   pub our_lsp: Lsp,
-  /// How often to retransmit the detect marker until the peer responds.
   pub detect_interval: Duration,
-  /// Total budget for each handshake stage (Detecting, Negotiating).
   pub handshake_timeout: Duration,
 }
 
@@ -56,21 +54,15 @@ impl LinkConfig {
 
 #[derive(Debug, Clone)]
 pub enum Iap2Event {
-  /// Link reached Established. Carries the peer's negotiated LSP.
   Established(Lsp),
-  /// Link is going down for the reason given.
+  LinkRestarting { reason: String },
   LinkDown(String),
-  /// One DATA chunk for `session_id` was delivered in-sequence. Sessions
-  /// reassemble across chunks using their own framing.
   DataReceived { session_id: u8, payload: Bytes },
 }
 
 #[derive(Debug, Clone)]
 pub enum Iap2Command {
-  /// Send a tear-down RST and exit cleanly.
   Disconnect,
-  /// Enqueue `payload` for transmission on `session_id`. Payloads larger
-  /// than the negotiated `max_len` are chunked across multiple link packets.
   Send { session_id: u8, payload: Bytes },
 }
 
@@ -89,34 +81,93 @@ impl Link {
     let (mut reader, mut writer) = tokio::io::split(stream);
     let mut buf = BytesMut::with_capacity(READ_CAPACITY);
     let mut codec = LinkCodec;
+    let mut restart_window: Option<Instant> = None;
 
-    Self::detect_phase(&mut reader, &mut writer, &mut buf, &config).await?;
-    let (peer_lsp, peer_initial_psn) =
-      Self::negotiate_phase(&mut reader, &mut writer, &mut buf, &mut codec, &config).await?;
+    loop {
+      let handshake = async {
+        Self::detect_phase(&mut reader, &mut writer, &mut buf, &config).await?;
+        Self::negotiate_phase(&mut reader, &mut writer, &mut buf, &mut codec, &config).await
+      };
+      let (peer_lsp, peer_initial_psn) = match handshake.await {
+        Ok(negotiated) => negotiated,
+        Err(Error::PeerReset) if restart_window.is_some_and(|s| s.elapsed() < RESTART_BUDGET_WINDOW) => {
+          buf.clear();
+          tokio::time::sleep(RESTART_PAUSE).await;
+          continue;
+        }
+        Err(err) => {
+          if restart_window.is_some() {
+            let _ = events_tx
+              .send(Iap2Event::LinkDown(format!("restart failed: {err}")))
+              .await;
+          }
+          return Err(err);
+        }
+      };
 
-    if events_tx.send(Iap2Event::Established(peer_lsp.clone())).await.is_err() {
-      tracing::debug!("iap2 events receiver dropped before Established could be delivered");
+      if events_tx.send(Iap2Event::Established(peer_lsp.clone())).await.is_err() {
+        tracing::debug!("iap2 events receiver dropped before Established could be delivered");
+      }
+      tracing::info!(
+        max_outgoing = peer_lsp.max_outgoing,
+        max_len = peer_lsp.max_len,
+        rt_ms = peer_lsp.retransmission_timeout_ms,
+        ack_ms = peer_lsp.ack_timeout_ms,
+        max_ack = peer_lsp.max_ack,
+        "iap2 link Established"
+      );
+
+      let mut state = EstablishedState::new(config.initial_psn, peer_initial_psn, &peer_lsp);
+      let established_at = Instant::now();
+      let result = Self::established_phase(
+        &mut reader,
+        &mut writer,
+        &mut buf,
+        &mut codec,
+        &mut state,
+        &events_tx,
+        &mut commands_rx,
+      )
+      .await;
+
+      let err = match result {
+        Ok(()) => return Ok(()),
+        Err(err @ (Error::PeerReset | Error::RetransmitLimit)) => err,
+        Err(err) => {
+          let _ = events_tx.send(Iap2Event::LinkDown(format!("link error: {err}"))).await;
+          return Err(err);
+        }
+      };
+
+      let reason = match err {
+        Error::PeerReset => "peer RST",
+        _ => "retransmit limit",
+      };
+      if established_at.elapsed() >= RESTART_HEALTHY_RESET {
+        restart_window = None;
+      }
+      match restart_window {
+        Some(started) if started.elapsed() >= RESTART_BUDGET_WINDOW => {
+          let _ = events_tx.send(Iap2Event::LinkDown(reason.to_string())).await;
+          return Err(err);
+        }
+        Some(_) => {}
+        None => restart_window = Some(Instant::now()),
+      }
+
+      tracing::info!(reason, "iap2 link reset; restarting detection in place");
+      if matches!(err, Error::RetransmitLimit) {
+        let rst = LinkPacket::header_only(ControlBits::RST, state.last_sent_psn(), 0);
+        let _ = write_packet(&mut writer, &mut codec, rst).await;
+      }
+      let _ = events_tx
+        .send(Iap2Event::LinkRestarting {
+          reason: reason.to_string(),
+        })
+        .await;
+      buf.clear();
+      tokio::time::sleep(RESTART_PAUSE).await;
     }
-    tracing::info!(
-      max_outgoing = peer_lsp.max_outgoing,
-      max_len = peer_lsp.max_len,
-      rt_ms = peer_lsp.retransmission_timeout_ms,
-      ack_ms = peer_lsp.ack_timeout_ms,
-      max_ack = peer_lsp.max_ack,
-      "iap2 link Established"
-    );
-
-    let mut state = EstablishedState::new(config.initial_psn, peer_initial_psn, &peer_lsp);
-    Self::established_phase(
-      &mut reader,
-      &mut writer,
-      &mut buf,
-      &mut codec,
-      &mut state,
-      &events_tx,
-      &mut commands_rx,
-    )
-    .await
   }
 
   #[cfg(feature = "emulator")]
@@ -314,7 +365,6 @@ impl Link {
     loop {
       while let Some(pkt) = codec.decode(buf)? {
         if pkt.header.control.contains(ControlBits::RST) {
-          let _ = events_tx.send(Iap2Event::LinkDown("peer RST".into())).await;
           return Err(Error::PeerReset);
         }
 
@@ -354,7 +404,6 @@ impl Link {
         read = reader.read_buf(buf) => {
           let n = read?;
           if n == 0 {
-            let _ = events_tx.send(Iap2Event::LinkDown("peer disconnected".into())).await;
             return Err(Error::PeerDisconnected);
           }
         }
@@ -375,7 +424,6 @@ impl Link {
         }
         _ = sleep_until_or_pending(retransmit_deadline) => {
           if state.handle_retransmit_fire(writer).await? {
-            let _ = events_tx.send(Iap2Event::LinkDown("retransmit limit".into())).await;
             return Err(Error::RetransmitLimit);
           }
         }

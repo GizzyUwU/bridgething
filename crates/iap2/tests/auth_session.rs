@@ -237,3 +237,54 @@ async fn identification_rejected_propagates_failed_param_ids() {
   }
   assert!(matches!(h.next_event().await, SessionEvent::LinkDown(_)));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn link_restart_resets_auth_identification_and_subscriptions() {
+  let mut h = Harness::establish(FakeMfi::ok()).await;
+
+  async fn full_walk(h: &mut Harness) -> Vec<u16> {
+    h.send_csm(RequestAuthenticationCertificate).await;
+    let cert: AuthenticationCertificate = h.read_csm().await.try_into().unwrap();
+    assert_eq!(&cert.cert[..], FakeMfi::ok().cert_bytes.as_ref());
+    h.send_csm(AuthenticationSucceeded).await;
+    assert!(matches!(h.next_event().await, SessionEvent::Authenticated));
+    h.send_csm(StartIdentification).await;
+    let info = h.read_csm().await;
+    assert_eq!(info.msg_id, IdentificationInformation::CSM_MSG_ID);
+    h.send_csm(IdentificationAccepted).await;
+    assert!(matches!(h.next_event().await, SessionEvent::Identified));
+    let mut subs = Vec::new();
+    for _ in 0..4 {
+      subs.push(h.read_csm().await.msg_id);
+    }
+    subs
+  }
+
+  let first_gen_subs = full_walk(&mut h).await;
+
+  let rst = LinkPacket::header_only(ControlBits::RST, h.peer_seq, 0);
+  write_link(&mut h.peer, &mut h.peer_codec, rst).await;
+  assert!(matches!(h.next_event().await, SessionEvent::LinkRestarting(_)));
+
+  use tokio::io::AsyncWriteExt;
+  h.peer.write_all(&bridgething_iap2::DETECT_MARKER).await.unwrap();
+  let syn = LinkPacket::with_payload(ControlBits::SYN, PEER_INITIAL_PSN, 0, 0, peer_lsp().encode());
+  write_link(&mut h.peer, &mut h.peer_codec, syn).await;
+  let our_syn = loop {
+    let pkt = read_link(&mut h.peer, &mut h.peer_buf, &mut h.peer_codec).await;
+    if pkt.header.control.contains(ControlBits::SYN) {
+      break pkt;
+    }
+  };
+  let _our_ack = read_link(&mut h.peer, &mut h.peer_buf, &mut h.peer_codec).await;
+  h.our_initial_psn = our_syn.header.seq;
+  h.peer_seq = PEER_INITIAL_PSN;
+  h.control_buf.clear();
+  assert!(matches!(h.next_event().await, SessionEvent::LinkEstablished(_)));
+
+  let second_gen_subs = full_walk(&mut h).await;
+  assert_eq!(
+    first_gen_subs, second_gen_subs,
+    "post-ident subscriptions must be re-sent on the fresh link"
+  );
+}

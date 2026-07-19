@@ -23,7 +23,6 @@ use crate::{
   link::Iap2Command,
 };
 
-/// Outbound telephony actions the daemon can request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TelephonyCommand {
   Initiate(InitiateCall),
@@ -59,8 +58,6 @@ impl TelephonyFlow {
     msg_id == CallStateUpdate::CSM_MSG_ID || msg_id == CommunicationsUpdate::CSM_MSG_ID
   }
 
-  /// Send `StartCallStateUpdates` and `StartCommunicationsUpdates`
-  /// once per session. Idempotent.
   pub(super) async fn ensure_subscribed(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, SubscriptionState::Idle) {
       tracing::debug!("iap2 telephony: sending Start*Updates pair");
@@ -69,6 +66,10 @@ impl TelephonyFlow {
       self.state = SubscriptionState::Subscribed;
     }
     Ok(())
+  }
+
+  pub(super) fn reset(&mut self) {
+    self.state = SubscriptionState::Idle;
   }
 
   pub(super) async fn handle(

@@ -36,8 +36,6 @@ use crate::{
   session::SessionEvent,
 };
 
-/// Link session id reserved for File Transfer in our LSP. Must match
-/// `Lsp::accessory_default()`'s `SessionTriple { id: 2, type: 1 }`.
 pub(crate) const FILE_TRANSFER_LINK_SESSION_ID: u8 = 2;
 
 const OP_DATA: u8 = 0x00;
@@ -50,7 +48,6 @@ const OP_LAST_DATA: u8 = 0x40;
 const OP_FIRST_DATA: u8 = 0x80;
 const OP_FIRST_AND_ONLY: u8 = 0xC0;
 
-/// File type for `MediaItemArtwork` transfers. Other types emit a generic event upstream.
 const FILE_TYPE_ARTWORK: u16 = 2;
 
 #[derive(Debug)]
@@ -74,9 +71,10 @@ impl FileTransferFlow {
     }
   }
 
-  /// Decode a session-2 link payload and dispatch to the right
-  /// per-id state. Emits `SessionEvent::ArtworkBytes` upstream when
-  /// a transfer completes for `file_type == 2`.
+  pub(crate) fn reset(&mut self) {
+    self.in_flight.clear();
+  }
+
   pub(crate) async fn dispatch_link_data(
     &mut self,
     payload: Bytes,
@@ -125,7 +123,6 @@ impl FileTransferFlow {
   }
 
   async fn handle_setup(&mut self, id: u8, mut rest: Bytes) -> Result<()> {
-    // two Setup shapes: 11-byte `[u64 size][u8 reserved][u16 type]` and 10-byte `[u64 size][u16 type]`.
     let declared_size = match rest.len() {
       11 => {
         let size = rest.get_u64() as usize;
@@ -248,7 +245,6 @@ impl FileTransferFlow {
 #[cfg(feature = "emulator")]
 pub(crate) use device::DeviceFileTransfer;
 
-/// Device-half (iPhone-side) artwork sender: the inverse of [`FileTransferFlow`].
 #[cfg(feature = "emulator")]
 mod device {
   use std::collections::HashMap;
@@ -266,9 +262,6 @@ mod device {
     link::Iap2Command,
   };
 
-  /// Per-packet overhead: link header + link payload checksum trailer + the `[id, op]` header.
-  /// Bodies are chunked so each `[id, op, chunk]` stays within the negotiated link payload budget;
-  /// otherwise the link re-chunks and the accessory misparses the spilled bytes as a bogus `[id, op]`.
   const PER_PACKET_OVERHEAD: usize = LINK_HEADER_LEN + 1 + 2;
 
   pub(crate) struct DeviceFileTransfer {
@@ -287,8 +280,6 @@ mod device {
       }
     }
 
-    /// Begin an artwork transfer: send Setup (file type 2), stash the
-    /// body until the accessory's SetupAck arrives.
     pub(crate) async fn begin_artwork(&mut self, transfer_id: u8, body: Bytes) -> Result<()> {
       let mut setup = BytesMut::with_capacity(12);
       setup.put_u8(transfer_id);
@@ -301,8 +292,6 @@ mod device {
       Ok(())
     }
 
-    /// Route an inbound session-2 link payload. On SetupAck, stream the
-    /// stashed body; on CompleteAck, return the finished transfer id.
     pub(crate) async fn on_link_data(&mut self, payload: Bytes) -> Result<Option<u8>> {
       if payload.len() < 2 {
         return Ok(None);
@@ -468,7 +457,6 @@ mod tests {
       .await
       .unwrap();
     flow.dispatch_link_data(op_only(1, OP_CANCEL), &evt_tx).await.unwrap();
-    // any subsequent Data without Setup is ignored
     flow
       .dispatch_link_data(data_with(1, OP_LAST_DATA, b"cd"), &evt_tx)
       .await

@@ -152,6 +152,14 @@ impl Iap2EventRouter {
         self.bluetooth.le.attach(address).await;
         self.start_ea_keepalive(address).await;
       }
+      SessionEvent::LinkRestarting(reason) => {
+        tracing::info!(%address, %reason, "iAP2 link restarting in place");
+        self.stop_ea_keepalive(address).await;
+        let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
+        self.bluetooth.le.detach(address).await;
+        self.np_checkpoint.lock().await.remove(&address);
+        self.pending_art.clear(address).await;
+      }
       SessionEvent::Authenticated => {
         tracing::info!(%address, "iAP2 authenticated");
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::Authenticated).await;
@@ -564,8 +572,6 @@ mod tests {
 
   #[test]
   fn pidless_source_distinguishes_tracks_by_title() {
-    // a genuinely pid-less source (every track lacks a pid) must still see a title change as a
-    // new track, so stickiness only applies when the current key is a real pid.
     let first = delta_track_key(
       Some(&MediaItemAttributes {
         title: Some("Ep 1".to_string()),

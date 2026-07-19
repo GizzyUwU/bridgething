@@ -44,54 +44,32 @@ use crate::{
   session::{DeviceFileTransfer, EA_LINK_SESSION_ID},
 };
 
-/// iAP2 control-session id, matching [`crate::session`]'s constant and
-/// the session triple the accessory declares in its LSP.
 const CONTROL_SESSION_ID: u8 = 1;
-
-/// File Transfer link session id, matching the accessory's LSP triple
-/// `{ id: 2, type: 1 }`. Outbound artwork SetupAck / CompleteAck land here.
 const FILE_TRANSFER_SESSION_ID: u8 = 2;
-
-/// Challenge length the emulator issues in
-/// `RequestAuthenticationChallengeResponse`. Arbitrary bytes; the
-/// accessory's CP3.0 chip signs whatever we send and we never validate it.
 const CHALLENGE_LEN: usize = 32;
 
-/// Device-side milestones the emulator surfaces for tests and logging,
-/// mirroring the accessory's [`crate::SessionEvent`] stream from the
-/// device side.
 #[derive(Debug)]
 pub enum EmulatorEvent {
   LinkEstablished,
   Authenticated,
   Identified,
   ArtworkSent(u8),
-  /// An EA gateway stream opened, carrying the byte channels a consumer
-  /// drives on top.
   EaStreamOpened(DeviceEaStream),
   LinkDown(String),
 }
 
-/// Runtime drive commands the emulator's control session applies as they
-/// arrive, the way an iPhone pushes a track change then its cover art a
-/// beat later. Delivered through [`DeviceEmulatorHandle`].
 #[derive(Debug)]
 enum EmulatorCommand {
   PushNowPlaying(Box<NowPlayingUpdate>),
   PushArtwork { transfer_id: u8, bytes: Bytes },
 }
 
-/// Drives the emulator's control session at runtime: push NowPlaying
-/// deltas and artwork transfers on demand, sequenced by a scenario the
-/// same way it sequences `inject_iap2` events in-process. Obtained from
-/// [`DeviceEmulator::handle`] before `run` consumes the emulator.
 #[derive(Clone)]
 pub struct DeviceEmulatorHandle {
   commands: mpsc::Sender<EmulatorCommand>,
 }
 
 impl DeviceEmulatorHandle {
-  /// Push a NowPlaying delta to the subscribed accessory.
   pub async fn push_now_playing(&self, update: NowPlayingUpdate) -> Result<()> {
     self
       .commands
@@ -100,8 +78,6 @@ impl DeviceEmulatorHandle {
       .map_err(|_| Error::LinkClosed)
   }
 
-  /// Deliver artwork bytes over File Transfer for `transfer_id`, as the
-  /// iPhone does after a NowPlaying delta carrying that id.
   pub async fn push_artwork(&self, transfer_id: u8, bytes: Bytes) -> Result<()> {
     self
       .commands
@@ -111,10 +87,6 @@ impl DeviceEmulatorHandle {
   }
 }
 
-/// Scripted device-half session. Construct with the device-role link's
-/// command/event channels plus an observation channel, then `run()`.
-/// [`DeviceEmulator::with_now_playing`] / [`DeviceEmulator::with_artwork`]
-/// script the media surface the accessory observes.
 pub struct DeviceEmulator {
   link_command_tx: mpsc::Sender<Iap2Command>,
   link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -153,32 +125,22 @@ impl DeviceEmulator {
     }
   }
 
-  /// A runtime drive handle for this emulator. Clone-able; sends keep
-  /// working until the link drops. Take it before `run` consumes self.
   pub fn handle(&self) -> DeviceEmulatorHandle {
     DeviceEmulatorHandle {
       commands: self.command_tx.clone(),
     }
   }
 
-  /// Replace the canned NowPlaying delta the emulator pushes when the
-  /// accessory subscribes.
   pub fn with_now_playing(mut self, update: NowPlayingUpdate) -> Self {
     self.now_playing = Some(update);
     self
   }
 
-  /// Suppress the subscribe-time canned push so a scenario drives every
-  /// delta through [`DeviceEmulatorHandle`], matching in-process
-  /// `inject_iap2` semantics where nothing arrives unsolicited.
   pub fn without_now_playing(mut self) -> Self {
     self.now_playing = None;
     self
   }
 
-  /// Script an artwork blob delivered over File Transfer once the
-  /// accessory subscribes. Patches the canned NowPlaying delta so its
-  /// `artwork_id` references the same transfer id, as the real iPhone does.
   pub fn with_artwork(mut self, transfer_id: u8, bytes: Bytes) -> Self {
     self.artwork = Some((transfer_id, bytes));
     let media = self
@@ -198,9 +160,6 @@ impl DeviceEmulator {
         self.handle_csm(frame).await?;
       }
 
-      // The command channel never closes (the emulator holds a sender for
-      // `handle`), so its arm only fires on an actual drive command; field
-      // borrows are scoped to the select so the arms can reborrow self.
       let wake = {
         let link_events = &mut self.link_events_rx;
         let commands = &mut self.command_rx;
@@ -228,7 +187,7 @@ impl DeviceEmulator {
           }
           other => tracing::trace!(session_id = other, "emulator: ignoring data on unhandled session"),
         },
-        Wake::Link(Some(Iap2Event::LinkDown(reason))) => {
+        Wake::Link(Some(Iap2Event::LinkRestarting { reason })) | Wake::Link(Some(Iap2Event::LinkDown(reason))) => {
           tracing::info!(reason = %reason, "emulator: link down");
           emit(&self.events_tx, EmulatorEvent::LinkDown(reason)).await;
           return Ok(());
@@ -300,10 +259,6 @@ impl DeviceEmulator {
     Ok(())
   }
 
-  /// Push the canned NowPlaying delta once the accessory subscribes,
-  /// then kick off the artwork transfer if one is scripted. A scenario in
-  /// driven mode ([`DeviceEmulator::without_now_playing`]) sends nothing
-  /// here and sequences deltas through [`DeviceEmulatorHandle`] instead.
   async fn push_now_playing(&mut self) -> Result<()> {
     if self.now_playing_pushed {
       return Ok(());
@@ -322,7 +277,6 @@ impl DeviceEmulator {
     Ok(())
   }
 
-  /// Apply a runtime drive command from [`DeviceEmulatorHandle`].
   async fn handle_command(&mut self, command: EmulatorCommand) -> Result<()> {
     match command {
       EmulatorCommand::PushNowPlaying(update) => {
@@ -340,9 +294,6 @@ impl DeviceEmulator {
     Ok(())
   }
 
-  /// Push the device-metadata CSMs an iPhone sends unsolicited right
-  /// after `IdentificationAccepted` (subscribe-by-listing on param 7):
-  /// device name, language, wall clock (host's current time), stable UUID.
   async fn push_device_metadata(&self) -> Result<()> {
     self
       .send_csm(DeviceInformationUpdate {
@@ -369,9 +320,6 @@ impl DeviceEmulator {
     Ok(())
   }
 
-  /// Emulate the companion app opening its EA session: map the bundle id
-  /// to the protocol the accessory declared, send
-  /// `StartExternalAccessoryProtocolSession`, surface the stream's channels.
   async fn open_ea_stream(&mut self, bundle_id: &str) -> Result<()> {
     let Some(protocol_id) = self.ea_protocols.iter().find(|p| p.name == bundle_id).map(|p| p.id) else {
       tracing::warn!(bundle = %bundle_id, "emulator: RequestAppLaunch for an undeclared EA protocol; ignoring");
@@ -412,8 +360,6 @@ impl DeviceEmulator {
   }
 }
 
-/// Canned NowPlaying delta so a default emulator drives a realistic
-/// subscribe response. Override via [`DeviceEmulator::with_now_playing`].
 fn default_now_playing() -> NowPlayingUpdate {
   NowPlayingUpdate {
     media_item: Some(MediaItemAttributes {
@@ -434,7 +380,6 @@ fn default_now_playing() -> NowPlayingUpdate {
   }
 }
 
-/// One iteration's wake source: a link event or a runtime drive command.
 enum Wake {
   Link(Option<Iap2Event>),
   Command(Option<EmulatorCommand>),

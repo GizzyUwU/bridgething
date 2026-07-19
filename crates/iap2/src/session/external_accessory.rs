@@ -61,9 +61,7 @@ const ON_DEMAND_LAUNCH_COOLDOWN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppLaunchState {
-  // no ea stream open; a launch request may be (re)sent, subject to the cooldown + attempt cap.
   Armed,
-  // an ea stream is open, so the companion is up and nothing to ask for.
   Active,
 }
 
@@ -120,10 +118,6 @@ impl EaFlow {
       || msg_id == StopExternalAccessoryProtocolSession::CSM_MSG_ID
   }
 
-  /// Sends `RequestAppLaunch` to foreground the companion. iOS silently ignores it unless the bundle id
-  /// names an installed app declaring our EA protocol string in its `UISupportedExternalAccessoryProtocols`.
-  /// Suppressed while an EA stream is open (so it never steals foreground from another app); re-armed when
-  /// iOS reaps the companion (Stop, or the inbound consumer dropping) with the control link still up.
   pub(super) async fn ensure_app_launch_requested(
     &mut self,
     bundle_id: &str,
@@ -149,10 +143,6 @@ impl EaFlow {
     Ok(())
   }
 
-  /// Fire a `RequestAppLaunch` for an arbitrary bundle on demand - waking the phone's Spotify so a
-  /// Connect target exists to play to. No attempt cap (the phone re-asks off the cluster state); a short
-  /// dedupe window collapses double-taps into a single launch. Distinct from the companion keep-alive
-  /// above, which suppresses while its EA stream is open and gives up after a fixed number of tries.
   pub(super) async fn request_app_launch(
     &mut self,
     bundle_id: &str,
@@ -174,8 +164,6 @@ impl EaFlow {
     Ok(())
   }
 
-  /// Dispatch one EA-range control CSM. Always returns `Ok(None)`; this layer never produces a
-  /// terminal `SessionEvent`, the link layer surfaces `LinkDown` if the link falls over.
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,
@@ -290,9 +278,13 @@ impl EaFlow {
     }
   }
 
-  /// Strip the leading u16-BE EA-stream-id from a session_id=3 link
-  /// payload and route the rest to the matching per-stream inbound
-  /// channel. Drops chunks for stream ids we don't know about.
+  pub(super) async fn teardown(&mut self, session_events_tx: &mpsc::Sender<SessionEvent>) {
+    for (stream_id, _inbound) in self.streams.drain() {
+      tracing::info!(stream_id, "iap2 ea: stream closed by link restart");
+      emit(session_events_tx, SessionEvent::EaStreamClosed { stream_id }).await;
+    }
+  }
+
   pub(super) async fn dispatch_link_data(&mut self, payload: Bytes, session_events_tx: &mpsc::Sender<SessionEvent>) {
     let Some((stream_id, chunk)) = split_stream_frame(&payload) else {
       tracing::warn!(
@@ -462,8 +454,6 @@ mod tests {
   async fn refuses_start_for_declaration_only_protocol() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
     let (events_tx, mut events_rx) = mpsc::channel(64);
-    // accept only the companion's protocol id (1); spotify's declaration-only id (2) must be refused so
-    // its WAMP bytes never route into the companion EA gateway.
     let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, Some(1));
 
     let start: CsmFrame = StartExternalAccessoryProtocolSession {
@@ -473,7 +463,6 @@ mod tests {
     .into();
     flow.handle(start, &link_tx, &events_tx).await.unwrap();
 
-    // a Close reply rides the control session, no stream opens, and the companion keep-alive stays armed.
     assert!(matches!(
       link_rx.recv().await.unwrap(),
       Iap2Command::Send { session_id: 1, .. }
@@ -492,8 +481,6 @@ mod tests {
     let (events_tx, mut events_rx) = mpsc::channel(64);
     let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, None);
 
-    // companion opens its EA stream (iOS launched it) -> Active; a launch request is suppressed so it
-    // never steals foreground from whatever app is on screen.
     let start: CsmFrame = StartExternalAccessoryProtocolSession {
       protocol_id: 1,
       session_id: 0x0100,
@@ -504,7 +491,6 @@ mod tests {
       events_rx.recv().await.unwrap(),
       SessionEvent::EaStreamOpened { stream_id: 0x0100, .. }
     ));
-    // drain the StatusExternalAccessoryProtocolSession Ok reply (rides the control session)
     assert!(matches!(
       link_rx.recv().await.unwrap(),
       Iap2Command::Send { session_id: 1, .. }
@@ -515,7 +501,6 @@ mod tests {
       .unwrap();
     assert!(link_rx.try_recv().is_err(), "no relaunch while the EA stream is open");
 
-    // ios reaps the companion -> Stop -> re-arm; the relaunch fires (no prior send, so no cooldown gate)
     let stop: CsmFrame = StopExternalAccessoryProtocolSession { session_id: 0x0100 }.into();
     flow.handle(stop, &link_tx, &events_tx).await.unwrap();
     assert!(matches!(
@@ -532,9 +517,6 @@ mod tests {
     );
   }
 
-  // a dropped inbound consumer (decode error / bus close) removes the last stream without a peer Stop;
-  // the launch must re-arm and an EaStreamClosed must fire so the gateway clears the companion - otherwise
-  // the launch latch stays Active forever and the companion can never be re-foregrounded.
   #[tokio::test]
   async fn app_launch_rearms_after_consumer_drop() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
@@ -556,7 +538,6 @@ mod tests {
       Iap2Command::Send { session_id: 1, .. }
     )); // Status Ok
 
-    // the upstream consumer drops its receiver; the next inbound chunk fails to enqueue.
     drop(inbound_rx);
     let mut wire = BytesMut::new();
     wire.extend_from_slice(&0x0100u16.to_be_bytes());

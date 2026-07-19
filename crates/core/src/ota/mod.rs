@@ -154,6 +154,8 @@ impl OtaOrchestrator {
       last_streaming_emit_at: None,
       last_streaming_percent: None,
       last_drain_ack: 0,
+      last_drain_ack_at: None,
+      last_received: 0,
       staged: Vec::new(),
       staged_peer: None,
     };
@@ -222,6 +224,7 @@ impl OtaState {
 }
 
 const STREAMING_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
+const DRAIN_ACK_MAX_INTERVAL: Duration = Duration::from_millis(300);
 
 struct OtaActor {
   transfers: ChunkedTransfer,
@@ -240,6 +243,8 @@ struct OtaActor {
   last_streaming_emit_at: Option<Instant>,
   last_streaming_percent: Option<u8>,
   last_drain_ack: u32,
+  last_drain_ack_at: Option<Instant>,
+  last_received: u32,
   staged: Vec<StagedPiece>,
   staged_peer: Option<Address>,
 }
@@ -253,8 +258,18 @@ impl OtaActor {
         Cmd(Option<Command>),
         Stream(Option<TransferEvent>),
         PeerLost,
+        AckFlush,
       }
       let step = {
+        let ack_flush_in = match &self.state {
+          OtaState::Streaming { .. } if self.last_received > self.last_drain_ack => Some(
+            self
+              .last_drain_ack_at
+              .map(|t| DRAIN_ACK_MAX_INTERVAL.saturating_sub(t.elapsed()))
+              .unwrap_or(Duration::ZERO),
+          ),
+          _ => None,
+        };
         let cmd_rx = &mut self.cmd_rx;
         let state = &mut self.state;
         let peer_watch = &mut self.peer_watch;
@@ -283,6 +298,12 @@ impl OtaActor {
               None => std::future::pending().await,
             }
           } => Step::PeerLost,
+          _ = async {
+            match ack_flush_in {
+              Some(d) => tokio::time::sleep(d).await,
+              None => std::future::pending().await,
+            }
+          } => Step::AckFlush,
         }
       };
       match step {
@@ -313,6 +334,13 @@ impl OtaActor {
             self.sinks.unbind(*transfer_id);
             self.state = OtaState::Idle;
             self.range_proxy.deactivate().await;
+          }
+        }
+        Step::AckFlush => {
+          if let OtaState::Streaming { peer, transfer_id, .. } = &self.state {
+            let (peer, transfer_id) = (*peer, *transfer_id);
+            let received = self.last_received;
+            self.force_drain_ack(peer, transfer_id, received).await;
           }
         }
       }
@@ -415,6 +443,8 @@ impl OtaActor {
         self.last_streaming_emit_at = Some(Instant::now());
         self.last_streaming_percent = Some(resume_percent);
         self.last_drain_ack = resume_from_offset as u32;
+        self.last_received = resume_from_offset as u32;
+        self.last_drain_ack_at = Some(Instant::now());
         let update_id = req.update_id.clone();
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
@@ -442,6 +472,7 @@ impl OtaActor {
 
   async fn drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u64) {
     let received = received as u32;
+    self.last_received = received;
     if received.saturating_sub(self.last_drain_ack) >= FORWARD_ACK_INTERVAL {
       self.force_drain_ack(peer, transfer_id, received).await;
     }
@@ -449,6 +480,7 @@ impl OtaActor {
 
   async fn force_drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u32) {
     self.last_drain_ack = received;
+    self.last_drain_ack_at = Some(Instant::now());
     if let Some(address) = peer {
       self
         .gateway_man
@@ -1103,9 +1135,6 @@ mod tests {
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 1);
   }
 
-  // a well-behaved windowed sender streams a multi-interval transfer without the daemon abandoning
-  // on transient buffer pressure, and drain-acks are throttled to FORWARD_ACK_INTERVAL boundaries
-  // (emitted from the disk-write path, not per-fragment on enqueue) with a forced ack on completion.
   #[tokio::test]
   async fn drain_acks_throttle_and_stream_is_not_abandoned() {
     let h = boot().await;
@@ -1135,11 +1164,9 @@ mod tests {
       h.sinks
         .fragment(tid_for(&sha), off as u32, Bytes::copy_from_slice(&bytes[off..end]));
       off = end;
-      // let the actor drain each fragment so ingest buffers never fill; a windowed sender paces here.
       tokio::task::yield_now().await;
     }
 
-    // the forced final drain-ack lands at streaming completion (received == size), before the write.
     let acks = timeout(Duration::from_secs(5), async {
       loop {
         {
@@ -1154,8 +1181,6 @@ mod tests {
     .await
     .expect("stream completed and emitted a final drain-ack at received == size");
 
-    // 40 KiB in 4 KiB fragments = 10 fragments but only ~3 acks (16 KiB, 32 KiB, forced 40 KiB): the
-    // final ack landing at `size` proves the stream reached Completed rather than being abandoned.
     assert!(
       acks.len() <= 4,
       "drain-acks not throttled: {} acks for 10 fragments",
@@ -1173,6 +1198,47 @@ mod tests {
       }
       prev = a.received;
     }
+  }
+
+  #[tokio::test]
+  async fn sub_interval_receipt_acks_on_the_flush_timer() {
+    let h = boot().await;
+    let (bytes, sha, size) = sized_fixture(40 * 1024);
+    let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+        },
+        Some(peer),
+      )
+      .await
+      .expect("begin ok");
+
+    h.sinks
+      .fragment(tid_for(&sha), 0, Bytes::copy_from_slice(&bytes[0..4096]));
+
+    let flushed = timeout(Duration::from_secs(2), async {
+      loop {
+        let acked = h.captured_acks.lock().unwrap().last().map(|a| a.received);
+        if acked == Some(4096) {
+          return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+      }
+    })
+    .await;
+    assert!(
+      flushed.is_ok(),
+      "a 4 KiB receipt below FORWARD_ACK_INTERVAL must ack on the flush timer"
+    );
   }
 
   #[tokio::test]
@@ -1286,8 +1352,6 @@ mod tests {
       .await
       .expect("first begin ok");
     h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
-    // fragments ride the sink channel, cancel rides the command mailbox; let
-    // the actor land the fragment before cancelling.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     h.ota.cancel().await;
@@ -1411,9 +1475,6 @@ mod tests {
     assert_eq!(ack.resume_from_offset, 0);
   }
 
-  // regression: a pinned peer dying mid-stream must release the pin (partial
-  // retained), or every later begin from a different identity is rejected
-  // until a daemon restart.
   #[tokio::test]
   async fn pinned_peer_disconnect_mid_stream_releases_for_resume() {
     use libbridgething::{Device, DeviceType, GatewayInfo, Peer};
@@ -1457,7 +1518,6 @@ mod tests {
     h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // network gateways remove the peer entirely on disconnect
     snapshot_tx.send(crate::peer::PeerSnapshot::default()).unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
 
