@@ -4,10 +4,6 @@ import BridgethingSchema
 import Foundation
 import os
 @_exported import Spotify
-#if canImport(ImageIO)
-    import CoreGraphics
-    import ImageIO
-#endif
 #if canImport(UIKit)
     import UIKit
 #endif
@@ -26,7 +22,7 @@ private typealias SpShelf = Spotify.Shelf
 private typealias SpLibraryScope = Spotify.LibraryScope
 
 private let scdnImagePrefix = "https://i.scdn.co/image/"
-private let assetIdPrefix = "spotify/img/"
+private let imageCodec = ImageAssetCodec(namespace: "spotify/img/", shortForm: (tag: "i", urlPrefix: scdnImagePrefix))
 private let builtinRefPrefix = "builtin:"
 private let builtinAssetIdPrefix = "builtin/img/"
 private let defaultHeroEdge = 248
@@ -552,16 +548,16 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     // MARK: - assets
 
     public func asset(id: String) async throws -> AssetBytes? {
-        guard let parsed = Self.parseImageId(id) else { return nil }
+        guard let parsed = imageCodec.parse(id) else { return nil }
         let (data, _) = try await urlSession.data(from: parsed.url)
         return autoreleasepool {
-            Self.downsample(data, maxEdge: parsed.maxEdge).map { AssetBytes(bytes: $0, mime: "image/jpeg") }
+            ArtImage.downsampleJpeg(data, maxEdge: parsed.maxEdge).map { AssetBytes(bytes: $0, mime: "image/jpeg") }
         }
     }
 
     private func warmArt(in result: BrowseResult) {
         for id in Set(Self.collectArtIds(result.entries)) {
-            guard let parsed = Self.parseImageId(id) else { continue }
+            guard let parsed = imageCodec.parse(id) else { continue }
             Task { [urlSession] in _ = try? await urlSession.data(from: parsed.url) }
         }
     }
@@ -799,7 +795,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         if ref.hasPrefix(builtinRefPrefix) {
             return builtinAssetIdPrefix + ref.dropFirst(builtinRefPrefix.count)
         }
-        return imageAssetId(ref.hasPrefix("http") ? ref : "\(scdnImagePrefix)\(ref)", maxEdge: edge)
+        return imageCodec.assetId(url: ref.hasPrefix("http") ? ref : "\(scdnImagePrefix)\(ref)", maxEdge: edge)
     }
 
     private static func rawArtworkURL(_ ref: String) -> String? {
@@ -927,52 +923,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         return NowPlayingUpdate(mediaItem: media, playback: playback)
     }
 
-    // MARK: - art asset id codec + downsample
-
-    private static func imageAssetId(_ rawURL: String, maxEdge: Int) -> String? {
-        guard !rawURL.isEmpty else { return nil }
-        if rawURL.hasPrefix(scdnImagePrefix) {
-            return "\(assetIdPrefix)\(maxEdge)/i\(rawURL.dropFirst(scdnImagePrefix.count))"
-        }
-        guard let encoded = rawURL.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
-        return "\(assetIdPrefix)\(maxEdge)/u\(encoded)"
-    }
-
-    private static func parseImageId(_ id: String) -> (url: URL, maxEdge: Int)? {
-        guard id.hasPrefix(assetIdPrefix) else { return nil }
-        let rest = id.dropFirst(assetIdPrefix.count)
-        guard let slash = rest.firstIndex(of: "/"), let maxEdge = Int(rest[..<slash]) else { return nil }
-        let tagged = rest[rest.index(after: slash)...]
-        guard let tag = tagged.first else { return nil }
-        let body = String(tagged.dropFirst())
-        let urlString: String
-        switch tag {
-        case "i": urlString = scdnImagePrefix + body
-        case "u": guard let decoded = body.removingPercentEncoding else { return nil }; urlString = decoded
-        default: return nil
-        }
-        guard let url = URL(string: urlString) else { return nil }
-        return (url, maxEdge)
-    }
-
-    private static func downsample(_ data: Data, maxEdge: Int) -> Data? {
-        #if canImport(ImageIO)
-            guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let opts: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxEdge,
-            ]
-            guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-            let out = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
-            CGImageDestinationAddImage(dest, thumb, [kCGImageDestinationLossyCompressionQuality: 0.6] as CFDictionary)
-            guard CGImageDestinationFinalize(dest) else { return nil }
-            return out as Data
-        #else
-            return nil
-        #endif
-    }
 }
 
 private final class ObserverBridge: Spotify.Observer, @unchecked Sendable {
@@ -995,20 +945,6 @@ private enum SpotifyGlueError: Swift.Error, CustomStringConvertible, LocalizedEr
     }
 
     var errorDescription: String? { description }
-}
-
-private extension LibraryItem {
-    var artworkId: String? {
-        switch self {
-        case let .track(t): return t.image_id.isEmpty ? nil : t.image_id
-        case let .playlist(p): return p.artworkId
-        case let .podcastEpisode(e): return e.artworkId
-        case let .show(s): return s.artworkId
-        case let .station(s): return s.artworkId
-        case let .album(a): return a.artwork_id
-        case let .artist(a): return a.artwork_id
-        }
-    }
 }
 
 final class GatewayDeviceWaker: Spotify.DeviceWaker, @unchecked Sendable {

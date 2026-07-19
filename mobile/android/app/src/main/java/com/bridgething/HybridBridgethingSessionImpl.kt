@@ -150,6 +150,7 @@ public class HybridBridgethingSessionImpl(
 
         private const val REQUEST_DIALER_ROLE = 0xBA02
         private const val AUTO_RESUME_PREFIX = "autoresume."
+        private const val ACTIVE_PROVIDER_KEY = "activeProvider"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -265,7 +266,10 @@ public class HybridBridgethingSessionImpl(
             BridgethingConnectionService.start(context)
         }
 
-        registry.firstOrNull { it.available && it.hasCredentials() }?.let {
+        val persisted = prefs.getString(ACTIVE_PROVIDER_KEY, null)
+        val restore = persisted?.let { id -> registry.firstOrNull { it.id == id && it.available } }
+            ?: registry.firstOrNull { it.available && it.hasCredentials() }
+        restore?.let {
             runCatching { setActiveProvider(it.id) }
         }
     }
@@ -350,6 +354,7 @@ public class HybridBridgethingSessionImpl(
             )
             is GlueAuthState.Authenticated -> {
                 activeRegistration?.let {
+                    prefs.edit().putString(ACTIVE_PROVIDER_KEY, it.id).apply()
                     emitProvider(BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available))
                 }
                 emitAuth(authState(BridgethingAuthKind.AUTHENTICATED))
@@ -361,6 +366,7 @@ public class HybridBridgethingSessionImpl(
     override suspend fun cancelAuth() {
         authJob?.cancel()
         activeRegistration = null
+        prefs.edit().remove(ACTIVE_PROVIDER_KEY).apply()
         stateLock.withLock { companion }?.setActive(null)
         emitProvider(null)
         emitAuth(idleState())
@@ -370,6 +376,7 @@ public class HybridBridgethingSessionImpl(
         authJob?.cancel()
         val reg = activeRegistration
         activeRegistration = null
+        prefs.edit().remove(ACTIVE_PROVIDER_KEY).apply()
         runCatching { reg?.signOut?.invoke() }
         stateLock.withLock { companion }?.setActive(null)
         emitProvider(null)

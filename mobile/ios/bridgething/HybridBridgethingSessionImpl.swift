@@ -212,7 +212,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         await applyOtaPollConfig(Self.loadOtaPollConfig())
         await applyDeviceAutoResume()
 
-        if let restore = Self.registry.first(where: { $0.available && $0.hasCredentials() }) {
+        if let persisted = Self.defaults.string(forKey: PrefKey.activeProvider),
+           let restore = Self.registry.first(where: { $0.id == persisted && $0.available }) {
+            try? await setActiveProvider(id: restore.id)
+        } else if let restore = Self.registry.first(where: { $0.available && $0.hasCredentials() }) {
             try? await setActiveProvider(id: restore.id)
         }
     }
@@ -289,6 +292,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let task = authTask
         activeRegistration = nil
         stateLock.unlock()
+        Self.defaults.removeObject(forKey: PrefKey.activeProvider)
         task?.cancel()
         let companion = stateLock.withLock { self.companion }
         try? await companion?.setActive(nil)
@@ -305,6 +309,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         task?.cancel()
 
         // clear persisted credentials for the signed-in provider so it doesn't auto-restore.
+        Self.defaults.removeObject(forKey: PrefKey.activeProvider)
         registration?.signOut()
 
         let companion = stateLock.withLock { self.companion }
@@ -781,6 +786,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         static let otaInterval = "bridgething.ota.intervalSeconds"
         static let otaAutoPush = "bridgething.ota.autoPush"
         static let otaRootUrl = "bridgething.ota.rootUrl"
+        static let activeProvider = "bridgething.activeProvider"
     }
 
     private static func loadCapabilityFlags() -> BridgethingCapabilityFlags {
@@ -1000,6 +1006,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             ))
         case .authenticated:
             if let registration = stateLock.withLock({ activeRegistration }) {
+                Self.defaults.set(registration.id, forKey: PrefKey.activeProvider)
                 emitProvider(BridgethingProviderInfo(
                     id: registration.id,
                     displayName: registration.displayName,

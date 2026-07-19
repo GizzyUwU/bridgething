@@ -64,6 +64,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>bridgething shows and controls Apple Music playback on your Car Thing.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>bridgething uses Bluetooth to connect to your Car Thing.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

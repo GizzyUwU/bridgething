@@ -35,7 +35,7 @@ enum BridgethingApp {
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id: AppleMusicGlue.name,
                 displayName: AppleMusicGlue.displayName,
-                available: false,
+                available: true,
                 factory: { AppleMusicGlue() },
                 signOut: {}
             ),

@@ -33,7 +33,7 @@ import {
   UserRound,
   Wifi,
 } from 'lucide-react-native';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -109,6 +109,7 @@ export function SettingsScreen({ navigation }: Props) {
   const [pollBusy, setPollBusy] = useState(false);
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [signInBusy, setSignInBusy] = useState<string | null>(null);
+  const lastSignInId = useRef<string | null>(null);
   const [addDeviceBusy, setAddDeviceBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -188,6 +189,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   const signIn = async (id: string) => {
     if (signInBusy) return;
+    lastSignInId.current = id;
     setSignInBusy(id);
     try {
       await session.setActiveProvider(id);
@@ -285,8 +287,11 @@ export function SettingsScreen({ navigation }: Props) {
               onRetry={
                 authState.kind === 'failed' && signInBusy === null
                   ? () => {
-                      const first = providers.find(p => p.available);
-                      if (first) signIn(first.id);
+                      const target =
+                        providers.find(
+                          p => p.id === lastSignInId.current && p.available,
+                        ) ?? providers.find(p => p.available);
+                      if (target) signIn(target.id);
                     }
                   : undefined
               }
@@ -640,7 +645,7 @@ function AutoResumeRow({ deviceId }: { deviceId: string }) {
       icon={Play}
       iconTint={enabled ? 'primary' : 'default'}
       title="resume playback on connect"
-      subtitle="wake spotify and pick up where you left off"
+      subtitle="wake your music app and pick up where you left off"
       trailing={
         <Switch
           value={enabled ?? true}
