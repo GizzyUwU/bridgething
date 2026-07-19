@@ -22,6 +22,13 @@ public object LogcatCapture {
     private const val TAG = "bridgething-logs"
     private const val RESTART_DELAY_MS = 2_000L
 
+    /**
+     * threadtime layout: `MM-DD HH:MM:SS.mmm  PID  TID <level> <tag>: <message>`.
+     * Captured groups are level, tag and message; the timestamp is dropped
+     * because the UI stamps its own arrival time.
+     */
+    private val LINE = Regex("""^\d{2}-\d{2} [\d:.]+\s+\d+\s+\d+\s+([VDIWEF])\s+(.*?):\s?(.*)$""")
+
     @Volatile private var thread: Thread? = null
 
     /** Idempotent. Starts the reader thread; it supervises and restarts the child process. */
@@ -33,6 +40,23 @@ public object LogcatCapture {
             priority = Thread.MIN_PRIORITY
             start()
         }
+    }
+
+    /** Parses a threadtime line and forwards it to the live stream. Unparseable lines go through as debug. */
+    private fun relay(line: String) {
+        val m = LINE.find(line)
+        if (m == null) {
+            LocalLogRelay.push("DEBUG", "logcat", line)
+            return
+        }
+        val (level, tag, message) = m.destructured
+        val name = when (level) {
+            "E", "F" -> "ERROR"
+            "W" -> "WARN"
+            "I" -> "INFO"
+            else -> "DEBUG"
+        }
+        LocalLogRelay.push(name, tag.trim(), message)
     }
 
     private fun run() {
@@ -47,6 +71,8 @@ public object LogcatCapture {
                     while (true) {
                         val line = reader.readLine() ?: break
                         LogStore.write(line)
+                        // only parse when a stream is actually open; see LocalLogRelay.hasSink
+                        if (LocalLogRelay.hasSink()) relay(line)
                     }
                 }
             } catch (_: InterruptedException) {

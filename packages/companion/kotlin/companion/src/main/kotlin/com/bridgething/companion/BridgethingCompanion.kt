@@ -9,6 +9,7 @@ import com.bridgething.gateway.AssetRequestHandle
 import com.bridgething.gateway.BridgethingGateway
 import com.bridgething.gateway.Compression
 import com.bridgething.gateway.GatewayEvent
+import com.bridgething.gateway.LogStore
 import com.bridgething.gateway.LocalLogRelay
 import com.bridgething.gateway.LyricsRequestHandle
 import com.bridgething.gateway.RequestResult
@@ -465,9 +466,10 @@ public class BridgethingCompanion(
             LogLevel.Error -> CompanionLogLevel.Error
         }
         val message = "[${entry.target}] ${entry.message}"
-        // mirror to logcat so the persistent log store picks these up: daemon
-        // lines arrive over the wire and would otherwise never hit our buffer
-        android.util.Log.d("bridgething-device", message)
+        // straight to the store rather than via logcat: these arrive over the
+        // wire and routing them through logcat would echo back through
+        // LogcatCapture and reach the live stream twice
+        LogStore.write("daemon ${level.raw}: $message")
         DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }
