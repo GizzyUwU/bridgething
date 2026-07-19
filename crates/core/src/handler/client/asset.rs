@@ -89,6 +89,23 @@ impl AssetHandler {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum AssetLane {
+  Iap2,
+  Companion,
+  Unavailable,
+}
+
+pub(crate) fn asset_lane(state: &State, id: &str) -> AssetLane {
+  if id.starts_with(IAP2_ART_PREFIX) {
+    AssetLane::Iap2
+  } else if state.gateway_info().is_none() {
+    AssetLane::Unavailable
+  } else {
+    AssetLane::Companion
+  }
+}
+
 pub(crate) async fn resolve_asset(state: &State, bluetooth: &BluetoothMan, id: &str) -> FetchOutcome {
   match state.assets.get(id).await {
     Ok(Some(asset)) => return FetchOutcome::Got(asset),
@@ -103,12 +120,10 @@ pub(crate) async fn resolve_asset(state: &State, bluetooth: &BluetoothMan, id: &
     return FetchOutcome::Got(asset);
   }
 
-  if id.starts_with(IAP2_ART_PREFIX) {
-    fetch_iap2_art(state, id).await
-  } else if state.gateway_info().is_none() {
-    FetchOutcome::NotFound
-  } else {
-    fetch_via_companion(state, bluetooth, id, Retention::DISK_LRU).await
+  match asset_lane(state, id) {
+    AssetLane::Iap2 => fetch_iap2_art(state, id).await,
+    AssetLane::Unavailable => FetchOutcome::NotFound,
+    AssetLane::Companion => fetch_via_companion(state, bluetooth, id, Retention::DISK_LRU).await,
   }
 }
 

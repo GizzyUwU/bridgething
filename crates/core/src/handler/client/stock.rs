@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use base64::Engine as _;
 use libbridgething::{
@@ -13,7 +13,7 @@ use libbridgething::{
 };
 use serde_json::{Value, json};
 
-use super::{HandlerResult, MsgHandle};
+use super::{HandlerResult, MsgHandle, asset::AssetLane};
 use crate::{
   asset::{CachedAsset, Retention, wait::FetchOutcome},
   bluetooth::BluetoothMan,
@@ -27,6 +27,9 @@ use crate::{
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
 const STOCK_THUMBNAIL_EDGE: u32 = 96;
+const STOCK_HERO_EDGE: u32 = 248;
+const STOCK_IMAGE_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+const STOCK_IMAGE_DEADLINE: Duration = Duration::from_secs(25);
 const STOCK_HOME_SECTIONS: u32 = 10;
 
 #[derive(Debug)]
@@ -96,7 +99,7 @@ impl LegacyStockHandler {
   }
 
   async fn get_image(self, id: String) -> HandlerResult {
-    self.serve_asset_to_stock(id).await
+    self.serve_asset_to_stock(art_id_with_edge(&id, STOCK_HERO_EDGE)).await
   }
 
   async fn get_thumbnail_image(self, id: String) -> HandlerResult {
@@ -108,12 +111,22 @@ impl LegacyStockHandler {
   async fn serve_asset_to_stock(self, id: String) -> HandlerResult {
     tracing::debug!("({}) stock image lookup for id: {}", &self.handle.from, id);
     let stock_msg_id = self.handle.stock_msg_id;
-    match super::asset::resolve_asset(&self.handle.state, &self.handle.bluetooth, &id).await {
-      FetchOutcome::Got(asset) => self.send_stock_image(stock_msg_id, &asset).await,
-      FetchOutcome::NotFound => {
-        tracing::trace!("({}) no asset for stock image id: {}", &self.handle.from, id);
-        self.send_empty_stock_image(stock_msg_id).await
+    let deadline = tokio::time::Instant::now() + STOCK_IMAGE_DEADLINE;
+
+    loop {
+      if let FetchOutcome::Got(asset) =
+        super::asset::resolve_asset(&self.handle.state, &self.handle.bluetooth, &id).await
+      {
+        return self.send_stock_image(stock_msg_id, &asset).await;
       }
+
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() || super::asset::asset_lane(&self.handle.state, &id) != AssetLane::Companion {
+        tracing::debug!("({}) no asset for stock image id: {}", &self.handle.from, id);
+        return self.send_stock_image_error(stock_msg_id, &id).await;
+      }
+
+      tokio::time::sleep(STOCK_IMAGE_RETRY_BACKOFF.min(remaining)).await;
     }
   }
 
@@ -133,16 +146,12 @@ impl LegacyStockHandler {
     Ok(())
   }
 
-  async fn send_empty_stock_image(&self, stock_msg_id: Option<usize>) -> HandlerResult {
+  async fn send_stock_image_error(&self, stock_msg_id: Option<usize>, id: &str) -> HandlerResult {
     self
       .handle
       .send_stock(StockInterAppSend::new(
         stock_msg_id,
-        StockInterAppSendPayload::Image {
-          height: 0,
-          width: 0,
-          image_data: String::new(),
-        },
+        StockInterAppSendPayload::CallError(format!("no asset for image id: {id}")),
       ))
       .await?;
     Ok(())
@@ -933,6 +942,27 @@ mod tests {
     assert_eq!(
       art_id_with_edge("spotify/img/248/uhttps%3A%2F%2Fx", 96),
       "spotify/img/96/uhttps%3A%2F%2Fx"
+    );
+  }
+
+  #[test]
+  fn hero_rewrites_queue_minted_thumb_edge_up() {
+    assert_eq!(
+      art_id_with_edge("spotify/img/96/iabc123", STOCK_HERO_EDGE),
+      "spotify/img/248/iabc123"
+    );
+    assert_eq!(
+      art_id_with_edge("spotify/img/248/iabc123", STOCK_HERO_EDGE),
+      "spotify/img/248/iabc123"
+    );
+  }
+
+  #[test]
+  fn hero_and_thumbnail_edges_do_not_collide() {
+    let queue_minted = "spotify/img/96/iabc123";
+    assert_ne!(
+      art_id_with_edge(queue_minted, STOCK_HERO_EDGE),
+      art_id_with_edge(queue_minted, STOCK_THUMBNAIL_EDGE)
     );
   }
 

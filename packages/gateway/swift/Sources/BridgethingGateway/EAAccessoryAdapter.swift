@@ -26,9 +26,10 @@
   /// Opens therefore retry with backoff, and the peer is reported connected only
   /// once both streams reach `.openCompleted` (not when the session object is
   /// created). Exhausting the fast retries yields `.linkFailed` once, then a slow
-  /// background retry keeps running so the link self-heals when the accessory is
-  /// ready again (recreating an `EASession` races the previous one's async release,
-  /// so a single fast burst is not enough on a mid-session drop).
+  /// background retry keeps running for as long as the accessory stays listed in
+  /// `connectedAccessories` (recreating an `EASession` races the previous one's async
+  /// release, so a single fast burst is not enough on a mid-session drop). Once the
+  /// accessory delists, the retry stops and recovery is `.EAAccessoryDidConnect` alone.
   /// Dedicated thread whose run loop carries all EA stream I/O. Keeping the
   /// streams off the main run loop decouples link throughput and latency from
   /// UI work on the main thread.

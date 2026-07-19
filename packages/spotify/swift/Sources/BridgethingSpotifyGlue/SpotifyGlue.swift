@@ -300,6 +300,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                     glueLog.info("connect auto-resume did not complete: \(error)")
                 }
             }
+        } else {
+            glueLog.info("peer connect without auto-resume; leaving playback as-is")
         }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()

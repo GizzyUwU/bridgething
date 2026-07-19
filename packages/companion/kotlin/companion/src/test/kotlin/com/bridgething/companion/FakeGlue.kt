@@ -45,6 +45,7 @@ class FakeGlue(
 
     override suspend fun attach(gateway: BridgethingGateway) { calls.add("attach") }
     override suspend fun detach() { calls.add("detach") }
+    override suspend fun handlePeerConnected(allowAutoResume: Boolean) { calls.add("peerConnected:$allowAutoResume") }
 
     override suspend fun play(uri: PlayUri) { calls.add("play:${uri.uri}") }
     override suspend fun pause() { calls.add("pause") }

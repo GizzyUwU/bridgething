@@ -84,8 +84,8 @@ public actor BridgethingCompanion {
     private var deviceLogStreaming = false
 
     private var deviceAutoResume: [String: Bool] = [:]
-    private static let autoResumeBlipGap: TimeInterval = 300
-    private var lastPeerDisconnectedAt: [String: Date] = [:]
+    var autoResumeCooldown: TimeInterval = 300
+    private var lastAutoResumeAt: [String: Date] = [:]
 
     private var localLogStreaming = false
     private var connectedDeviceIds: Set<String> = []
@@ -441,10 +441,24 @@ public actor BridgethingCompanion {
         deviceAutoResume[deviceId] = enabled
     }
 
+    func setAutoResumeCooldown(_ seconds: TimeInterval) {
+        autoResumeCooldown = seconds
+    }
+
     private func allowAutoResume(_ deviceId: String) -> Bool {
-        guard deviceAutoResume[deviceId] ?? true else { return false }
-        guard let gone = lastPeerDisconnectedAt[deviceId] else { return true }
-        return Date().timeIntervalSince(gone) >= Self.autoResumeBlipGap
+        guard deviceAutoResume[deviceId] ?? true else {
+            log(.info, "auto-resume off for \(deviceId); skipping connect resume")
+            return false
+        }
+        if let resumed = lastAutoResumeAt[deviceId] {
+            let since = Date().timeIntervalSince(resumed)
+            guard since >= autoResumeCooldown else {
+                log(.info, "auto-resumed \(Int(since))s ago for \(deviceId); skipping connect resume")
+                return false
+            }
+        }
+        lastAutoResumeAt[deviceId] = Date()
+        return true
     }
 
     // MARK: - capability composition
@@ -575,7 +589,6 @@ public actor BridgethingCompanion {
 
     private func handlePeerGone(_ id: String, reason: String) async {
         guard connectedDeviceIds.remove(id) != nil else { return }
-        lastPeerDisconnectedAt[id] = Date()
         log(.info, "peer gone (\(reason)): \(id)")
         deviceLogTokens.removeValue(forKey: id)
         #if os(iOS)

@@ -195,6 +195,8 @@ pub struct StockInterAppSend {
 pub enum StockInterAppSendPayload {
   #[serde(rename = "call_result")]
   Ack {},
+  #[serde(rename = "call_error")]
+  CallError(String),
   #[serde(rename = "call_result")]
   Permissions { can_use_superbird: bool },
   #[serde(rename = "com.spotify.session_state")]

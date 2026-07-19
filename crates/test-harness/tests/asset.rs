@@ -12,8 +12,9 @@ use bridgething_test_harness::{Harness, MockWsClient};
 use libbridgething::{
   AssetRetention, GatewayCapabilities, GatewayInfo, Priority,
   gateway::{
-    AssetGotReply, BridgeToGatewayAssetMsg, BridgeToGatewayMsgData, GatewayToBridgeAssetMsg, GatewayToBridgeMsgData,
-    GatewayToBridgeTransferMsg, TransferBody, TransferFragment, TransferRef,
+    AssetGotReply, AssetNotFoundReply, AssetRequest, BridgeToGatewayAssetMsg, BridgeToGatewayMsgData,
+    GatewayToBridgeAssetMsg, GatewayToBridgeMsgData, GatewayToBridgeTransferMsg, TransferBody, TransferFragment,
+    TransferRef,
   },
   wire::MsgMeta,
 };
@@ -50,28 +51,104 @@ async fn stock_get_image(stock: &mut MockWsClient, id: &str, timeout: Duration) 
   }
 }
 
-/// Stock and modern asset requests share one resolution path, keyed by id. An
-/// `iap2/art/...` id must take the iAP2-wait lane and never be fetched from the
-/// companion (iOS pushes art; it cannot serve it on request). A companion IS
-/// connected here so the companion-fetch lane is live - routing the iap2 id there
-/// would await a response no one sends, hanging the stock reply.
+#[derive(Debug, PartialEq)]
+enum StockImageReply {
+  Bytes,
+  EmptySuccess,
+  Error,
+}
+
+async fn stock_image_reply(stock: &mut MockWsClient, id: &str, msg_id: u64, timeout: Duration) -> StockImageReply {
+  let req = format!(r#"{{"msgId":{msg_id},"method":"com.spotify.get_image","args":{{"id":"{id}"}},"userAction":false}}"#);
+  stock.send_text(req).await.expect("send get_image");
+  let deadline = tokio::time::Instant::now() + timeout;
+  loop {
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    assert!(!remaining.is_zero(), "stock image request {msg_id} never got a reply");
+    let text = match tokio::time::timeout(remaining, stock.recv()).await {
+      Ok(Some(t)) => t,
+      Ok(None) => panic!("stock socket closed awaiting reply to {msg_id}"),
+      Err(_) => panic!("stock image request {msg_id} timed out with no reply"),
+    };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+      continue;
+    };
+    if val.get("msgId").and_then(serde_json::Value::as_u64) != Some(msg_id) {
+      continue;
+    }
+    if val.get("type").and_then(serde_json::Value::as_str) == Some("call_error") {
+      return StockImageReply::Error;
+    }
+    let data = val
+      .get("payload")
+      .and_then(|p| p.get("image_data"))
+      .and_then(serde_json::Value::as_str)
+      .unwrap_or("");
+    return if data.is_empty() {
+      StockImageReply::EmptySuccess
+    } else {
+      StockImageReply::Bytes
+    };
+  }
+}
+
+fn serve_asset_not_found(gateway: Gateway) -> tokio::task::JoinHandle<()> {
+  let mut events = gateway.events();
+  tokio::spawn(async move {
+    while let Ok(msg) = events.recv().await {
+      let BridgeToGatewayMsgData::Asset(BridgeToGatewayAssetMsg::Request(req)) = &msg.data else {
+        continue;
+      };
+      gateway
+        .connection()
+        .respond_err::<AssetRequest>(msg.id, AssetNotFoundReply { id: req.id.clone() })
+        .await
+        .expect("respond not found");
+    }
+  })
+}
+
+#[tokio::test]
+async fn stock_image_miss_settles_instead_of_spinning() {
+  let harness = Harness::start().await.expect("harness start");
+  let companion = harness.connect_android().await.expect("connect companion");
+  announce(&companion).await;
+  let _responder = serve_asset_not_found(companion.clone());
+  let mut stock = harness.connect_stock_client().await.expect("stock client");
+
+  let id = "spotify/img/248/iflickerrepro";
+  const REFETCH_CAP: u64 = 40;
+  let per_request = Duration::from_secs(40);
+
+  let mut requests = 0u64;
+  for msg_id in 1..=REFETCH_CAP {
+    requests += 1;
+    if stock_image_reply(&mut stock, id, msg_id, per_request).await != StockImageReply::EmptySuccess {
+      break;
+    }
+  }
+
+  assert!(
+    requests < REFETCH_CAP,
+    "stock refetched {requests} times without settling; an empty success re-arms the fetch forever"
+  );
+}
+
 #[tokio::test]
 async fn stock_get_image_never_routes_iap2_art_to_the_companion() {
   let harness = Harness::start().await.expect("harness start");
   let _companion = harness.connect_android().await.expect("connect companion");
   let mut stock = harness.connect_stock_client().await.expect("stock client");
 
-  let image_data = stock_get_image(&mut stock, "iap2/art/deadbeef/9", Duration::from_secs(3))
-    .await
-    .expect("stock get_image for an iap2 art id must respond promptly, not hang");
-  assert!(
-    image_data.is_empty(),
-    "a non-pending iap2 art id must resolve empty, never be fetched from the companion"
+  let reply = stock_image_reply(&mut stock, "iap2/art/deadbeef/9", 7001, Duration::from_secs(3)).await;
+  assert_eq!(
+    reply,
+    StockImageReply::Error,
+    "a non-pending iap2 art id is authoritatively absent: fail it promptly rather than fetching it \
+     from the companion or answering empty, which would re-arm stock's fetch"
   );
 }
 
-/// Stock `get_image` resolves through the same id-keyed path as the modern
-/// `asset.get`, so any cached asset is served as image bytes.
 #[tokio::test]
 async fn stock_get_image_serves_a_cached_asset() {
   let harness = Harness::start().await.expect("harness start");
@@ -98,36 +175,29 @@ async fn stock_get_image_serves_a_cached_asset() {
   );
 }
 
-/// A companion-fetched asset request that is in flight when the companion drops
-/// must fail fast, not hang on the request leak-guard. The daemon fails pending
-/// gateway requests when their peer disconnects, so the stock reply comes back
-/// empty within the disconnect latency rather than after the 60s leak-guard.
 #[tokio::test]
 async fn companion_disconnect_fails_inflight_asset_request_fast() {
   let harness = Harness::start().await.expect("harness start");
   let companion = harness.connect_android().await.expect("connect companion");
   let mut stock = harness.connect_stock_client().await.expect("stock client");
 
-  // a normal companion-fetched id: cache miss, not an iap2 art id, gateway present
-  // -> daemon issues an AssetRequest the companion never answers.
   let id = "spotify/img/480/https%3A%2F%2Fexample.test%2Fart.jpg";
 
   let drop_companion = async {
     tokio::time::sleep(Duration::from_millis(300)).await;
     drop(companion);
   };
-  let fetch = stock_get_image(&mut stock, id, Duration::from_secs(8));
-  let (image, ()) = tokio::join!(fetch, drop_companion);
+  let fetch = stock_image_reply(&mut stock, id, 7002, Duration::from_secs(8));
+  let (reply, ()) = tokio::join!(fetch, drop_companion);
 
   assert_eq!(
-    image,
-    Some(String::new()),
-    "a disconnect must fail the in-flight fetch promptly and serve an empty image, not hang"
+    reply,
+    StockImageReply::Error,
+    "a disconnect closes the only lane that could produce bytes, so the fetch must fail promptly \
+     rather than hang on the leak-guard or answer empty"
   );
 }
 
-/// Announce companion capabilities so the daemon opens the companion-fetch
-/// lane for cache misses.
 async fn announce(gateway: &Gateway) {
   let caps = GatewayCapabilities {
     gateway: GatewayInfo {
@@ -145,8 +215,6 @@ async fn announce(gateway: &Gateway) {
   gateway.capabilities().announce(caps).await.expect("announce");
 }
 
-/// Answer every daemon `AssetRequest` with `body`: inline bytes, or a
-/// fragment stream on the Bulk lane keyed by the request id.
 fn serve_assets(gateway: Gateway, bytes: Vec<u8>, inline: bool, fragment_size: usize) -> tokio::task::JoinHandle<()> {
   let mut events = gateway.events();
   tokio::spawn(async move {
@@ -198,8 +266,6 @@ fn art_bytes(len: usize) -> Vec<u8> {
   (0u8..=255).cycle().take(len).collect()
 }
 
-/// Companion serves an asset as a Bulk-lane fragment stream; the daemon
-/// reassembles it through the memory sink and serves the exact bytes.
 #[tokio::test]
 async fn asset_pull_stream_body_serves_exact_bytes() {
   let harness = Harness::start().await.expect("harness start");
@@ -219,7 +285,6 @@ async fn asset_pull_stream_body_serves_exact_bytes() {
   );
 }
 
-/// Companion serves a small asset inline in the reply; no fragments flow.
 #[tokio::test]
 async fn asset_pull_inline_body_serves_exact_bytes() {
   let harness = Harness::start().await.expect("harness start");
@@ -235,10 +300,6 @@ async fn asset_pull_inline_body_serves_exact_bytes() {
   assert_eq!(image_data, base64::engine::general_purpose::STANDARD.encode(&bytes));
 }
 
-/// A sustained Background-lane fragment flood (a stand-in for an OTA push)
-/// must not stall a foreground asset pull: the companion's lane scheduler
-/// drains the Bulk-lane art fragments ahead of the queued Background
-/// backlog, and the daemon drops the unknown-id flood without harm.
 #[tokio::test]
 async fn asset_pull_resolves_under_background_flood() {
   let harness = Harness::start().await.expect("harness start");
@@ -273,7 +334,6 @@ async fn asset_pull_resolves_under_background_flood() {
     })
   };
 
-  // let the flood get ahead before asking for art.
   tokio::time::sleep(Duration::from_millis(50)).await;
 
   let mut stock = harness.connect_stock_client().await.expect("stock client");

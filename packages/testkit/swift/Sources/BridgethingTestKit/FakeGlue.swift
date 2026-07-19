@@ -9,6 +9,7 @@ import os
 public enum FakeGlueCall: Sendable, Equatable {
     case attach
     case detach
+    case peerConnected(allowAutoResume: Bool)
     case play(String)
     case queue(String)
     case pause
@@ -78,6 +79,7 @@ public final class FakeGlue: BridgethingGlue, @unchecked Sendable {
 
     public func attach(gateway _: BridgethingGateway) async throws { record(.attach) }
     public func detach() async { record(.detach) }
+    public func handlePeerConnected(allowAutoResume: Bool) async { record(.peerConnected(allowAutoResume: allowAutoResume)) }
 
     // MARK: - player
 
