@@ -77,7 +77,7 @@ export function LogsScreen({}: Props) {
   const clearStored = () => {
     Alert.alert(
       'Clear stored logs?',
-      'Deletes the log files kept on disk from previous app launches.',
+      'Deletes the log files kept on disk from previous app launches, including launches pinned because they contained errors.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
