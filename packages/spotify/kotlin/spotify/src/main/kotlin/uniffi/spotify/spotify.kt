@@ -5456,12 +5456,6 @@ public object FfiConverterTypeRepeatMode: FfiConverterRustBuffer<RepeatMode> {
 
 
 
-/**
- * why the platform is being asked to wake the phone's spotify. user-initiated
- * wakes must always fire; connect-resume wakes may be suppressed by the platform
- * (ios skips them while the companion app is foreground so an iap2 app-launch
- * never yanks the user out of the app mid-pairing).
- */
 
 enum class WakeReason {
     
