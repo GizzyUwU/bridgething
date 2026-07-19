@@ -59,6 +59,16 @@ public object LogStore {
     @Volatile private var launchDir: File? = null
     @Volatile private var writer: Thread? = null
 
+    /**
+     * Bumped whenever segments are deleted out from under the writer. It keeps
+     * its file handle open across writes, so without this it would go on
+     * appending to an unlinked inode until the next rotation.
+     */
+    @Volatile private var sinkGeneration = 0
+
+    /** Launch directories are named for their start time, so ids are always digits. */
+    private val ID = Regex("""^\d+$""")
+
     /** Lines dropped because the queue was full; surfaced in the export header. */
     @Volatile private var dropped: Long = 0
 
@@ -96,17 +106,57 @@ public object LogStore {
 
     // ---- export ----------------------------------------------------------
 
+    /** One retained launch, as surfaced to the UI. */
+    public data class LogArchive(
+        val id: String,
+        val startedAtMs: Long,
+        val bytes: Long,
+        val pinned: Boolean,
+        val current: Boolean,
+    )
+
+    /** Retained launches, newest first. */
+    public fun archives(): List<LogArchive> =
+        launchDirs()
+            .map { dir ->
+                LogArchive(
+                    id = dir.name,
+                    startedAtMs = dir.name.toLongOrNull() ?: 0L,
+                    bytes = segments(dir).sumOf { it.length() },
+                    pinned = pinnedSegments(dir).isNotEmpty(),
+                    current = dir == launchDir,
+                )
+            }
+            .sortedByDescending { it.startedAtMs }
+
+    /** Drops a single launch. Truncates in place when it is the live one. */
+    @Synchronized
+    public fun delete(id: String) {
+        val base = root ?: return
+        if (!ID.matches(id)) return
+        val dir = File(base, id)
+        if (!dir.isDirectory) return
+        flush()
+        if (dir == launchDir) {
+            segments(dir).forEach { pinMarker(it).delete(); it.delete() }
+            sinkGeneration += 1
+        } else {
+            dir.deleteRecursively()
+        }
+    }
+
     /**
-     * Concatenates every retained launch, oldest first, into [target].
+     * Concatenates retained launches, oldest first, into [target]. Passing an
+     * [id] narrows the bundle to that one launch.
      * Returns [target] so callers can chain into a share intent.
      */
-    public fun exportTo(target: File): File {
+    public fun exportTo(target: File, id: String? = null): File {
         flush()
         target.parentFile?.mkdirs()
         target.bufferedWriter().use { out ->
             out.write("bridgething log export\n")
             out.write("generated: ${java.util.Date()}\n")
-            val dirs = launchDirs()
+            val dirs = if (id == null) launchDirs() else launchDirs().filter { it.name == id }
             out.write("launches: ${dirs.size}\n")
             if (dropped > 0) out.write("dropped lines (writer backpressure): $dropped\n")
             out.write("\n")
@@ -142,6 +192,7 @@ public object LogStore {
                 dir.deleteRecursively()
             }
         }
+        sinkGeneration += 1
         dropped = 0
     }
 
@@ -158,9 +209,15 @@ public object LogStore {
 
     private fun runWriter() {
         var sink: Sink? = null
+        var generation = sinkGeneration
         try {
             while (true) {
                 val first = queue.take()
+                if (generation != sinkGeneration) {
+                    runCatching { sink?.close() }
+                    sink = null
+                    generation = sinkGeneration
+                }
                 val active = sink ?: openSink().also { sink = it }
                 active.write(first)
                 // drain whatever else piled up before touching the disk again

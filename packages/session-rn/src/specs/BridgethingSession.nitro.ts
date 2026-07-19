@@ -306,6 +306,17 @@ export type BridgethingDeviceLogLine = {
   message: string;
 };
 
+export type BridgethingLogArchive = {
+  /** Opaque handle for export/delete; also the launch start time in epoch millis. */
+  id: string;
+  startedAt: number;
+  bytes: number;
+  /** Held back from rotation because it contains errors. */
+  pinned: boolean;
+  /** The launch currently being written to. */
+  current: boolean;
+};
+
 export type BridgethingCompanionDebug = {
   authorityPlaybackHeld: boolean;
   authorityMetadataHeld: boolean;
@@ -329,10 +340,14 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   /** Bytes of persisted log currently retained on disk across all launches. */
   persistedLogSize(): Promise<number>;
-  /** Writes every retained launch into one text bundle; resolves to its path. */
-  exportLogs(): Promise<string>;
-  /** Writes a bundle and opens the OS share sheet. False when no UI is available to host it. */
-  shareLogs(): Promise<boolean>;
+  /** Retained launches, newest first. */
+  logArchives(): Promise<BridgethingLogArchive[]>;
+  /** Bundles retained launches into one text file; pass an id to narrow it to one. */
+  exportLogs(archiveId: string | null): Promise<string>;
+  /** Bundles and opens the OS share sheet. False when no UI is available to host it. */
+  shareLogs(archiveId: string | null): Promise<boolean>;
+  /** Drops a single retained launch, truncating it in place if it is the live one. */
+  deleteLogArchive(archiveId: string): Promise<void>;
   /** Drops retained launches and truncates the live one. */
   clearPersistedLogs(): Promise<void>;
 

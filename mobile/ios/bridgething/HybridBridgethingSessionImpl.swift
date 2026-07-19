@@ -369,11 +369,15 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     // pretending to have a bundle to hand over.
     public func persistedLogSize() async -> Double { 0 }
 
-    public func exportLogs() async throws -> String {
+    public func logArchives() async -> [BridgethingLogArchive] { [] }
+
+    public func exportLogs(archiveId: String?) async throws -> String {
         throw SessionError.unsupportedOnPlatform
     }
 
-    public func shareLogs() async -> Bool { false }
+    public func shareLogs(archiveId: String?) async -> Bool { false }
+
+    public func deleteLogArchive(archiveId: String) async {}
 
     public func clearPersistedLogs() async {}
 

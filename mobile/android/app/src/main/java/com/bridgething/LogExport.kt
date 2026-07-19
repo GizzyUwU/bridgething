@@ -18,14 +18,18 @@ import java.io.File
 public object LogExport {
     private const val AUTHORITY_SUFFIX = ".fileprovider"
 
-    /** Writes a fresh bundle and returns it. Overwrites nothing - each call is timestamped. */
-    public fun writeBundle(context: Context): File {
+    /**
+     * Writes a fresh bundle and returns it. Overwrites nothing - each call is
+     * timestamped. Passing an [archiveId] narrows it to that single launch.
+     */
+    public fun writeBundle(context: Context, archiveId: String? = null): File {
         val dir = File(context.applicationContext.cacheDir, "exports")
         dir.mkdirs()
         // one stale bundle per share is enough; drop older ones so the cache does not creep
         dir.listFiles { f: File -> f.name.startsWith("bridgething-logs-") }?.forEach { it.delete() }
         val stamp = android.text.format.DateFormat.format("yyyyMMdd-HHmmss", java.util.Date())
-        return LogStore.exportTo(File(dir, "bridgething-logs-$stamp.txt"))
+        val suffix = if (archiveId == null) "" else "-$archiveId"
+        return LogStore.exportTo(File(dir, "bridgething-logs$suffix-$stamp.txt"), archiveId)
     }
 
     /**

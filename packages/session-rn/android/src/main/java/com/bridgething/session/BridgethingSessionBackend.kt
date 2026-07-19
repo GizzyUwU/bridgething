@@ -12,6 +12,7 @@ import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
+import com.margelo.nitro.bridgething.session.BridgethingLogArchive
 import com.margelo.nitro.bridgething.session.BridgethingDocEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
@@ -40,8 +41,10 @@ public interface BridgethingSessionBackend {
     public suspend fun companionDebug(): BridgethingCompanionDebug
 
     public suspend fun persistedLogSize(): Double
-    public suspend fun exportLogs(): String
-    public suspend fun shareLogs(): Boolean
+    public suspend fun logArchives(): Array<BridgethingLogArchive>
+    public suspend fun exportLogs(archiveId: String?): String
+    public suspend fun shareLogs(archiveId: String?): Boolean
+    public suspend fun deleteLogArchive(archiveId: String)
     public suspend fun clearPersistedLogs()
 
     public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult

@@ -23,6 +23,7 @@ import com.margelo.nitro.bridgething.session.BridgethingDocEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMetaEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingHostInfo
+import com.margelo.nitro.bridgething.session.BridgethingLogArchive
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingPlayback
@@ -422,15 +423,34 @@ public class HybridBridgethingSessionImpl(
         LogStore.retainedBytes().toDouble()
     }
 
-    override suspend fun exportLogs(): String = withContext(Dispatchers.IO) {
-        LogExport.writeBundle(context).absolutePath
+    override suspend fun logArchives(): Array<BridgethingLogArchive> = withContext(Dispatchers.IO) {
+        LogStore.archives()
+            .map {
+                BridgethingLogArchive(
+                    id = it.id,
+                    startedAt = it.startedAtMs.toDouble(),
+                    bytes = it.bytes.toDouble(),
+                    pinned = it.pinned,
+                    current = it.current,
+                )
+            }
+            .toTypedArray()
     }
 
-    override suspend fun shareLogs(): Boolean {
+    override suspend fun exportLogs(archiveId: String?): String = withContext(Dispatchers.IO) {
+        LogExport.writeBundle(context, archiveId).absolutePath
+    }
+
+    override suspend fun shareLogs(archiveId: String?): Boolean {
         // the bundle write is IO, but startActivity has to run on the main thread
-        val file = withContext(Dispatchers.IO) { runCatching { LogExport.writeBundle(context) }.getOrNull() }
-            ?: return false
+        val file = withContext(Dispatchers.IO) {
+            runCatching { LogExport.writeBundle(context, archiveId) }.getOrNull()
+        } ?: return false
         return withContext(Dispatchers.Main) { LogExport.share(context, file) }
+    }
+
+    override suspend fun deleteLogArchive(archiveId: String): Unit = withContext(Dispatchers.IO) {
+        LogStore.delete(archiveId)
     }
 
     override suspend fun clearPersistedLogs(): Unit = withContext(Dispatchers.IO) { LogStore.clear() }

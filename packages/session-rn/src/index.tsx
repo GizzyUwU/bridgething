@@ -12,6 +12,7 @@ import type {
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
   BridgethingDocEntry,
+  BridgethingLogArchive,
   BridgethingNowPlaying,
   BridgethingOtaEvent,
   BridgethingOtaManifest,
@@ -46,6 +47,7 @@ export type {
   BridgethingDeviceMetaEntry,
   BridgethingDocEntry,
   BridgethingHostInfo,
+  BridgethingLogArchive,
   BridgethingNowPlaying,
   BridgethingNowPlayingPlayback,
   BridgethingNowPlayingTrack,
@@ -199,12 +201,20 @@ export class BridgethingSession {
     return this.native.persistedLogSize();
   }
 
-  async exportLogs(): Promise<string> {
-    return this.native.exportLogs();
+  async logArchives(): Promise<BridgethingLogArchive[]> {
+    return this.native.logArchives();
   }
 
-  async shareLogs(): Promise<boolean> {
-    return this.native.shareLogs();
+  async exportLogs(archiveId: string | null = null): Promise<string> {
+    return this.native.exportLogs(archiveId);
+  }
+
+  async shareLogs(archiveId: string | null = null): Promise<boolean> {
+    return this.native.shareLogs(archiveId);
+  }
+
+  async deleteLogArchive(archiveId: string): Promise<void> {
+    return this.native.deleteLogArchive(archiveId);
   }
 
   async clearPersistedLogs(): Promise<void> {

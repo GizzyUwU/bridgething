@@ -155,9 +155,21 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.persistedLogSize() ?: 0.0
     }
 
-    override fun exportLogs(): Promise<String> = Promise.async { require().exportLogs() }
+    override fun logArchives(): Promise<Array<BridgethingLogArchive>> = Promise.async {
+        backend?.logArchives() ?: emptyArray()
+    }
 
-    override fun shareLogs(): Promise<Boolean> = Promise.async { backend?.shareLogs() ?: false }
+    override fun exportLogs(archiveId: Variant_NullType_String?): Promise<String> = Promise.async {
+        require().exportLogs(unwrapString(archiveId))
+    }
+
+    override fun shareLogs(archiveId: Variant_NullType_String?): Promise<Boolean> = Promise.async {
+        backend?.shareLogs(unwrapString(archiveId)) ?: false
+    }
+
+    override fun deleteLogArchive(archiveId: String): Promise<Unit> = Promise.async {
+        backend?.deleteLogArchive(archiveId)
+    }
 
     override fun clearPersistedLogs(): Promise<Unit> = Promise.async { backend?.clearPersistedLogs() }
 

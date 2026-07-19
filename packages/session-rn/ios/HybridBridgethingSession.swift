@@ -17,8 +17,10 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func companionDebug() async -> BridgethingCompanionDebug
 
     func persistedLogSize() async -> Double
-    func exportLogs() async throws -> String
-    func shareLogs() async -> Bool
+    func logArchives() async -> [BridgethingLogArchive]
+    func exportLogs(archiveId: String?) async throws -> String
+    func shareLogs(archiveId: String?) async -> Bool
+    func deleteLogArchive(archiveId: String) async
     func clearPersistedLogs() async
 
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
@@ -263,15 +265,27 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func exportLogs() throws -> Promise<String> {
+    public func logArchives() throws -> Promise<[BridgethingLogArchive]> {
         Promise.async {
-            try await (try Self.backend()).exportLogs()
+            await (try Self.backend()).logArchives()
         }
     }
 
-    public func shareLogs() throws -> Promise<Bool> {
+    public func exportLogs(archiveId: String?) throws -> Promise<String> {
         Promise.async {
-            await (try Self.backend()).shareLogs()
+            try await (try Self.backend()).exportLogs(archiveId: archiveId)
+        }
+    }
+
+    public func shareLogs(archiveId: String?) throws -> Promise<Bool> {
+        Promise.async {
+            await (try Self.backend()).shareLogs(archiveId: archiveId)
+        }
+    }
+
+    public func deleteLogArchive(archiveId: String) throws -> Promise<Void> {
+        Promise.async {
+            await (try Self.backend()).deleteLogArchive(archiveId: archiveId)
         }
     }
 
