@@ -15,20 +15,6 @@ import com.bridgething.schema.PhoneCallStatus
 import com.bridgething.schema.PhoneState
 import java.util.UUID
 
-/**
- * Light-path telephony state machine for hosts that are NOT the default dialer. Fed by the
- * manifest-declared [PhoneStateReceiver] (runtime-registered receivers do not reliably get
- * `PHONE_STATE` on Android 14+; manifest receivers do - the same shape caller-ID apps use).
- * Lifts the live incoming number out of `EXTRA_INCOMING_NUMBER`, populated only while
- * `READ_CALL_LOG` is held. Emits the same per-call [PhoneOutEvent]s the InCallService does.
- *
- * Defers to the InCallService when the default-dialer / MANAGE_ONGOING_CALLS role IS held:
- * emission is gated on `PhoneBridgeRegistry.service == null`, so the two sources never double up.
- *
- * Broadcast state is phone-wide, so this tracks a single active call (no hold/swap/merge or
- * call-waiting - that fidelity is the opt-in dialer/companion role). Outgoing calls carry no
- * number in the broadcast.
- */
 public object PhoneStateTracker {
     private data class Tracked(
         val id: String,
@@ -42,12 +28,10 @@ public object PhoneStateTracker {
     @Volatile
     private var current: Tracked? = null
 
-    /** Snapshot for `stateGet()` when the InCallService is not bound. */
     public fun currentState(): PhoneState =
         PhoneState(activeCalls = current?.let { listOf(toWire(it)) } ?: emptyList())
 
     internal fun handle(state: String, number: String) {
-        // The dialer / companion role, if held, makes the InCallService authoritative; stay quiet.
         if (PhoneBridgeRegistry.service != null) return
 
         when (state) {
@@ -73,8 +57,6 @@ public object PhoneStateTracker {
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 val existing = current
                 if (existing == null) {
-                    // OFFHOOK with no prior RINGING = an outgoing call dialed on the phone;
-                    // the broadcast carries no number for outgoing legs.
                     val call = Tracked(
                         id = UUID.randomUUID().toString(),
                         remoteId = "",
@@ -127,7 +109,6 @@ public object PhoneStateTracker {
         conferenceGroup = null,
     )
 
-    /** Light-path capabilities: observe + answer/decline/end/initiate; no multi-call control. */
     private fun communications(): CommunicationsState = CommunicationsState(
         muteStatus = null,
         currentCallCount = (if (current != null) 1 else 0).toUByte(),
@@ -152,12 +133,6 @@ public object PhoneStateTracker {
     private const val TAG = "bridgething.phone"
 }
 
-/**
- * Manifest-declared `PHONE_STATE` receiver. Runtime-registered receivers do not reliably
- * receive this broadcast on Android 14+, so it lives in the manifest (merged into the host
- * app). Requires the host to hold `READ_PHONE_STATE` for delivery and `READ_CALL_LOG` for the
- * incoming number. Feeds [PhoneStateTracker].
- */
 public class PhoneStateReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context?, intent: Intent?) {
         if (intent?.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return

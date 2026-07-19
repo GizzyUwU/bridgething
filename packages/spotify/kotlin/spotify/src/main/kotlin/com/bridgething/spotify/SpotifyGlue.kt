@@ -479,8 +479,6 @@ class SpotifyGlue(
     private fun warmArt(result: BrowseResult) {
         for (id in collectArtIds(result.entries).toSet()) {
             val url = parseImageId(id)?.first ?: continue
-            // Best-effort prefetch: a network timeout here must not reach the
-            // default uncaught handler (SupervisorJob does not swallow it) and crash the app.
             scope.launch { runCatching { fetchMaster(url) } }
         }
     }

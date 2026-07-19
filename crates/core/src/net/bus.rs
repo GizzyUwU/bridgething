@@ -9,16 +9,6 @@ use uuid::Uuid;
 use super::{ClientMan, WSError, WSResult};
 use crate::stock::StockSendMsg;
 
-/// Cloneable typed event/command/request fan-out for the daemon.
-///
-/// Producers (PeerTracker, Player, TimeManager, TelephonyManager,
-/// CapabilitiesRegistry, Iap2EventRouter, &c.) hold this rather than
-/// `ClientMan` directly. The bus owns the chokepoint where wire events
-/// fan out to webapp connections.
-///
-/// Connection lifecycle (accept, mode change, complete_pending,
-/// stock-mode sends) stays on `ClientMan` and is driven from the daemon
-/// dispatch path, not from producers.
 #[derive(Debug, Clone)]
 pub struct WireEventBus {
   client_man: ClientMan,
@@ -29,8 +19,6 @@ impl WireEventBus {
     Self { client_man }
   }
 
-  /// Records which call dialect the stock webapp will be listening for. Kept in
-  /// step with the `phone_type` reported to the webapp on the stock connect bundle.
   pub fn set_stock_phone(&self, phone: crate::stock::StockDeviceType) {
     self.client_man.set_stock_phone(phone);
   }

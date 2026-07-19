@@ -29,7 +29,6 @@ import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Logs'>;
 
-/** Threshold filter: picking a level shows it and everything more severe. */
 const LEVELS = ['all', 'info', 'warn', 'error'] as const;
 type LevelFilter = (typeof LEVELS)[number];
 
@@ -40,7 +39,6 @@ const SEVERITY: Record<string, number> = {
   error: 3,
 };
 
-/** Past this scroll offset the list is no longer tailing and we stop auto-following. */
 const TAIL_SLOP_PX = 24;
 
 export function LogsScreen({}: Props) {
@@ -59,11 +57,6 @@ export function LogsScreen({}: Props) {
   const [archivesOpen, setArchivesOpen] = useState(false);
   const listRef = useRef<FlatList<DeviceLogLine>>(null);
 
-  /**
-   * Newest first, because the list renders inverted: that pins the newest line
-   * to the visual bottom for free and keeps position stable as lines arrive,
-   * instead of chasing the tail with scrollToEnd on every batch.
-   */
   const visible = useMemo(() => {
     const min = filter === 'all' ? -1 : SEVERITY[filter];
     const needle = query.trim().toLowerCase();
@@ -94,11 +87,6 @@ export function LogsScreen({}: Props) {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
-  /**
-   * Prefers the on-disk bundle (full logcat across the last few launches) and
-   * falls back to dumping the in-memory buffer as text on platforms that have
-   * no persistent store.
-   */
   const share = useCallback(async () => {
     try {
       if (await getSession().shareLogs()) return;
@@ -171,7 +159,10 @@ export function LogsScreen({}: Props) {
             active={localStreaming}
             onPress={() => setLocalStreaming(!localStreaming)}
           />
-          <ToolbarBtn icon={FolderClock} onPress={() => setArchivesOpen(true)} />
+          <ToolbarBtn
+            icon={FolderClock}
+            onPress={() => setArchivesOpen(true)}
+          />
           <ToolbarBtn icon={Share2} onPress={share} />
           <ToolbarBtn icon={Trash2} onPress={clearLogs} destructive />
         </View>
@@ -248,10 +239,6 @@ function renderRow({ item }: { item: DeviceLogLine }) {
   return <Row item={item} />;
 }
 
-/**
- * Memoized on the entry object, which the store never mutates in place, so a
- * new batch only renders the rows it actually added.
- */
 const Row = memo(function Row({ item }: { item: DeviceLogLine }) {
   const { tag, body } = splitTag(item.message);
   return (
@@ -320,7 +307,6 @@ function ToolbarBtn({
   );
 }
 
-/** Native formats lines as `[tag] message`; pull the tag out so it can sit in the meta row. */
 function splitTag(message: string): { tag: string | null; body: string } {
   const m = /^\[([^\]]{1,48})\]\s?([\s\S]*)$/.exec(message);
   return m ? { tag: m[1], body: m[2] } : { tag: null, body: message };

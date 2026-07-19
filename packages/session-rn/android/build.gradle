@@ -22,11 +22,6 @@ def isNewArchitectureEnabled() {
 apply plugin: "com.android.library"
 apply plugin: "org.jetbrains.kotlin.android"
 
-// `com.facebook.react` plugin wires in the react-android prefab + JNI
-// codegen path. Without it the prefab `find_package(ReactAndroid)` call
-// in nitrogen's autolinking.cmake can't resolve `hermestooling` because
-// the prefab artifact never gets extracted into the module's .cxx tree.
-// Mirror what react-native-mmkv does.
 if (isNewArchitectureEnabled()) {
   apply plugin: "com.facebook.react"
 }
@@ -42,9 +37,6 @@ android {
     minSdkVersion getExtOrDefault("minSdkVersion", 26).toInteger()
     targetSdkVersion getExtOrDefault("targetSdkVersion", 35).toInteger()
 
-    // Match the app's ABI set (reactNativeArchitectures); the library's native
-    // CMake would otherwise build every ABI the NDK supports, regardless of what
-    // the consuming app packages. Default arm64-v8a: arm32 is EOL, x86 emulator-only.
     ndk {
       abiFilters.addAll((findProperty("reactNativeArchitectures") ?: "arm64-v8a").toString().split(",").collect { it.trim() })
     }
@@ -52,9 +44,6 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
-        // ReactAndroid prefab requires libc++_shared (its .so links
-        // against it). Without explicit ANDROID_STL the NDK defaults
-        // to static and prefab rejects the import.
         arguments "-DANDROID_STL=c++_shared"
       }
     }

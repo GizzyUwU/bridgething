@@ -98,10 +98,6 @@ pub enum StockSendMsg {
 #[derive(Debug, Default)]
 pub struct StockCallSlot(std::sync::Mutex<Option<String>>);
 
-/// The connected peer's platform, as reported to the stock webapp at connect.
-/// The webapp routes call events to a per-platform store, so phone events have
-/// to be emitted in the matching dialect or they land in a store it never reads.
-/// Read on every stock translation, hence an atomic rather than a lock.
 #[derive(Debug, Default)]
 pub struct StockPeerPhone(std::sync::atomic::AtomicBool);
 

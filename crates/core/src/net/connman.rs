@@ -135,8 +135,6 @@ impl ClientManager {
     }
   }
 
-  /// Which call dialect the stock webapp is listening for. Set from the peer
-  /// connect path, which is what tells the webapp the phone type in the first place.
   pub fn set_stock_phone(&self, phone: StockDeviceType) {
     self.stock_phone.set(phone);
   }

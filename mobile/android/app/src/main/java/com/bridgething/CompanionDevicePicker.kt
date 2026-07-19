@@ -13,12 +13,6 @@ import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import java.util.regex.Pattern
 import kotlinx.coroutines.CompletableDeferred
 
-/**
- * CompanionDeviceManager-backed pair flow. CDM handles scan + pair +
- * permission prompts in one OS-managed surface, avoiding `BLUETOOTH_SCAN`
- * runtime grants and custom picker UI. The trade-off is requiring a
- * foreground Activity for CDM's `IntentSender` launch.
- */
 public object CompanionDevicePicker {
     private const val REQUEST_CDM_PICK = 0xBA01
 
@@ -45,16 +39,6 @@ public object CompanionDevicePicker {
                 } else {
                     @Suppress("DEPRECATION") data.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
                 }
-            // The one and only place a bond is started. Kicking it off straight
-            // off the user's selection, while we're foreground, is what makes
-            // Android show the pairing DIALOG - a bond triggered by a background
-            // RFCOMM connect only gets a tap-to-open notification, and a retry
-            // loop doing that produces one per attempt. Nothing else opens a
-            // socket to an unbonded device any more, so this is the sole trigger.
-            //
-            // Open the pairing window first: it tells BondWatcher that the Car
-            // Thing's BOND_NONE dips over the next couple of minutes are pairing
-            // noise, not an unpair.
             device?.let {
                 if (it.bondState != BluetoothDevice.BOND_BONDED) {
                     BondWatcher.beginPairing(it.address)
@@ -71,11 +55,6 @@ public object CompanionDevicePicker {
                     .build()
             )
             .setSingleDevice(false)
-        // The WATCH companion profile grants the phone / call-log / contacts / notifications /
-        // MANAGE_ONGOING_CALLS bundle via the companion role in a single consent. On Android 12+
-        // a role-less association CANNOT receive PHONE_STATE or the caller number, so this is what
-        // makes incoming-call display (and companion DTMF) work without claiming the default-dialer
-        // role. DEVICE_PROFILE_WATCH is fully public; the method itself is API 31+.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             builder.setDeviceProfile(AssociationRequest.DEVICE_PROFILE_WATCH)
         }
@@ -105,10 +84,6 @@ public object CompanionDevicePicker {
         return deferred.await()
     }
 
-    /**
-     * MAC addresses the user has authorized via CDM for this app. Used
-     * at session start to reopen RFCOMM sockets without prompting again.
-     */
     public fun associations(context: Context): Set<String> {
         val manager = context.applicationContext
             .getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager
@@ -122,12 +97,6 @@ public object CompanionDevicePicker {
         } catch (_: Throwable) { emptySet() }
     }
 
-    /**
-     * Ask the system to bind our [BridgethingPresenceService] when an associated
-     * Car Thing comes into BT range, so the app wakes from cold and reconnects
-     * without the user opening it. API 31+ only; older versions rely on the app
-     * being opened to start the connection service.
-     */
     public fun startObservingPresence(context: Context) {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
         val manager = context.applicationContext
@@ -140,10 +109,6 @@ public object CompanionDevicePicker {
         }
     }
 
-    /**
-     * Forget an associated Car Thing: stop observing its presence and disassociate it so the OS no longer
-     * wakes us for it and `associations()` no longer returns it.
-     */
     public fun forget(context: Context, mac: String) {
         val manager = context.applicationContext
             .getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager ?: return
@@ -165,10 +130,6 @@ public object CompanionDevicePicker {
         runCatching { @Suppress("DEPRECATION") manager.stopObservingDevicePresence(mac) }
     }
 
-    /**
-     * Wait for the bond [pick] started to land, so the pair flow can report a real
-     * outcome instead of guessing. Returns false if it failed or timed out.
-     */
     public suspend fun awaitBond(context: Context, mac: String): Boolean {
         val ba = (context.applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)
             ?.adapter ?: return false

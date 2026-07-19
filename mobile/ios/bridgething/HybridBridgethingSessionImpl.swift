@@ -364,9 +364,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    // Persistent log capture is Android-only for now: the logcat-backed store
-    // has no iOS counterpart, so these report "nothing retained" rather than
-    // pretending to have a bundle to hand over.
     public func persistedLogSize() async -> Double { 0 }
 
     public func logArchives() async -> [BridgethingLogArchive] { [] }

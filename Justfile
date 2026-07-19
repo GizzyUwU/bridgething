@@ -90,10 +90,7 @@ test-device:
 
 # --- Device iteration ---
 
-# Check out vendored submodules. swupdate's IPC sources are a submodule, and a
-# plain clone leaves them empty - the cross image then COPYs an empty directory
-# and dies on "ipc/network_ipc.c: No such file or directory", which reads like a
-# broken Dockerfile rather than a missing checkout.
+# check out vendored submodules; a plain clone leaves swupdate's ipc sources empty and the cross image build dies
 submodules:
   git submodule update --init --recursive
 

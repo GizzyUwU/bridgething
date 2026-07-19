@@ -271,15 +271,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func exportLogs(archiveId: String?) throws -> Promise<String> {
+    public func exportLogs(archiveId: Variant_NullType_String?) throws -> Promise<String> {
         Promise.async {
-            try await (try Self.backend()).exportLogs(archiveId: archiveId)
+            try await (try Self.backend()).exportLogs(archiveId: Self.unwrapString(archiveId))
         }
     }
 
-    public func shareLogs(archiveId: String?) throws -> Promise<Bool> {
+    public func shareLogs(archiveId: Variant_NullType_String?) throws -> Promise<Bool> {
         Promise.async {
-            await (try Self.backend()).shareLogs(archiveId: archiveId)
+            await (try Self.backend()).shareLogs(archiveId: Self.unwrapString(archiveId))
         }
     }
 

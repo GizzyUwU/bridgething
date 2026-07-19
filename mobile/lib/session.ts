@@ -263,9 +263,6 @@ export async function runPairFlow(): Promise<PairOutcome> {
       if (bt !== 'granted') return { kind: 'permissionDenied' };
       const picked = await getSession().presentPairPicker();
       if (picked == null) return { kind: 'cancelled' };
-      // Android resolves this only once the bond has actually landed or failed.
-      // A failed bond needs a deliberate retry - we never silently re-pair, since
-      // that is what used to stack up duplicate system pairing dialogs.
       if (picked.bondState !== 'bonded') return { kind: 'pairingFailed' };
       return (await waitForPeer(45000))
         ? { kind: 'connected' }

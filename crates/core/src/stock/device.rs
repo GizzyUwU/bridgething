@@ -66,9 +66,6 @@ pub enum StockPhoneCallSend {
   },
 }
 
-/// The stock webapp keeps a separate call store per phone platform and picks
-/// between them on the `phone_type` we report at connect. The iOS store reads
-/// `phone_call_info` (above); the Android store only ever reads this message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "payload")]
 pub enum StockLegacyPhoneCallSend {
@@ -80,9 +77,6 @@ pub enum StockLegacyPhoneCallSend {
   },
 }
 
-/// The Android store's whole vocabulary. It has no outgoing-call state at all
-/// (`isRingingOutgoing` is hardcoded false), so an outgoing call stays hidden
-/// until it goes `Active` and lands on `Offhook`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StockLegacyPhoneCallState {

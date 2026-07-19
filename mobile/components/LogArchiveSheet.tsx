@@ -8,11 +8,6 @@ import { Button } from './Button';
 import { Press } from './Press';
 import { Sheet } from './Sheet';
 
-/**
- * Browser for the on-disk log launches. Each row is one app launch; the store
- * keeps the last few plus any that recorded an error, so this is where a user
- * picks the run that actually went wrong instead of exporting the lot.
- */
 export function LogArchiveSheet({
   visible,
   onClose,
@@ -20,10 +15,11 @@ export function LogArchiveSheet({
 }: {
   visible: boolean;
   onClose: () => void;
-  /** Fired after a delete so the caller can refresh its on-disk size readout. */
   onChanged?: () => void;
 }) {
-  const [archives, setArchives] = useState<BridgethingLogArchive[] | null>(null);
+  const [archives, setArchives] = useState<BridgethingLogArchive[] | null>(
+    null,
+  );
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -44,9 +40,16 @@ export function LogArchiveSheet({
     setBusy(archive.id);
     try {
       const ok = await getSession().shareLogs(archive.id);
-      if (!ok) Alert.alert('Share failed', 'No app was available to receive the log file.');
+      if (!ok)
+        Alert.alert(
+          'Share failed',
+          'No app was available to receive the log file.',
+        );
     } catch (err) {
-      Alert.alert('Share failed', err instanceof Error ? err.message : String(err));
+      Alert.alert(
+        'Share failed',
+        err instanceof Error ? err.message : String(err),
+      );
     } finally {
       setBusy(null);
     }
@@ -157,7 +160,11 @@ export function LogArchiveSheet({
                     hitSlop={8}
                     className="rounded-full bg-destructive-soft p-2"
                   >
-                    <Trash2 size={14} color="hsl(0 72% 50%)" strokeWidth={2.4} />
+                    <Trash2
+                      size={14}
+                      color="hsl(0 72% 50%)"
+                      strokeWidth={2.4}
+                    />
                   </Press>
                 </>
               )}

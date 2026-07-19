@@ -23,12 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Process-wide owner of the one live [BridgethingCompanion]. The foreground
- * connection service and the RN session module both reach it through here, so
- * the bluetooth link survives the UI being swiped away. Built once per process;
- * never torn down on device-disappear (idles with no peer instead).
- */
 public object CompanionHolder {
     private const val TAG = "BridgethingBT"
     private val mutex = Mutex()
@@ -83,18 +77,6 @@ public object CompanionHolder {
         c
     }
 
-    /**
-     * Reconnect every associated device that is actually bonded.
-     *
-     * Unbonded associations are skipped rather than connected: a CDM association
-     * outlives its BT bond, and connecting RFCOMM to an unbonded peer is how
-     * Android starts pairing - which is what made reconnects re-pair in the
-     * background. If such a device ever bonds again, [BondWatcher] connects it.
-     *
-     * Safe to call concurrently and repeatedly (the foreground service restarts,
-     * CDM presence wakeups and the pair flow all land here); the adapter folds
-     * concurrent connects for one device into a single attempt.
-     */
     public fun reconnectAssociated(context: Context) {
         val transport = adapter
         if (transport == null) {
@@ -109,10 +91,6 @@ public object CompanionHolder {
         val macs = CompanionDevicePicker.associations(context.applicationContext)
         Log.i(TAG, "reconnectAssociated: ${macs.size} association(s) $macs")
         for (mac in macs) {
-            // CDM hands back lowercase MACs (MacAddress.toString()), but
-            // BluetoothAdapter.getRemoteDevice rejects anything but uppercase
-            // with IllegalArgumentException. Normalize or the connect silently
-            // never happens.
             val device = runCatching { ba.getRemoteDevice(mac.uppercase()) }.getOrNull()
             if (device == null) {
                 Log.w(TAG, "reconnectAssociated: getRemoteDevice($mac) failed")
@@ -131,7 +109,6 @@ public object CompanionHolder {
         }
     }
 
-    /** Bring up a peer that just reached BOND_BONDED. Called by [BondWatcher]. */
     public suspend fun connectBonded(context: Context, device: BluetoothDevice) {
         if (adapter == null) runCatching { ensureStarted(context) }
         val transport = adapter ?: run {
@@ -143,7 +120,6 @@ public object CompanionHolder {
             .onFailure { Log.w(TAG, "connectBonded: connect(${device.address}) failed: ${it.message}") }
     }
 
-    /** Stop tracking a peer that lost its bond, so nothing reconnects (or re-pairs) to it. */
     public suspend fun forgetDevice(mac: String) {
         val transport = adapter ?: return
         runCatching { transport.forget(mac.uppercase()) }
@@ -153,11 +129,6 @@ public object CompanionHolder {
     private fun ensureLifecycleObserver(app: Application) {
         if (lifecycleRegistered) return
         lifecycleRegistered = true
-        // The companion is usually created while the activity is already
-        // resumed, so the first onActivityStarted fired before we registered
-        // and would be missed - leaving `foreground` stuck false until the next
-        // app switch, which silently drops every foreground-gated event (auth,
-        // peer, catalog, ...) on first launch. Seed from the current activity.
         if (BridgethingActivityRegistry.currentActivity != null) {
             startedActivities = 1
             foreground = true

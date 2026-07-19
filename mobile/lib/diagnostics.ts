@@ -27,13 +27,6 @@ type DiagState = {
 };
 
 let logCounter = 0;
-
-/**
- * Lines arrive one per native callback and a busy logcat stream can emit
- * hundreds a second. Committing each one to the store would rebuild the array
- * and re-render the list every time, so arrivals accumulate here and land in a
- * single set() per frame-ish interval instead.
- */
 const FLUSH_MS = 120;
 let pending: DeviceLogLine[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -47,7 +40,9 @@ function flushPending(): void {
     const merged = s.deviceLogs.concat(batch);
     return {
       deviceLogs:
-        merged.length > LOG_LIMIT ? merged.slice(merged.length - LOG_LIMIT) : merged,
+        merged.length > LOG_LIMIT
+          ? merged.slice(merged.length - LOG_LIMIT)
+          : merged,
     };
   });
 }
@@ -73,13 +68,12 @@ export const useDiagnosticsStore = create<DiagState>((set, get) => ({
     const s = get();
     if (!s.deviceLogStreaming && !s.localLogStreaming) return;
     pending.push({ id: `l${logCounter++}`, ts: Date.now(), level, message });
-    // a burst larger than the buffer can only be tail-relevant
-    if (pending.length > LOG_LIMIT) pending.splice(0, pending.length - LOG_LIMIT);
+    if (pending.length > LOG_LIMIT)
+      pending.splice(0, pending.length - LOG_LIMIT);
     scheduleFlush();
   },
 
   seedDeviceLogs: lines => {
-    // a seed replaces the buffer wholesale; anything queued is already stale
     dropPending();
     const mapped = lines.map(l => ({
       id: `s${l.seq}`,
