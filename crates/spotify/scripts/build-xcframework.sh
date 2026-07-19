@@ -26,6 +26,8 @@ HDRS="$WORK/headers"
 
 echo "== rustup targets =="
 rustup target add "$DEVICE" "$SIM_ARM" "$SIM_X86" "$MAC_ARM" "$MAC_X86" >/dev/null
+rustup component add llvm-tools >/dev/null 2>&1 || true
+OBJCOPY="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/rust-objcopy"
 
 echo "== generate swift bindings =="
 cargo build -q -p spotify --lib
@@ -42,6 +44,7 @@ export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export MACOSX_DEPLOYMENT_TARGET=15.0
 for t in "$DEVICE" "$SIM_ARM" "$SIM_X86" "$MAC_ARM" "$MAC_X86"; do
   cargo rustc -q -p spotify --lib --crate-type staticlib --"$PROFILE" --target "$t"
+  "$OBJCOPY" --remove-section=__TEXT,__eh_frame --remove-section=__LD,__compact_unwind "target/$t/$PROFILE/$LIB"
 done
 
 echo "== lipo simulator + macos arches =="

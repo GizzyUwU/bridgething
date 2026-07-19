@@ -3697,12 +3697,6 @@ public func FfiConverterTypeRepeatMode_lower(_ value: RepeatMode) -> RustBuffer 
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * why the platform is being asked to wake the phone's spotify. user-initiated
- * wakes must always fire; connect-resume wakes may be suppressed by the platform
- * (ios skips them while the companion app is foreground so an iap2 app-launch
- * never yanks the user out of the app mid-pairing).
- */
 
 public enum WakeReason: Equatable, Hashable {
     

@@ -26,7 +26,6 @@ let package = Package(
         .linkedFramework("SystemConfiguration"),
         .linkedFramework("Security"),
         .linkedFramework("CoreFoundation"),
-        .unsafeFlags(["-Xlinker", "-no_compact_unwind"]),
       ]
     ),
     .target(
