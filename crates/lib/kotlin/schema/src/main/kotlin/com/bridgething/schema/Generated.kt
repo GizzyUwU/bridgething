@@ -410,8 +410,6 @@ enum class MusicProvider(val string: String) {
 	Spotify("spotify"),
 	@SerialName("appleMusic")
 	AppleMusic("appleMusic"),
-	@SerialName("tidal")
-	Tidal("tidal"),
 }
 
 /// What the daemon advertises to webapps. `gateway: None` means no

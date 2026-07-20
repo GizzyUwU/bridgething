@@ -507,7 +507,7 @@ export type MediaType = 'music' | 'podcast' | 'audioBook';
  * Which music service the companion is currently logged into and
  * driving on behalf of the user. `None` when no glue is attached.
  */
-export type MusicProvider = 'none' | 'spotify' | 'appleMusic' | 'tidal';
+export type MusicProvider = 'none' | 'spotify' | 'appleMusic';
 
 export type NetError =
   | { type: 'requestFailed'; data: { reason: string } }

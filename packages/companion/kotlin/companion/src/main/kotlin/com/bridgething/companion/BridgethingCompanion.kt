@@ -653,7 +653,8 @@ public class BridgethingCompanion(
 
     private suspend fun handleAsset(handle: AssetRequestHandle, req: AssetRequest) {
         val bytes: AssetBytes? = try {
-            activeGlue?.asset(req.id)
+            if (req.id.startsWith(SystemMediaSource.ASSET_ID_PREFIX)) systemMediaSource.asset(req.id)
+            else activeGlue?.asset(req.id)
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "asset ${req.id} glue resolve failed: ${e.message ?: e.toString()}")
             runCatching { handle.respondErr(AssetNotFoundReply(id = req.id)) }
@@ -838,6 +839,10 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleFavoritesToggle(msg: FavoritesToggle) {
+        if (systemMediaSource.owns(msg.item.uri)) {
+            systemMediaSource.toggleLiked()
+            return
+        }
         val glue = activeGlue ?: return
         try {
             glue.favoritesToggle(msg.item)
@@ -847,6 +852,10 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleFavoritesSet(msg: FavoritesSet) {
+        if (systemMediaSource.owns(msg.item.uri)) {
+            systemMediaSource.setLiked(msg.liked)
+            return
+        }
         val glue = activeGlue ?: return
         try {
             glue.favoritesSet(msg.item, msg.liked)

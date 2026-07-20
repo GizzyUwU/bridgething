@@ -83,7 +83,6 @@ pub enum MusicProvider {
   None,
   Spotify,
   AppleMusic,
-  Tidal,
 }
 
 /// One TTS voice the companion's audio backend can speak as. `id` is

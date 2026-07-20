@@ -11,15 +11,8 @@ import com.bridgething.companion.HostInfo
 import com.bridgething.lyrics.LrclibResolver
 import com.bridgething.spotify.AndroidConnectivityWatcher
 import com.bridgething.spotify.SpotifyGlue
-import com.bridgething.tidal.TidalGlue
 import uniffi.spotify.TokenStore as SpTokenStore
 
-/**
- * Wires the Nitro session module's static registry and installs the real
- * session backend before React Native starts. Each provider registration
- * carries a factory closure that produces a fresh glue plus a `signOut`
- * hook that clears persisted credentials.
- */
 public object BridgethingApp {
     public const val APP_NAME: String = "bridgething"
     public const val SPOTIFY_PROVIDER_ID: String = "spotify"
@@ -57,13 +50,6 @@ public object BridgethingApp {
                 factory = { AppleMusicGlue() },
                 signOut = {},
             ),
-            HybridBridgethingSessionImpl.ProviderRegistration(
-                id = "tidal",
-                displayName = "Tidal",
-                available = false,
-                factory = { TidalGlue() },
-                signOut = {},
-            ),
         )
 
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(app))
@@ -85,10 +71,6 @@ public object BridgethingApp {
         )
 }
 
-/**
- * EncryptedSharedPreferences token store: the rotating carthing refresh token
- * + the resolved canonical username + a stable connect/dealer device id.
- */
 private class SpotifyKeychainStore(context: Context) : SpTokenStore {
     private val prefs: SharedPreferences? by lazy {
         try {
@@ -118,7 +100,6 @@ private class SpotifyKeychainStore(context: Context) : SpTokenStore {
         prefs?.edit()?.remove("refresh")?.remove("username")?.apply()
     }
 
-    /** a stable 40-hex device id, generated once and persisted (ephemeral if the store is down). */
     fun deviceId(): String {
         prefs?.getString("device_id", null)?.let { return it }
         val bytes = ByteArray(20)

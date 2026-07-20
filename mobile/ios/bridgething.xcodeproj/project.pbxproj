@@ -32,7 +32,6 @@
 		C90677CED5F4F396FA808345 /* BridgethingSpotifyGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */; };
 		CC51CD1356EF4F9EAF2251BF /* Outfit-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2C29232EA11541098B55B62E /* Outfit-Bold.ttf */; };
 		D493A3B12FAEC981004E66E2 /* bridgething.icon in Resources */ = {isa = PBXBuildFile; fileRef = D493A3B02FAEC981004E66E2 /* bridgething.icon */; };
-		ED6C51592E60E3F272DF62BC /* BridgethingTidalGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 951DEFFC70F323C14864A561 /* BridgethingTidalGlue */; };
 		F0CA64465D30B821F9715B12 /* BridgethingGateway in Frameworks */ = {isa = PBXBuildFile; productRef = 302CF909B3940CFB4BD61A29 /* BridgethingGateway */; };
 /* End PBXBuildFile section */
 
@@ -76,7 +75,6 @@
 				7429B03CA90D9A8E71D3DD4C /* BridgethingCompanion in Frameworks */,
 				C90677CED5F4F396FA808345 /* BridgethingSpotifyGlue in Frameworks */,
 				1B16E5853653557376728421 /* BridgethingAppleMusicGlue in Frameworks */,
-				ED6C51592E60E3F272DF62BC /* BridgethingTidalGlue in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -192,7 +190,6 @@
 				D924249BDDDFEA6D9511A03E /* BridgethingCompanion */,
 				7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */,
 				37EB35D1D6F792B888BCCF58 /* BridgethingAppleMusicGlue */,
-				951DEFFC70F323C14864A561 /* BridgethingTidalGlue */,
 			);
 			productName = bridgething;
 			productReference = 13B07F961A680F5B00A75B9A /* bridgething.app */;
@@ -643,11 +640,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */;
 			productName = BridgethingSpotifyGlue;
-		};
-		951DEFFC70F323C14864A561 /* BridgethingTidalGlue */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
-			productName = BridgethingTidalGlue;
 		};
 		D924249BDDDFEA6D9511A03E /* BridgethingCompanion */ = {
 			isa = XCSwiftPackageProductDependency;

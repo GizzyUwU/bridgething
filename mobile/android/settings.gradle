@@ -8,7 +8,6 @@ pluginManagement {
 }
 plugins {
   id("com.facebook.react.settings")
-  // Auto-provisions JDK toolchains the kotlin packages declare (jvmToolchain(26)).
   id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
@@ -16,13 +15,6 @@ rootProject.name = 'bridgething'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
 
-// bridgething kotlin packages. Same colon paths as the root
-// settings.gradle.kts so each package's build.gradle.kts (which uses
-// e.g. project(":packages:glue:kotlin:glue")) resolves identically
-// whether built from root or from mobile/android. Intermediate paths
-// (`:packages`, `:packages:glue`, etc.) get explicit projectDir
-// overrides because gradle 9 requires every intermediate project to
-// resolve to a real directory.
 def repoRoot = file('../..')
 def setProj(path, dir) {
   include path
@@ -59,12 +51,3 @@ setProj(':packages:spotify:kotlin:spotify', "${repoRoot}/packages/spotify/kotlin
 setProj(':packages:apple-music', "${repoRoot}/packages/apple-music")
 setProj(':packages:apple-music:kotlin', "${repoRoot}/packages/apple-music/kotlin")
 setProj(':packages:apple-music:kotlin:apple-music', "${repoRoot}/packages/apple-music/kotlin/apple-music")
-
-setProj(':packages:tidal', "${repoRoot}/packages/tidal")
-setProj(':packages:tidal:kotlin', "${repoRoot}/packages/tidal/kotlin")
-setProj(':packages:tidal:kotlin:tidal', "${repoRoot}/packages/tidal/kotlin/tidal")
-
-// session-rn is autolinked by RN's CLI as :react-native-session-react-native
-// (read from `@bridgething/session-react-native` once the package.json
-// exports map exposes ./package.json and the config file is .cjs - bun
-// workspaces choked on both before the fix).

@@ -14,7 +14,6 @@ let package = Package(
     .library(name: "BridgethingGlue", targets: ["BridgethingGlue"]),
     .library(name: "BridgethingCompanion", targets: ["BridgethingCompanion"]),
     .library(name: "BridgethingAppleMusicGlue", targets: ["BridgethingAppleMusicGlue"]),
-    .library(name: "BridgethingTidalGlue", targets: ["BridgethingTidalGlue"]),
     .library(name: "BridgethingTestKit", targets: ["BridgethingTestKit"]),
   ],
   dependencies: [
@@ -85,11 +84,6 @@ let package = Package(
       name: "BridgethingAppleMusicGlue",
       dependencies: ["BridgethingGlue", "BridgethingGateway", "BridgethingSchema"],
       path: "packages/apple-music/swift/Sources/BridgethingAppleMusicGlue"
-    ),
-    .target(
-      name: "BridgethingTidalGlue",
-      dependencies: ["BridgethingGlue", "BridgethingGateway", "BridgethingSchema"],
-      path: "packages/tidal/swift/Sources/BridgethingTidalGlue"
     ),
   ]
 )

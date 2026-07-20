@@ -1,5 +1,5 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.3",
   "surfaces": [
     {
       "name": "asset",
@@ -3075,9 +3075,6 @@
         },
         {
           "name": "AppleMusic"
-        },
-        {
-          "name": "Tidal"
         }
       ]
     },

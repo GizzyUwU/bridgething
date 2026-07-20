@@ -115,8 +115,12 @@ const actions: Record<string, () => void> = {
   'call-active': () => callUpdated.emit(call('active')),
   'call-held': () => callUpdated.emit(call('held')),
   'call-end': () => callEnded.emit(call('disconnected')),
-  'toast-msg': () => posted.emit(notification('Messages', 'com.apple.MobileSMS', 'Sam Rivera', 'leaving now, see you in 10')),
-  'toast-discord': () => posted.emit(notification('Discord', 'com.hammerandchisel.discord', '#superbird', 'new OTA is up on the dev channel')),
+  'toast-msg': () =>
+    posted.emit(notification('Messages', 'com.apple.MobileSMS', 'Sam Rivera', 'leaving now, see you in 10')),
+  'toast-discord': () =>
+    posted.emit(
+      notification('Discord', 'com.hammerandchisel.discord', '#superbird', 'new OTA is up on the dev channel'),
+    ),
   'toast-long': () =>
     posted.emit(
       notification(

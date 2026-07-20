@@ -770,7 +770,6 @@ public enum MusicProvider: String, Codable, Sendable {
 	case none
 	case spotify
 	case appleMusic
-	case tidal
 }
 
 /// What the daemon advertises to webapps. `gateway: None` means no

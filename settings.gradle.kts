@@ -7,8 +7,6 @@ pluginManagement {
 }
 
 plugins {
-  // Auto-downloads JDK toolchains the kotlin modules declare via
-  // jvmToolchain(...) when the host machine doesn't have a matching JDK.
   id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
@@ -28,9 +26,6 @@ project(":packages:spotify:kotlin:spotify").projectDir = file("packages/spotify/
 
 include(":packages:apple-music:kotlin:apple-music")
 project(":packages:apple-music:kotlin:apple-music").projectDir = file("packages/apple-music/kotlin/apple-music")
-
-include(":packages:tidal:kotlin:tidal")
-project(":packages:tidal:kotlin:tidal").projectDir = file("packages/tidal/kotlin/tidal")
 
 include(":packages:lyrics:kotlin:lyrics")
 project(":packages:lyrics:kotlin:lyrics").projectDir = file("packages/lyrics/kotlin/lyrics")

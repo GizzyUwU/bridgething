@@ -3,11 +3,8 @@ import BridgethingCompanion
 import BridgethingLyrics
 import BridgethingSession
 import BridgethingSpotifyGlue
-import BridgethingTidalGlue
 import Foundation
 
-/// Populates the static provider registry and installs the session backend.
-/// Call from `application(_:didFinishLaunchingWithOptions:)` before React Native starts.
 enum BridgethingApp {
     static let appName: String = "bridgething"
     static var appVersion: String {
@@ -40,13 +37,6 @@ enum BridgethingApp {
                 displayName: AppleMusicGlue.displayName,
                 available: false,
                 factory: { AppleMusicGlue() },
-                signOut: {}
-            ),
-            HybridBridgethingSessionImpl.ProviderRegistration(
-                id: TidalGlue.name,
-                displayName: TidalGlue.displayName,
-                available: false,
-                factory: { TidalGlue() },
                 signOut: {}
             ),
         ]

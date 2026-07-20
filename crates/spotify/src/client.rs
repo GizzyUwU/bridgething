@@ -840,7 +840,10 @@ impl SpotifyClient {
     if !self.fire_waker(WakeReason::ConnectResume) {
       return Ok(());
     }
-    if tokio::time::timeout(CONNECT_RESUME_WAKE_TIMEOUT, changed).await.is_err() {
+    if tokio::time::timeout(CONNECT_RESUME_WAKE_TIMEOUT, changed)
+      .await
+      .is_err()
+    {
       tracing::warn!("connect resume: no cluster update after wake; standing down");
       return Ok(());
     }
@@ -848,7 +851,14 @@ impl SpotifyClient {
       tracing::info!("connect resume: the wake resumed playback on its own");
       return Ok(());
     }
-    let phone = match self.shared.cluster.lock().await.as_ref().and_then(|c| phone_device(c, &me)) {
+    let phone = match self
+      .shared
+      .cluster
+      .lock()
+      .await
+      .as_ref()
+      .and_then(|c| phone_device(c, &me))
+    {
       Some(p) => p,
       None => {
         tracing::warn!("connect resume: no phone in the cluster after wake; standing down");
@@ -1920,7 +1930,11 @@ mod tests {
     )
     .await;
     r.client.resume_on_connect().await.unwrap();
-    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "unconfirmed resume escalates to a wake");
+    assert_eq!(
+      r.wake_calls.load(Ordering::SeqCst),
+      1,
+      "unconfirmed resume escalates to a wake"
+    );
     assert_eq!(*r.wake_reasons.lock().unwrap(), [WakeReason::ConnectResume]);
     assert_eq!(
       resume_targets(&r.hits),
@@ -1992,7 +2006,11 @@ mod tests {
     )
     .await;
     r.client.resume_on_connect().await.unwrap();
-    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "exactly one wake per connect resume");
+    assert_eq!(
+      r.wake_calls.load(Ordering::SeqCst),
+      1,
+      "exactly one wake per connect resume"
+    );
     assert_eq!(resume_targets(&r.hits), ["phone-1"]);
   }
 

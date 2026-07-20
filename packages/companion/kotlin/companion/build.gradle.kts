@@ -42,8 +42,7 @@ dependencies {
   api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
   api("com.squareup.okhttp3:okhttp:4.12.0")
   api("androidx.core:core-ktx:1.13.1")
-  // loaded reflectively so the companion works on degoogled devices; compileOnly so the
-  // host app decides whether to ship it.
+  api("androidx.media:media:1.8.0")
   compileOnly("com.google.android.gms:play-services-location:21.3.0")
   testImplementation(project(":packages:spotify:kotlin:spotify"))
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
@@ -54,7 +53,6 @@ dependencies {
   androidTestImplementation("androidx.test:core-ktx:1.6.1")
 }
 
-// JUnit Platform applies to JVM unit tests only; instrumented tests use AndroidJUnitRunner.
 tasks.withType<Test>().configureEach {
   useJUnitPlatform()
 }

@@ -59,7 +59,8 @@ enum StockImageReply {
 }
 
 async fn stock_image_reply(stock: &mut MockWsClient, id: &str, msg_id: u64, timeout: Duration) -> StockImageReply {
-  let req = format!(r#"{{"msgId":{msg_id},"method":"com.spotify.get_image","args":{{"id":"{id}"}},"userAction":false}}"#);
+  let req =
+    format!(r#"{{"msgId":{msg_id},"method":"com.spotify.get_image","args":{{"id":"{id}"}},"userAction":false}}"#);
   stock.send_text(req).await.expect("send get_image");
   let deadline = tokio::time::Instant::now() + timeout;
   loop {

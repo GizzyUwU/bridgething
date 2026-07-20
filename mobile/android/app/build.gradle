@@ -70,7 +70,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2
-        versionName "0.2.3"
+        versionName "0.2.4"
 
         manifestPlaceholders = [appAuthRedirectScheme: 'bridgething']
 
@@ -120,7 +120,6 @@ dependencies {
     implementation project(":packages:lyrics:kotlin:lyrics")
     implementation project(":packages:spotify:kotlin:spotify")
     implementation project(":packages:apple-music:kotlin:apple-music")
-    implementation project(":packages:tidal:kotlin:tidal")
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "androidx.security:security-crypto:1.1.0"
     implementation "androidx.core:core:1.17.0"
