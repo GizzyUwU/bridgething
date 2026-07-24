@@ -1,0 +1,59 @@
+#!/bin/sh
+# grants the current terminal app media & apple music access so the live musickit tests
+# (BRIDGETHING_APPLEMUSIC_LIVE=1 swift test --filter AppleMusicLive) can run.
+#
+# macos kills any process that PROMPTS for this service while a gui terminal is the
+# responsible process (the terminal's Info.plist lacks NSAppleMusicUsageDescription and
+# an embedded __info_plist section on the requesting binary is ignored), so the prompt
+# path can never mint this grant. instead this writes the allow row into the user tcc
+# database directly, which needs the terminal to have full disk access.
+# undo with: tccutil reset MediaLibrary <terminal-bundle-id>
+set -eu
+
+client=${__CFBundleIdentifier:-}
+if [ -z "$client" ]; then
+    echo "cannot determine the terminal's bundle id (__CFBundleIdentifier unset)" >&2
+    exit 1
+fi
+
+db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+if ! sqlite3 "$db" "select 1;" >/dev/null 2>&1; then
+    echo "cannot open the user tcc database; give $client full disk access first" >&2
+    exit 1
+fi
+
+sqlite3 "$db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, indirect_object_identifier, flags, boot_uuid) VALUES ('kTCCServiceMediaLibrary', '$client', 0, 2, 4, 1, NULL, 'UNUSED', 0, 'UNUSED');"
+killall tccd 2>/dev/null || true
+echo "granted media library access to $client"
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+
+cat > "$workdir/probe.swift" <<'SWIFT'
+import Foundation
+import MusicKit
+
+@main
+enum Probe {
+    static func main() async {
+        let status = MusicAuthorization.currentStatus
+        print("media library authorization: \(status)")
+        guard status == .authorized else { exit(1) }
+        do {
+            var request = MusicLibraryRequest<Playlist>()
+            request.limit = 1
+            let response = try await request.response()
+            print("library reachable (sample playlist count: \(response.items.count))")
+            if response.items.isEmpty {
+                print("note: the mac music library looks empty; enable Sync Library in Music.app for full live-test coverage")
+            }
+        } catch {
+            print("authorized, but library probe failed: \(error)")
+            exit(1)
+        }
+    }
+}
+SWIFT
+
+swiftc -parse-as-library "$workdir/probe.swift" -o "$workdir/probe" -framework MusicKit
+"$workdir/probe"

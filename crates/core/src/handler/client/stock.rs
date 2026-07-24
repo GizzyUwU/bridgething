@@ -693,16 +693,15 @@ fn limit_to_u32(limit: usize) -> u32 {
 }
 
 fn art_id_with_edge(id: &str, edge: u32) -> String {
-  let Some(rest) = id.strip_prefix("spotify/img/") else {
+  let mut parts = id.splitn(4, '/');
+  let (Some(ns), Some("img"), Some(old_edge), Some(rest)) = (parts.next(), parts.next(), parts.next(), parts.next())
+  else {
     return id.to_string();
   };
-  let Some(slash) = rest.find('/') else {
-    return id.to_string();
-  };
-  if rest[..slash].parse::<u32>().is_err() {
+  if old_edge.parse::<u32>().is_err() {
     return id.to_string();
   }
-  format!("spotify/img/{edge}/{}", &rest[slash + 1..])
+  format!("{ns}/img/{edge}/{rest}")
 }
 
 fn offset_to_u32(offset: Option<usize>) -> u32 {
@@ -942,6 +941,10 @@ mod tests {
     assert_eq!(
       art_id_with_edge("spotify/img/248/uhttps%3A%2F%2Fx", 96),
       "spotify/img/96/uhttps%3A%2F%2Fx"
+    );
+    assert_eq!(
+      art_id_with_edge("applemusic/img/248/umusicKit%3A%2F%2Fartwork%2Fx", 96),
+      "applemusic/img/96/umusicKit%3A%2F%2Fartwork%2Fx"
     );
   }
 

@@ -551,9 +551,16 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
 
     // MARK: - assets
 
+    func artSession(for url: URL) -> URLSession {
+        switch url.scheme?.lowercased() {
+        case "http", "https": urlSession
+        default: .shared
+        }
+    }
+
     public func asset(id: String) async throws -> AssetBytes? {
         guard let parsed = imageCodec.parse(id) else { return nil }
-        let (data, _) = try await urlSession.data(from: parsed.url)
+        let (data, _) = try await artSession(for: parsed.url).data(from: parsed.url)
         return autoreleasepool {
             ArtImage.downsampleJpeg(data, maxEdge: parsed.maxEdge).map { AssetBytes(bytes: $0, mime: "image/jpeg") }
         }
@@ -562,7 +569,8 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
     private func warmArt(in result: BrowseResult) {
         for id in Set(collectArtIds(result.entries)) {
             guard let parsed = imageCodec.parse(id) else { continue }
-            Task { [urlSession] in _ = try? await urlSession.data(from: parsed.url) }
+            let session = artSession(for: parsed.url)
+            Task { _ = try? await session.data(from: parsed.url) }
         }
     }
 

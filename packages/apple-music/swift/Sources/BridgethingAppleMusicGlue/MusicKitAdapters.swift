@@ -1,17 +1,19 @@
 import Foundation
 import os
 
-#if canImport(MusicKit) && os(iOS)
-    import AVFAudio
+#if canImport(MusicKit)
     import Combine
     import MusicKit
+#endif
+#if os(iOS)
+    import AVFAudio
 #endif
 
 private let adapterLog = Logger(subsystem: "com.bridgething.applemusic", category: "musickit")
 
 extension AppleMusicGlue {
     static func defaultAuth() -> any AppleMusicAuthProviding {
-        #if canImport(MusicKit) && os(iOS)
+        #if canImport(MusicKit)
             MusicKitAuth()
         #else
             UnavailableSeam()
@@ -27,7 +29,7 @@ extension AppleMusicGlue {
     }
 
     static func defaultLibrary() -> any AppleMusicLibraryProviding {
-        #if canImport(MusicKit) && os(iOS)
+        #if canImport(MusicKit)
             MusicKitLibrary()
         #else
             UnavailableSeam()
@@ -35,11 +37,14 @@ extension AppleMusicGlue {
     }
 }
 
-#if canImport(MusicKit) && os(iOS)
+func isLibraryId(_ id: String) -> Bool {
+    let head = Array(id.prefix(3))
+    return head.count == 3 && head[0].isLetter && head[1] == "."
+}
+
+#if canImport(MusicKit)
 
     // MARK: - shared uri -> MusicKit item resolution
-
-    private func isLibraryId(_ id: String) -> Bool { id.hasPrefix("i.") }
 
     private let artSentinel = 999_999_999
 
@@ -176,6 +181,8 @@ extension AppleMusicGlue {
 
     // MARK: - player
 
+    #if os(iOS)
+
     final class MusicKitPlayer: AppleMusicPlayerProviding, @unchecked Sendable {
         private let player = SystemMusicPlayer.shared
         private let lock = NSLock()
@@ -266,10 +273,17 @@ extension AppleMusicGlue {
                 }
             case .artist:
                 let artist = try await MusicKitItems.artist(parsed.id)
-                guard let top = try await artist.with([.topSongs]).topSongs, !top.isEmpty else {
-                    throw AmPlayerError.itemNotFound(contextUri)
+                if isLibraryId(parsed.id) {
+                    guard let albums = try await artist.with([.albums]).albums, !albums.isEmpty else {
+                        throw AmPlayerError.itemNotFound(contextUri)
+                    }
+                    player.queue = SystemMusicPlayer.Queue(for: albums, startingAt: nil)
+                } else {
+                    guard let top = try await artist.with([.topSongs]).topSongs, !top.isEmpty else {
+                        throw AmPlayerError.itemNotFound(contextUri)
+                    }
+                    player.queue = SystemMusicPlayer.Queue(for: top, startingAt: nil)
                 }
-                player.queue = SystemMusicPlayer.Queue(for: top, startingAt: nil)
             case .station:
                 let station = try await MusicKitItems.station(parsed.id)
                 player.queue = [station]
@@ -303,6 +317,8 @@ extension AppleMusicGlue {
         }
     }
 
+    #endif
+
     // MARK: - library
 
     final class MusicKitLibrary: AppleMusicLibraryProviding, @unchecked Sendable {
@@ -310,7 +326,9 @@ extension AppleMusicGlue {
             var req = MusicLibraryRequest<Playlist>()
             req.limit = Int(limit)
             req.offset = Int(offset)
-            req.sort(by: \.lastPlayedDate, ascending: false)
+            #if os(iOS)
+                req.sort(by: \.lastPlayedDate, ascending: false)
+            #endif
             let res = try await req.response()
             return page(res.items.map { amItem($0) }, limit: limit)
         }
@@ -319,7 +337,9 @@ extension AppleMusicGlue {
             var req = MusicLibraryRequest<Album>()
             req.limit = Int(limit)
             req.offset = Int(offset)
-            req.sort(by: \.libraryAddedDate, ascending: false)
+            #if os(iOS)
+                req.sort(by: \.libraryAddedDate, ascending: false)
+            #endif
             let res = try await req.response()
             return page(res.items.map { amItem($0) }, limit: limit)
         }
@@ -380,6 +400,10 @@ extension AppleMusicGlue {
                 let tracks = (playlist.tracks ?? []).compactMap(amTrackItem)
                 return slice(tracks, limit: limit, offset: offset)
             case .artist:
+                if isLibraryId(parsed.id) {
+                    let artist = try await MusicKitItems.artist(parsed.id).with([.albums])
+                    return slice((artist.albums ?? []).map { amItem($0) }, limit: limit, offset: offset)
+                }
                 let artist = try await MusicKitItems.artist(parsed.id).with([.topSongs, .albums])
                 let top = (artist.topSongs ?? []).map { amItem($0) }
                 let albums = (artist.albums ?? []).map { amItem($0) }
@@ -428,7 +452,9 @@ extension AppleMusicGlue {
             var req = MusicLibraryRequest<Song>()
             req.limit = Int(limit)
             req.offset = Int(offset)
-            req.sort(by: \.libraryAddedDate, ascending: false)
+            #if os(iOS)
+                req.sort(by: \.libraryAddedDate, ascending: false)
+            #endif
             let res = try await req.response()
             return page(res.items.map { amItem($0) }, limit: limit)
         }
@@ -493,40 +519,38 @@ extension AppleMusicGlue {
         }
     }
 
-#else
+#endif
 
-    final class UnavailableSeam: AppleMusicAuthProviding, AppleMusicPlayerProviding, AppleMusicLibraryProviding {
-        func currentStatus() async -> AmAuthStatus { .restricted }
-        func requestAuthorization() async -> AmAuthStatus { .restricted }
-        func canPlayCatalogContent() async -> Bool? { false }
+final class UnavailableSeam: AppleMusicAuthProviding, AppleMusicPlayerProviding, AppleMusicLibraryProviding {
+    func currentStatus() async -> AmAuthStatus { .restricted }
+    func requestAuthorization() async -> AmAuthStatus { .restricted }
+    func canPlayCatalogContent() async -> Bool? { false }
 
-        func changes() -> AsyncStream<Void> { AsyncStream { $0.finish() } }
-        func currentSnapshot() async -> AmPlayerSnapshot {
-            AmPlayerSnapshot(entry: nil, playing: false, positionMs: 0, shuffle: false, repeatMode: .off)
-        }
-
-        func play(contextUri _: String, startAtUri _: String?) async throws { throw AmPlayerError.unavailable }
-        func queueInsert(uri _: String, next _: Bool) async throws { throw AmPlayerError.unavailable }
-        func play() async throws { throw AmPlayerError.unavailable }
-        func pause() async throws { throw AmPlayerError.unavailable }
-        func skipNext() async throws { throw AmPlayerError.unavailable }
-        func skipPrev() async throws { throw AmPlayerError.unavailable }
-        func seek(toMs _: UInt32) async throws { throw AmPlayerError.unavailable }
-        func setShuffle(_: Bool) async throws { throw AmPlayerError.unavailable }
-        func setRepeat(_: AmRepeatMode) async throws { throw AmPlayerError.unavailable }
-        func isOtherAudioPlaying() async -> Bool { false }
-
-        func libraryPlaylists(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func libraryAlbums(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func libraryArtists(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func recentlyPlayed(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func recommendations() async throws -> [AmShelf] { throw AmPlayerError.unavailable }
-        func children(of _: String, limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func resolve(uri _: String) async throws -> AmItem { throw AmPlayerError.unavailable }
-        func search(query _: String, limit _: UInt32) async throws -> AmSearchResults { throw AmPlayerError.unavailable }
-        func librarySongs(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
-        func isFavorite(uris: [String]) async throws -> [Bool] { uris.map { _ in false } }
-        func addFavorite(uri _: String) async throws { throw AmPlayerError.unavailable }
+    func changes() -> AsyncStream<Void> { AsyncStream { $0.finish() } }
+    func currentSnapshot() async -> AmPlayerSnapshot {
+        AmPlayerSnapshot(entry: nil, playing: false, positionMs: 0, shuffle: false, repeatMode: .off)
     }
 
-#endif
+    func play(contextUri _: String, startAtUri _: String?) async throws { throw AmPlayerError.unavailable }
+    func queueInsert(uri _: String, next _: Bool) async throws { throw AmPlayerError.unavailable }
+    func play() async throws { throw AmPlayerError.unavailable }
+    func pause() async throws { throw AmPlayerError.unavailable }
+    func skipNext() async throws { throw AmPlayerError.unavailable }
+    func skipPrev() async throws { throw AmPlayerError.unavailable }
+    func seek(toMs _: UInt32) async throws { throw AmPlayerError.unavailable }
+    func setShuffle(_: Bool) async throws { throw AmPlayerError.unavailable }
+    func setRepeat(_: AmRepeatMode) async throws { throw AmPlayerError.unavailable }
+    func isOtherAudioPlaying() async -> Bool { false }
+
+    func libraryPlaylists(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func libraryAlbums(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func libraryArtists(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func recentlyPlayed(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func recommendations() async throws -> [AmShelf] { throw AmPlayerError.unavailable }
+    func children(of _: String, limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func resolve(uri _: String) async throws -> AmItem { throw AmPlayerError.unavailable }
+    func search(query _: String, limit _: UInt32) async throws -> AmSearchResults { throw AmPlayerError.unavailable }
+    func librarySongs(limit _: UInt32, offset _: UInt32) async throws -> AmPage { throw AmPlayerError.unavailable }
+    func isFavorite(uris: [String]) async throws -> [Bool] { uris.map { _ in false } }
+    func addFavorite(uri _: String) async throws { throw AmPlayerError.unavailable }
+}
