@@ -159,7 +159,6 @@ pub(crate) async fn request_asset_body(
 ) -> Option<(Bytes, Option<String>)> {
   let _permit = ASSET_PULL_GATE.acquire().await;
   let request_id = Uuid::now_v7();
-  // bind before sending so fragments racing ahead of the terminal reply are not dropped
   sinks.bind_memory(request_id);
   let req = AssetRequest {
     id: id.to_string(),

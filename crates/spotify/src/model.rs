@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::collections::HashMap;
 
 use librespot_protocol::{
@@ -549,7 +547,6 @@ mod tests {
     assert_eq!(cdn_image_ref("http://i.scdn.co/image/ab67deadbeef"), "ab67deadbeef");
     assert_eq!(cdn_image_ref("spotify:image:ab67deadbeef"), "ab67deadbeef");
     assert_eq!(cdn_image_ref("https://i.scdn.co/image/ab67deadbeef/"), "ab67deadbeef");
-    // foreign cdns stay whole so the glue u-encodes and fetches them directly.
     for url in [
       "https://pickasso.spotifycdn.com/ab/en/default.jpg",
       "https://daylist.spotifycdn.com/v1/early-morning_default.jpg",

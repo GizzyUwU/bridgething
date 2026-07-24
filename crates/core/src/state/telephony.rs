@@ -1,13 +1,3 @@
-//! Telephony manager. Tracks the most recent CallStateUpdate and
-//! CommunicationsUpdate snapshots received from the iAP2 control
-//! session, and dispatches outbound action CSMs (Initiate/Accept/End/
-//! Swap/Merge/Hold/Mute/DTMF) through the iAP2 manager when a session
-//! is identified.
-//!
-//! State is intentionally minimal - we hold what arrived but don't
-//! interpret it; webapps subscribed to the Phone SDK surface receive
-//! delta events and read the merged snapshot through `state.get`.
-
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,

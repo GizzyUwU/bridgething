@@ -26,7 +26,6 @@ public data class OtaArtifactDigest(
     val sha256: String,
 )
 
-/** per-artifact digests for a release, keyed to the artifacts the companion fetches by convention. */
 @Serializable
 public data class OtaReleaseArtifacts(
     val daemon: OtaArtifactDigest? = null,
@@ -34,6 +33,7 @@ public data class OtaReleaseArtifacts(
     @SerialName("image_zck") val imageZck: OtaArtifactDigest? = null,
     @SerialName("image_boot_zck") val imageBootZck: OtaArtifactDigest? = null,
     val webapps: Map<String, OtaArtifactDigest> = emptyMap(),
+    @SerialName("daemon_patches") val daemonPatches: Map<String, OtaArtifactDigest> = emptyMap(),
 )
 
 @Serializable
@@ -93,6 +93,11 @@ public data class OtaArtifactUrls(
         public fun builtinWebapp(rootUrl: String, channel: String, name: String, version: String): String {
             val root = rootUrl.trimEnd('/')
             return "$root/webapps/$channel/$name/$version/$name.zip"
+        }
+
+        public fun daemonPatch(rootUrl: String, channel: String, toVersion: String, fromVersion: String): String {
+            val root = rootUrl.trimEnd('/')
+            return "$root/daemon/$channel/$toVersion/patches/from-$fromVersion.zst"
         }
     }
 }

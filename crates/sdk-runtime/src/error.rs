@@ -1,6 +1,5 @@
 use libbridgething::wire::{RequestError, WireError};
 
-/// transport-layer failure.
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
   #[error("transport closed")]
@@ -13,7 +12,6 @@ pub enum TransportError {
   Io(#[from] std::io::Error),
 }
 
-/// failure of a fire-and-forget send (`command` / `event` / `send_data`).
 #[derive(Debug, thiserror::Error)]
 pub enum SdkError {
   #[error("connection driver stopped")]
@@ -22,18 +20,12 @@ pub enum SdkError {
   Transport(#[from] TransportError),
 }
 
-/// flattened failure of a typed `request`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestFailure<E> {
-  /// the request's own error catalog.
   Domain(E),
-  /// protocol-level failure reported by the responder.
   Protocol(WireError),
-  /// the response wire shape didn't match what the request declared.
   ResponseMismatch,
-  /// no response within the connection's request timeout.
   Timeout,
-  /// the connection driver stopped before a response arrived.
   Disconnected,
 }
 

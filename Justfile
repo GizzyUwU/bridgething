@@ -101,10 +101,10 @@ build-image: submodules
 
 # Cross-build the daemon for the Car Thing.
 cross-build: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird --config profile.release.lto=false --config profile.release.codegen-units=32
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird --config profile.release.lto=false --config profile.release.codegen-units=32
 
 cross-build-test: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "superbird,test-tap" --config profile.release.lto=false --config profile.release.codegen-units=32
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "superbird,test-tap" --config profile.release.lto=false --config profile.release.codegen-units=32
 
 # Cross-build then push the daemon to /opt/bridgething/daemon/
 push: cross-build

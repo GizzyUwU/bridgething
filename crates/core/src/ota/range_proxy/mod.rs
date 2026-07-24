@@ -1,25 +1,3 @@
-//! HTTP-Range proxy that translates libswupdate's delta-fetch traffic
-//! into wire `OtaAssetRange` requests against the pinned companion.
-//!
-//! Lifecycle is owned by [`OtaActor`]: the proxy is in `Inactive` state
-//! at daemon boot, becomes `Active { update_id, peer }` when an OTA
-//! enters `Streaming`, and reverts to `Inactive` when the OTA terminates
-//! (success-by-reboot, failure, or cancel). HTTP requests arriving while
-//! `Inactive` (or for the wrong `update_id`) get `409 Conflict`, which
-//! libswupdate surfaces as a clean install failure.
-//!
-//! Range bytes arrive either inline in the reply or as a fragment stream
-//! routed through the transfer sink registry, and stream straight back
-//! out the HTTP response body - never accumulated in a `Vec<u8>` on the
-//! daemon side. The 426 MB usable RAM on Superbird is shared with
-//! chromium; range responses can be hundreds of MB if libcurl asks for
-//! a large coalesced range.
-//!
-//! Actor-with-mpsc concurrency: a single broker task owns `active` and
-//! the in-flight id set, and HTTP handlers reach it through a cloneable
-//! `RangeProxy` handle. Deactivation unbinds every in-flight sink, which
-//! closes each HTTP body stream with an error.
-
 use std::{
   collections::{HashMap, HashSet},
   sync::{

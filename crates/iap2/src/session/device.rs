@@ -1,12 +1,3 @@
-//! Device-metadata flow: receives `DeviceInformationUpdate`,
-//! `DeviceLanguageUpdate`, `DeviceTimeUpdate`, and `DeviceUUIDUpdate`
-//! pushes from the iPhone and re-emits each as its own `SessionEvent`.
-//!
-//! The accessory subscribes by listing each CSM ID in
-//! `IdentificationInformation.MessagesReceivedFromDevice`; iOS sends an
-//! initial push after `IdentificationAccepted` and again on change. No
-//! `Start*` / `Stop*` pair to drive - purely passive on the wire.
-
 use tokio::sync::mpsc;
 
 use super::{SessionEvent, emit};

@@ -1,10 +1,3 @@
-//! Tier-2 observer: drive the real stock SPA under headless chromium via CDP.
-//! chromiumoxide launches a host chromium; the daemon serves the real bundle
-//! off its modern http port and the SPA's own javascript runs untouched. The
-//! SPA hardcodes its websocket as ws://localhost:8890, but headless binds
-//! ephemeral ports, so a pre-load shim rewrites that port to the daemon's bound
-//! stock port - every daemon keeps its own ports so parallel tiers never collide.
-
 use std::{net::SocketAddr, time::Duration};
 
 use anyhow::{Result, anyhow};
@@ -15,8 +8,6 @@ use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::task::JoinHandle;
 
-/// A headless chromium attached to the daemon, rendering the real stock SPA.
-/// Drop kills the browser (chromiumoxide sets kill-on-drop) and ends the driver.
 pub struct ChromeView {
   page: Page,
   _browser: Browser,
@@ -24,10 +15,6 @@ pub struct ChromeView {
 }
 
 impl ChromeView {
-  /// Launch chromium, install the websocket-port shim before any page script
-  /// runs, then navigate to the daemon's modern http port (which serves the
-  /// active webapp - the stock SPA). Errors when no chromium binary is present,
-  /// which lets callers skip rather than fail on a runner without one.
   pub async fn launch(modern_addr: SocketAddr, stock_port: u16) -> Result<Self> {
     let config = BrowserConfig::builder()
       .no_sandbox()
@@ -57,12 +44,10 @@ impl ChromeView {
     })
   }
 
-  /// Evaluate javascript in the page and deserialize the result.
   pub async fn eval<T: DeserializeOwned>(&self, js: impl Into<String>) -> Result<T> {
     Ok(self.page.evaluate(js.into()).await?.into_value()?)
   }
 
-  /// Poll a boolean javascript expression until it holds or the timeout elapses.
   pub async fn wait_for_js(&self, expr: &str, timeout: Duration) -> bool {
     let probe = format!("(() => {{ try {{ return !!({expr}); }} catch (e) {{ return false; }} }})()");
     let deadline = tokio::time::Instant::now() + timeout;

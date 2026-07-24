@@ -1,24 +1,3 @@
-//! iAP2 control-session orchestration.
-//!
-//! Sits above the link layer: subscribes to `Iap2Event` from a running
-//! [`Link`], dispatches inbound CSMs to per-feature flows, and emits
-//! [`SessionEvent`] upstream. Each feature is a sibling `Flow` struct
-//! threaded through [`Iap2Session::handle_csm`]'s dispatcher.
-//!
-//! Auth requires the MFi coprocessor; the chip is reached through the
-//! [`MfiAccess`] trait so production wires
-//! [`WorkerMfiAccess`] (a dedicated thread around `MfiAuth<LinuxI2c>`)
-//! and tests pass a fake. The session invokes `cert()` once per
-//! RFCOMM connection and `sign()` once per challenge; auth must not be
-//! retried on the same connection.
-//!
-//! Failure paths uniformly emit a terminal `SessionEvent::LinkDown`
-//! (or `AuthFailed` / `IdentificationRejected` followed by a
-//! `LinkDown`) before the task exits, so consumers only need to watch
-//! the event channel; the `JoinHandle::Result` is informational.
-//!
-//! [`Link`]: crate::Link
-
 mod auth;
 mod device;
 mod ea_transport;

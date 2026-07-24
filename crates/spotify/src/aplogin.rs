@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};

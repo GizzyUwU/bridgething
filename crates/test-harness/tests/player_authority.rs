@@ -1,9 +1,3 @@
-//! Single-source now-playing authority scenarios: while the companion owns
-//! playback, iAP2 chatter stages silently; ownership flips are one hard-cut
-//! broadcast, not a burst. Each test attaches a real companion over the
-//! duplex gateway link, injects iAP2 session events, and asserts on both the
-//! merged daemon state and the actual client broadcast stream.
-
 use std::time::Duration;
 
 use bridgething_gateway::Gateway;
@@ -90,8 +84,6 @@ fn queue_item(uri: &str, title: &str, artist: &str) -> QueueItem {
   }
 }
 
-// returns the phone gateway alongside the harness: dropping it disconnects the companion, which
-// correctly drops authority and resets the companion view mid-test
 async fn companion_owned_harness() -> (Harness, Gateway) {
   let harness = Harness::start().await.expect("harness start");
   let _modern = harness.connect_modern_client().await.expect("modern client");
@@ -131,16 +123,11 @@ async fn companion_owned_harness() -> (Harness, Gateway) {
   (harness, phone)
 }
 
-/// iAP2 spotify-foreground chatter while the companion owns playback must not
-/// reach clients at all: no broadcast, no playhead movement. Pre-fix, every
-/// delta arriving >2s after the last companion snapshot re-applied the stale
-/// stored position, snapping the playhead backward and force-broadcasting.
 #[tokio::test]
 async fn iap2_chatter_during_companion_playback_is_broadcast_silent() {
   let (harness, _phone) = companion_owned_harness().await;
   let source = harness.iap2_source().await.expect("iap2 source");
 
-  // let the staged companion position go stale past the 2s resync tolerance
   tokio::time::sleep(Duration::from_millis(2_500)).await;
   let before = harness.state().player.state_reply().state.playback.position_ms;
 
@@ -174,9 +161,6 @@ async fn iap2_chatter_during_companion_playback_is_broadcast_silent() {
   );
 }
 
-/// A foreground-bundle flip to another app is a single hard cut: one snapshot
-/// (plus its queue companion frame), then iap2-owned position ticks ride the
-/// broadcast gate silently.
 #[tokio::test]
 async fn youtube_flip_is_one_hard_cut_not_a_burst() {
   let (harness, _phone) = companion_owned_harness().await;
@@ -219,8 +203,6 @@ async fn youtube_flip_is_one_hard_cut_not_a_burst() {
     cut_frames
   );
 
-  // iap2 now owns playback: continuous position ticks are position-only and
-  // must ride the signature gate without broadcasting.
   let mut frames = harness.observe_frames();
   for pos in [5_600u32, 6_200, 6_800] {
     tokio::time::sleep(Duration::from_millis(400)).await;
@@ -249,15 +231,11 @@ async fn youtube_flip_is_one_hard_cut_not_a_burst() {
   );
 }
 
-/// A dealer-confirmed context switch must survive stale iAP2 chatter that still names the
-/// previous song. The runway-held queue still leads with that song, so a wrongful optimistic
-/// promotion sticks until the next real song change: the dealer has nothing new to push.
 #[tokio::test]
 async fn context_switch_survives_a_stale_iap2_echo() {
   let (harness, phone) = companion_owned_harness().await;
   let source = harness.iap2_source().await.expect("iap2 source");
 
-  // steady state mid-playlist: the held queue still leads with the current track
   phone
     .player()
     .queue_changed(QueueSnapshot {
@@ -274,7 +252,6 @@ async fn context_switch_survives_a_stale_iap2_echo() {
     .await
     .expect("iap2 same-song tick");
 
-  // the user selects a track from a different playlist; the dealer confirms it
   phone
     .player()
     .snapshot(PlayerState {
@@ -302,7 +279,6 @@ async fn context_switch_survives_a_stale_iap2_echo() {
     .await;
   assert!(switched, "the dealer-confirmed context switch never applied");
 
-  // a stale iap2 echo still naming the old song lands before the new context queue arrives
   source
     .push_now_playing(iap2_spotify_tick(None))
     .await

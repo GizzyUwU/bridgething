@@ -1,20 +1,4 @@
-//! LE advertisement registration for the pair-trigger service. Written
-//! against zbus rather than bluer's `Adapter::advertise` because bluer
-//! 0.17 doesn't expose every BlueZ property we want to pin (LocalName +
-//! Includes + tx-power live on different paths in the wrapper).
-//!
-//! Carries `ServiceUUIDs = [PAIR_TRIGGER_SERVICE]` so the iOS companion
-//! app's `AccessorySetupKit` picker (and CoreBluetooth's
-//! `scanForPeripherals(withServices:)` filter) can find us; both match
-//! against advertised service UUIDs, not the LE Service-Solicitation AD
-//! type. The legacy 31-byte ADV PDU can't fit a second 128-bit UUID
-//! alongside Flags + LocalName + tx-power; we drop ANCS solicit
-//! deliberately. ANCS is exposed by iOS to any LE-bonded peer that
-//! holds the per-bond authorization, regardless of solicit history;
-//! the app issues `connect(_, options: [CBConnectPeripheralOptionRequiresANCS: true])`
-//! to drive iOS to surface the ANCS authorization prompt after pair.
-
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 
 use uuid::Uuid;
 use zbus::{
@@ -23,7 +7,8 @@ use zbus::{
 };
 
 const ADV_OBJECT_PATH: &str = "/dev/bridgething/le/adv0";
-const ADV_LOCAL_NAME: &str = "Bridgething";
+const ADV_LOCAL_NAME_PREFIX: &str = "Car Thing";
+static ADV_LOCAL_NAME: OnceLock<&'static str> = OnceLock::new();
 
 const ADV_MIN_INTERVAL_MS: u32 = 100;
 const ADV_MAX_INTERVAL_MS: u32 = 150;
@@ -40,6 +25,7 @@ trait LEAdvertisingManager {
 }
 
 struct LeAdvertisementImpl {
+  serial_suffix: [char; 4],
   service_uuids: Vec<String>,
 }
 
@@ -62,7 +48,17 @@ impl LeAdvertisementImpl {
 
   #[zbus(property, name = "LocalName")]
   fn local_name(&self) -> &str {
-    ADV_LOCAL_NAME
+    ADV_LOCAL_NAME.get_or_init(|| {
+      let mut name = String::from(ADV_LOCAL_NAME_PREFIX);
+      name.push(' ');
+      name.push('(');
+      name.push(self.serial_suffix[0]);
+      name.push(self.serial_suffix[1]);
+      name.push(self.serial_suffix[2]);
+      name.push(self.serial_suffix[3]);
+      name.push(')');
+      Box::leak(name.into_boxed_str())
+    })
   }
 
   #[zbus(property, name = "Includes")]
@@ -92,7 +88,11 @@ pub struct LeAdvertisement {
 }
 
 impl LeAdvertisement {
-  pub async fn register(adapter_dbus_path: &str, advertised_service_uuid: Uuid) -> Result<Self, AdvertiseError> {
+  pub async fn register(
+    serial_suffix: [char; 4],
+    adapter_dbus_path: &str,
+    advertised_service_uuid: Uuid,
+  ) -> Result<Self, AdvertiseError> {
     let conn = Connection::system().await?;
     let path: OwnedObjectPath = ObjectPath::try_from(ADV_OBJECT_PATH)?.into();
 
@@ -101,6 +101,7 @@ impl LeAdvertisement {
       .at(
         &path,
         LeAdvertisementImpl {
+          serial_suffix,
           service_uuids: vec![advertised_service_uuid.to_string()],
         },
       )

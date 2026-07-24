@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 pub use librespot_protocol as upstream;
 
 pub mod custom {

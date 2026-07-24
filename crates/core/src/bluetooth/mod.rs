@@ -108,10 +108,10 @@ impl BluetoothBootstrap {
 }
 
 impl BluetoothManager {
-  pub(crate) fn create() -> (BluetoothMan, BluetoothBootstrap) {
+  pub(crate) fn create(serial_suffix: [char; 4]) -> (BluetoothMan, BluetoothBootstrap) {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
     let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
-    let (le_handle, le_bootstrap) = LeManager::allocate();
+    let (le_handle, le_bootstrap) = LeManager::allocate(serial_suffix);
     let (profile_man_tx, profile_man_rx) = watch::channel(None);
 
     let manager = Arc::new(Self {

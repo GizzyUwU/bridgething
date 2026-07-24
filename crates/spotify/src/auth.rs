@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::time::{Duration, Instant};
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};

@@ -1,36 +1,14 @@
-//! Typed CSMs for the iAP2 authentication handshake.
-//!
-//! Five messages exchanged on the control session, gated before
-//! `IdentificationAccepted` will arrive. iPhone drives certificate
-//! retrieval and challenge issuance; the accessory replies via the
-//! MFi coprocessor.
-//!
-//! The auth CSMs are flat structs with at most a single `Bytes` field;
-//! the `Csm` derive generates `From<X> for CsmFrame` and
-//! `TryFrom<CsmFrame> for X` for each.
-
 use bytes::Bytes;
 
 use super::Csm;
 
-/// CSMs the accessory sends. Empty: auth is a framework-level message,
-/// and listing it in `IdentificationInformation::messages_sent_by_accessory`
-/// makes the iPhone return `IdentificationRejected` on params 6/7. Only
-/// app-level CSMs belong in those lists.
 pub const SENT_BY_ACCESSORY: &[u16] = &[];
-
-/// CSMs the accessory accepts. Empty for the same reason as
-/// `SENT_BY_ACCESSORY`.
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[];
 
-/// `0xAA00` iPhone -> accessory. Asks the accessory to read its MFi
-/// certificate from the coprocessor.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA00)]
 pub struct RequestAuthenticationCertificate;
 
-/// `0xAA01` accessory -> iPhone. Carries the X.509 DER certificate
-/// read from the chip.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA01)]
 pub struct AuthenticationCertificate {
@@ -38,8 +16,6 @@ pub struct AuthenticationCertificate {
   pub cert: Bytes,
 }
 
-/// `0xAA02` iPhone -> accessory. Carries the random challenge bytes
-/// (32 on CP3.0 chips) the accessory must sign.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA02)]
 pub struct RequestAuthenticationChallengeResponse {
@@ -47,8 +23,6 @@ pub struct RequestAuthenticationChallengeResponse {
   pub challenge: Bytes,
 }
 
-/// `0xAA03` accessory -> iPhone. Carries the signed response from the
-/// coprocessor (64 bytes for CP3.0 ECDSA).
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA03)]
 pub struct AuthenticationResponse {
@@ -56,14 +30,10 @@ pub struct AuthenticationResponse {
   pub response: Bytes,
 }
 
-/// `0xAA04` iPhone -> accessory. The accessory should tear down the
-/// link with a RST and not retry on the same RFCOMM connection.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA04)]
 pub struct AuthenticationFailed;
 
-/// `0xAA05` iPhone -> accessory. Authentication completed; the
-/// accessory may proceed to identification.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xAA05)]
 pub struct AuthenticationSucceeded;

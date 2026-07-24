@@ -1,12 +1,3 @@
-//! Transport-agnostic runtime shared by the Rust bridgething SDKs
-//! (`bridgething-client`, `bridgething-gateway`). Provides the generic
-//! [`Connection`] driver over the [`Protocol`] trait: typed `command` /
-//! `event` / `request` built on libbridgething's `WireCommand` /
-//! `WireEvent` / `WireRequest` marker traits, plus an inbound event
-//! broadcast. Each SDK crate supplies a `Protocol` impl and concrete
-//! [`Connector`] transports; the named ergonomic surface is layered on
-//! top by codegen.
-
 mod connection;
 mod error;
 mod handle;
@@ -159,7 +150,6 @@ mod tests {
 
   #[tokio::test]
   async fn handle_answers_inbound_request() {
-    // far end sends us a request; we build a handle and respond_to it.
     let (c_out, mut fe_in) = mpsc::unbounded_channel();
     let (fe_out, c_in) = mpsc::unbounded_channel();
     let conn = Connection::spawn(ChanConnector { out: c_out, inn: c_in });
@@ -240,10 +230,8 @@ mod tests {
       tokio::spawn(async move { conn.send_data(MsgMeta::Event, data, priority).await })
     };
 
-    // bg0 dequeues first and blocks inside the gated transport send.
     let t0 = send(conn.clone(), "bg0", Priority::Background);
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    // these queue behind the in-flight send, in arrival order...
     let t1 = send(conn.clone(), "bg1", Priority::Background);
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     let t2 = send(conn.clone(), "bulk0", Priority::Bulk);
@@ -251,7 +239,6 @@ mod tests {
     let t3 = send(conn.clone(), "norm0", Priority::Normal);
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    // ...and drain in lane order once the transport opens up.
     gate.add_permits(4);
     for t in [t0, t1, t2, t3] {
       t.await.unwrap().unwrap();

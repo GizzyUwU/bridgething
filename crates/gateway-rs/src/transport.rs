@@ -1,11 +1,3 @@
-//! Concrete transports for the gateway (companion) protocol.
-//!
-//! - [`FramedConnector`] frames `GatewayEndec` over any
-//!   `AsyncRead + AsyncWrite` (a duplex pair in-process, a real RFCOMM
-//!   socket on hardware).
-//! - [`WsConnector`] carries the same `GatewayEndec` frames as binary
-//!   WebSocket messages (the daemon's network gateway on port 8892).
-
 use bridgething_sdk_runtime::{Connector, InboundHalf, OutboundHalf, TransportError};
 use futures::{
   SinkExt, StreamExt,

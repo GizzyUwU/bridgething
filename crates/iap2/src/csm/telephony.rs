@@ -1,27 +1,3 @@
-//! Typed CSMs for the iAP2 telephony surface.
-//!
-//! Two paired Start/Update/Stop families plus a set of accessory-driven
-//! action CSMs:
-//!
-//! - Call-state subscription pair (`0x4154`/`0x4156`) and the inbound
-//!   `CallStateUpdate` (`0x4155`).
-//! - Communications subscription pair (`0x4157`/`0x4159`) and the
-//!   inbound `CommunicationsUpdate` (`0x4158`).
-//! - Action CSMs: `InitiateCall` (`0x415A`), `AcceptCall` (`0x415B`),
-//!   `EndCall` (`0x415C`), `SwapCalls` (`0x415D`), `MergeCalls`
-//!   (`0x415E`), `HoldStatusUpdate` (`0x415F`), `MuteStatusUpdate`
-//!   (`0x4160`), `SendDTMF` (`0x4161`).
-//!
-//! Subscribe-by-presence pattern: the accessory sends `Start*` carrying
-//! one empty-payload TLV per param-id it wants the iPhone to push back.
-//! Stop family ends the subscription. Inbound `*Update` CSMs are
-//! delta-shaped - every field optional, iOS sends only what changed.
-//!
-//! Enum-valued params are decoded as `u8` here; the daemon's
-//! translation layer maps them to the `libbridgething` typed enums so
-//! downstream consumers don't need to keep two parallel enum
-//! declarations in sync.
-
 use bytes::Bytes;
 
 use super::{Csm, CsmFrame, CsmParam, encode_param_block};
@@ -43,16 +19,9 @@ pub const SENT_BY_ACCESSORY: &[u16] = &[
 
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[CallStateUpdate::CSM_MSG_ID, CommunicationsUpdate::CSM_MSG_ID];
 
-/// Param IDs the accessory subscribes to inside `StartCallStateUpdates`,
-/// one empty-payload TLV per id. Slot 5 is unused.
 pub const CALL_STATE_SUBSCRIBE: &[u16] = &[0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
-
-/// Param IDs the accessory subscribes to inside
-/// `StartCommunicationsUpdates`. Slot 3 is unused.
 pub const COMMUNICATIONS_SUBSCRIBE: &[u16] = &[0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
-/// `0x4154` accessory -> device. Subscribes to one or more
-/// `CallStateUpdate` params; the iPhone only pushes the listed fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartCallStateUpdates {
   pub params: Vec<u16>,
@@ -84,13 +53,10 @@ impl From<StartCallStateUpdates> for CsmFrame {
   }
 }
 
-/// `0x4156` accessory -> device. Tears down the call-state subscription.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4156)]
 pub struct StopCallStateUpdates;
 
-/// `0x4157` accessory -> device. Subscribes to one or more
-/// `CommunicationsUpdate` params.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartCommunicationsUpdates {
   pub params: Vec<u16>,
@@ -122,14 +88,10 @@ impl From<StartCommunicationsUpdates> for CsmFrame {
   }
 }
 
-/// `0x4159` accessory -> device. Tears down the communications subscription.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4159)]
 pub struct StopCommunicationsUpdates;
 
-/// `0x4155` device -> accessory. Push of one call's current state. All
-/// fields optional and delta-shaped. `status` and `direction` decode as
-/// raw `u8`.
 #[derive(Csm, Debug, Clone, Default, PartialEq, Eq)]
 #[csm(id = 0x4155)]
 pub struct CallStateUpdate {
@@ -159,8 +121,6 @@ pub struct CallStateUpdate {
   pub start_timestamp_unix_s: Option<i64>,
 }
 
-/// `0x4158` device -> accessory. Push of cellular / call-control state.
-/// All fields optional and delta-shaped.
 #[derive(Csm, Debug, Clone, Default, PartialEq, Eq)]
 #[csm(id = 0x4158)]
 pub struct CommunicationsUpdate {
@@ -200,7 +160,6 @@ pub struct CommunicationsUpdate {
   pub hold_available: Option<bool>,
 }
 
-/// `0x415A` accessory -> device. Place an outbound call.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415A)]
 pub struct InitiateCall {
@@ -214,9 +173,6 @@ pub struct InitiateCall {
   pub address_book_id: Option<String>,
 }
 
-/// `0x415B` accessory -> device. Accept the named call (or default to
-/// the only ringing one when `call_uuid` is None). `accept_action` is
-/// 0=Accept (default) / 1=EndAndAccept.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415B)]
 pub struct AcceptCall {
@@ -226,8 +182,6 @@ pub struct AcceptCall {
   pub call_uuid: Option<String>,
 }
 
-/// `0x415C` accessory -> device. End the named call. `end_action` is
-/// 0=End / 1=EndAll.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415C)]
 pub struct EndCall {
@@ -237,17 +191,14 @@ pub struct EndCall {
   pub call_uuid: Option<String>,
 }
 
-/// `0x415D` accessory -> device. Swap calls (call-waiting parlance).
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415D)]
 pub struct SwapCalls;
 
-/// `0x415E` accessory -> device. Merge two calls into a conference.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415E)]
 pub struct MergeCalls;
 
-/// `0x415F` accessory -> device. Place a call on/off hold.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x415F)]
 pub struct HoldStatusUpdate {
@@ -257,7 +208,6 @@ pub struct HoldStatusUpdate {
   pub call_uuid: Option<String>,
 }
 
-/// `0x4160` accessory -> device. Push mic-mute state.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4160)]
 pub struct MuteStatusUpdate {
@@ -265,8 +215,6 @@ pub struct MuteStatusUpdate {
   pub mute_status: bool,
 }
 
-/// `0x4161` accessory -> device. Play DTMF tone on the named call.
-/// `tone`: 0..9 = digit, 10=`*`, 11=`#`.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4161)]
 pub struct SendDtmf {
@@ -276,7 +224,6 @@ pub struct SendDtmf {
   pub call_uuid: Option<String>,
 }
 
-/// Build a subscribe-list payload from a slice of param IDs.
 #[allow(dead_code)]
 fn encode_subscribe_list(ids: &[u16]) -> Bytes {
   encode_param_block(

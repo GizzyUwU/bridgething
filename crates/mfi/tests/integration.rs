@@ -1,5 +1,3 @@
-//! Integration tests for the MFi auth driver against the in-memory mock.
-
 use std::time::Duration;
 
 use bridgething_mfi::{CHALLENGE_LEN, Error, MfiAuth, MockTransport, RESPONSE_LEN, SERIAL_LEN};

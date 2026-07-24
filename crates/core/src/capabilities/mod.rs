@@ -1,20 +1,3 @@
-//! Live `Capabilities` snapshot the daemon publishes to webapps.
-//!
-//! Two feeds merge into the published snapshot: the companion's
-//! `GatewayCapabilities` announce (uri schemes, network info, audio
-//! capabilities, surface availability bits the companion claims) and
-//! `AuthorityRegistry`'s live scope set. The companion's
-//! `available` bits pass through unmodified -- the Car Thing has no
-//! network stack, no speaker, no GPS, no notification source, so no
-//! surface here is daemon-backed in the literal sense. The daemon
-//! routes; the gateway provides. Webapps that hit a half-built
-//! routing handler get `WireError::Unimplemented` at call time.
-//!
-//! All authority mutations funnel through this registry so a snapshot
-//! rebuild + broadcast happens at the same instant the underlying
-//! `AuthorityRegistry` flips. Reads on `AuthorityRegistry` (player
-//! merge, transport merge) stay direct.
-
 use std::{
   collections::HashMap,
   net::SocketAddr,

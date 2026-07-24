@@ -1,9 +1,3 @@
-//! Slices 2-3 proof: the device emulator drives a real accessory
-//! [`Iap2Session`] through MFi authentication and identification over an
-//! in-process duplex. The assertion is on the accessory's own event
-//! stream - it must emit `Authenticated` then `Identified`, proving the
-//! emulator's AA00/AA02/AA05 + 1D00/1D02 sequence is wire-correct.
-
 #![cfg(feature = "emulator")]
 
 mod emu;
@@ -22,8 +16,6 @@ async fn emulator_drives_accessory_to_identified() {
 
   let (mut harness, _emu_events, _emu_handle) = emu::spawn(emu::identification_config(), None, |e| e);
 
-  // The accessory must reach Identified (through Authenticated), driven
-  // entirely by the emulator's AA00/AA02/AA05 + 1D00/1D02 sequence.
   let mut authenticated = false;
   loop {
     let evt = recv_with_timeout(&mut harness.acc_events, Duration::from_secs(10))

@@ -1,11 +1,3 @@
-//! Slice (EA) proof: configured like the production daemon (declares the
-//! gateway EA protocol + requests app launch), the accessory triggers the
-//! emulator to open an External Accessory stream. The emulator discovers
-//! the protocol id from the wire (identification param 10), opens the
-//! stream, and raw bytes round-trip both directions through the real
-//! accessory `EaFlow` chunker and the device-side transport - the byte
-//! pipe a real gateway client rides on hardware.
-
 #![cfg(feature = "emulator")]
 
 mod emu;
@@ -39,7 +31,6 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
   let (mut harness, mut emu_events, _emu_handle) =
     emu::spawn(gateway_identification(), Some(GATEWAY_BUNDLE.into()), |e| e);
 
-  // Accessory side of the stream, from the real EaFlow's own event.
   let (mut acc_inbound, acc_outbound) = loop {
     match recv_with_timeout(&mut harness.acc_events, Duration::from_secs(10))
       .await
@@ -61,7 +52,6 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
     }
   };
 
-  // Device side of the stream, surfaced by the emulator.
   let mut dev_stream = loop {
     match recv_with_timeout(&mut emu_events, Duration::from_secs(10))
       .await
@@ -76,8 +66,6 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
     "emulator discovered the protocol id from identification"
   );
 
-  // Device -> accessory: rides the device chunker, the real link, and the
-  // accessory's EaFlow reassembly.
   dev_stream
     .outbound
     .send(EaPriority::Normal, Bytes::from_static(b"hello accessory"))
@@ -88,7 +76,6 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
     .expect("accessory never received the device's gateway bytes");
   assert_eq!(&got[..], b"hello accessory");
 
-  // Accessory -> device: the inverse path.
   acc_outbound
     .send(EaPriority::Normal, Bytes::from_static(b"hello device"))
     .await

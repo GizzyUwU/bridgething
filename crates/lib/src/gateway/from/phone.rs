@@ -6,9 +6,6 @@ use typeshare::typeshare;
 
 use crate::{CallEndReason, CommunicationsState, PhoneCall, PhoneState};
 
-/// Typed reply payload for `PhoneStateGet` and the unsolicited
-/// announce-time snapshot the companion proactively pushes per the
-/// announce-on-connect rule.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -18,9 +15,6 @@ pub struct PhoneStateReply {
   pub state: PhoneState,
 }
 
-/// Companion-side cellular / call-control snapshot. Announce-on-connect
-/// pattern: companion sends an initial `CommunicationsSnapshot` after
-/// announce, then re-sends on any field change.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

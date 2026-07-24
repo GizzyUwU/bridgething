@@ -1,14 +1,3 @@
-//! Shared scaffold for the full-lifecycle emulator integration tests
-//! (auth, media, external accessory): a real accessory (`Link::run` +
-//! `Iap2Session` with a fake MFi chip) wired to the device-half
-//! (`Link::run_device` + `DeviceEmulator`) over a duplex. Assertions
-//! read the accessory's own `SessionEvent` stream, the authoritative
-//! observation point.
-//!
-//! Link-only tests (`emulator_handshake`) do not use this; they stay
-//! standalone so neither module carries items the other binary leaves
-//! unused.
-
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -32,8 +21,6 @@ pub fn link_config(initial_psn: u8, lsp: Lsp) -> LinkConfig {
   config
 }
 
-/// Mirrors the real iPhone's SYN|ACK LSP from the 2026-05-26 capture:
-/// max_outgoing 127, max_len 65535, sessions control/file-transfer/EA.
 pub fn device_lsp() -> Lsp {
   Lsp {
     version: 1,
@@ -89,10 +76,6 @@ impl MfiAccess for FakeMfi {
   }
 }
 
-/// Live accessory + emulator. Holds every join handle and command
-/// sender so neither side's channels close while a test runs. The
-/// emulator's own event stream is returned separately by [`spawn`] so
-/// tests that only assert on `acc_events` can discard it.
 pub struct EmuHarness {
   pub acc_events: mpsc::Receiver<SessionEvent>,
   _keep: Keep,
@@ -111,8 +94,6 @@ struct Keep {
   _tel_tx: mpsc::Sender<bridgething_iap2::session::TelephonyCommand>,
 }
 
-/// Spawn the accessory (with the given identification + optional
-/// app-launch bundle) and the emulator (after `setup` customizes it).
 pub fn spawn<F>(
   ident: IdentificationConfig,
   app_launch_bundle: Option<String>,

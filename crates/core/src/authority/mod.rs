@@ -1,26 +1,3 @@
-//! Per-scope authority registry: which companion-supplied surface
-//! ("NowPlayingMetadata", "NowPlayingPlayback", future scopes) is
-//! currently authoritative, and how recently the companion refreshed
-//! that claim.
-//!
-//! Read-mostly: every NowPlayingUpdate merge consults the registry,
-//! companions write occasionally. `std::sync::RwLock<HashMap>` is the
-//! right shape. Fast reads, no `await` between merge call sites.
-//!
-//! Stale claims fall back automatically. A claim that hasn't been
-//! refreshed within `STALE_TIMEOUT` is treated as released on the next
-//! `is_authoritative` query - covers companion crashes, BT blips that
-//! drop a Release in flight, and OS-suspended companions.
-//!
-//! The now-playing scopes are the exception: they hold indefinitely once
-//! claimed. The companion claims them once when its app becomes the
-//! current player, and the dealer pushes only on change, so there is no
-//! periodic refresh to ride a staleness clock. They drop on explicit
-//! release (sign-out), on the companion-disconnect hook (`drop_all`), or
-//! get arbitrated away by the player's iAP2 app-bundle gate when another
-//! app takes the foreground. The companion declares its app bundle on the
-//! claim so that gate can compare it against iAP2's foreground signal.
-
 use std::{
   collections::HashMap,
   sync::{Arc, RwLock},
@@ -197,7 +174,6 @@ mod tests {
     r.claim(CompanionAuthorityScope::NowPlayingPlayback);
     assert!(rx.borrow().companion_playback);
 
-    // a non-now-playing scope must not move the now-playing signal.
     r.claim(CompanionAuthorityScope::Volume);
     assert!(rx.borrow().companion_metadata && rx.borrow().companion_playback);
 
@@ -207,8 +183,6 @@ mod tests {
 
   #[test]
   fn volume_holds_past_stale_timeout() {
-    // the companion claims volume once and only re-sends on a real change, so it must hold like the
-    // now-playing scopes rather than expire after STALE_TIMEOUT.
     assert!(scope_holds_indefinitely(CompanionAuthorityScope::Volume));
     let r = AuthorityRegistry::new();
     r.inner

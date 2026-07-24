@@ -1,10 +1,3 @@
-//! Ergonomic Rust SDK for the gateway (companion) side of the
-//! bridgething wire protocol. A companion speaks `GatewayToBridgeMsg`
-//! outbound and receives `BridgeToGatewayMsg`. Built on
-//! [`bridgething_sdk_runtime`]: the generic `event` / `command` /
-//! `request` methods are type-checked against the wire marker traits,
-//! and the named per-surface methods are layered on top by codegen.
-
 mod transport;
 
 #[path = "surface.generated.rs"]
@@ -27,7 +20,6 @@ use tokio_tungstenite::connect_async;
 pub use transport::Ws;
 use uuid::Uuid;
 
-/// Wire-protocol binding for the companion side.
 pub struct GatewayProtocol;
 
 impl Protocol for GatewayProtocol {
@@ -50,14 +42,12 @@ impl Protocol for GatewayProtocol {
   }
 }
 
-/// A connected gateway.
 #[derive(Clone)]
 pub struct Gateway {
   conn: Connection<GatewayProtocol>,
 }
 
 impl Gateway {
-  /// Drive the protocol over any byte stream.
   pub fn from_io<S>(io: S) -> Self
   where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -67,7 +57,6 @@ impl Gateway {
     }
   }
 
-  /// Connect to a daemon's network gateway over WebSocket.
   pub async fn connect(url: &str) -> Result<Self, TransportError> {
     let (ws, _) = connect_async(url)
       .await
@@ -77,29 +66,24 @@ impl Gateway {
     })
   }
 
-  /// Override the per-request response timeout (default 30s).
   pub fn with_timeout(self, timeout: Duration) -> Self {
     Self {
       conn: self.conn.with_timeout(timeout),
     }
   }
 
-  /// Inbound messages that aren't correlated responses (events, daemon-initiated requests, broadcasts).
   pub fn events(&self) -> broadcast::Receiver<BridgeToGatewayMsg> {
     self.conn.events()
   }
 
-  /// Raw connection handle for callers that want the generic surface directly.
   pub fn connection(&self) -> &Connection<GatewayProtocol> {
     &self.conn
   }
 
-  /// Build a per-message handle for an inbound message
   pub fn handle(&self, msg: &BridgeToGatewayMsg) -> MsgHandle<GatewayProtocol> {
     self.conn.handle(msg)
   }
 
-  /// Fire-and-forget event (`meta = event`).
   pub async fn event<E>(&self, event: E) -> Result<(), SdkError>
   where
     E: WireEvent<GatewayToBridgeMsgData>,
@@ -107,7 +91,6 @@ impl Gateway {
     self.conn.event(event).await
   }
 
-  /// Fire-and-forget command (`meta = command`).
   pub async fn command<C>(&self, command: C) -> Result<(), SdkError>
   where
     C: WireCommand<GatewayToBridgeMsgData>,
@@ -115,7 +98,6 @@ impl Gateway {
     self.conn.command(command).await
   }
 
-  /// Typed request: await the correlated, decoded response.
   pub async fn request<R>(&self, request: R) -> Result<R::Response, RequestFailure<R::DomainError>>
   where
     R: WireRequest<Outbound = GatewayToBridgeMsgData, Inbound = BridgeToGatewayMsgData>,
@@ -123,7 +105,6 @@ impl Gateway {
     self.conn.request(request).await
   }
 
-  /// Escape hatch: send arbitrary out-data with a chosen meta + priority.
   pub async fn send_data(
     &self,
     meta: MsgMeta,

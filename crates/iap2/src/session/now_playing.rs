@@ -1,15 +1,3 @@
-//! NowPlaying flow: subscribes to the iPhone's NowPlaying surface
-//! after identification reaches Accepted, then translates each
-//! inbound `NowPlayingUpdate` (CSM `0x5001`) into a session event.
-//! Also handles outbound `SetNowPlayingInformation` (CSM `0x5003`)
-//! commands that the daemon's `TransportController` issues for scrub
-//! and queue-jump verbs.
-//!
-//! `ensure_subscribed` sends `StartNowPlayingUpdates` exactly once per
-//! session - the iPhone keeps the subscription for the life of the
-//! link. Subsequent calls are no-ops, so the session is free to call
-//! it after every CSM dispatch as a "kick if needed" check.
-
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;

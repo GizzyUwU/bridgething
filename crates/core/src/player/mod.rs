@@ -443,8 +443,6 @@ mod tests {
 
   #[test]
   fn companion_snapshot_rides_the_signature_gate() {
-    // a companion snapshot must not bypass the broadcast gate: identical re-sends stay silent
-    // and real changes broadcast via the signature diff or the position-resync flag.
     assert!(!forces_broadcast(&PlayerCommand::ApplyCompanionSnapshot(
       libbridgething::PlayerState::default()
     )));

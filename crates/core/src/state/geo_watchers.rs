@@ -1,10 +1,3 @@
-//! Per-webapp geo watch tracker. Each webapp's `geo.watch` registers a
-//! token with desired (accuracy, min_interval_ms); the daemon aggregates
-//! across watchers (most-demanding accuracy, smallest interval) and
-//! forwards a single `Watch` to the companion. When the aggregate
-//! changes (first watcher / last watcher / accuracy upgrade / interval
-//! drop), the daemon reissues the gateway-side request.
-
 use std::{
   collections::HashMap,
   net::SocketAddr,

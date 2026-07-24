@@ -826,9 +826,6 @@ impl RecvMsgData {
         let mode = if repeat_mode { RepeatMode::All } else { RepeatMode::Off };
         RecvMsgData::Player(ClientToBridgePlayerMsg::SetRepeat(ClientSetRepeat { mode }))
       }
-      // Stock encodes podcast playback speed as a percentage integer
-      // (50, 75, 100, 125, 150, 200); modern Player uses an absolute
-      // multiplier (1.0 = normal). Divide.
       StockInterAppRecv::SetPodcastPlaybackSpeed { playback_speed } => {
         RecvMsgData::Player(ClientToBridgePlayerMsg::SetSpeed(ClientSetSpeed {
           speed: playback_speed as f32 / 100.0,
@@ -840,13 +837,10 @@ impl RecvMsgData {
       StockInterAppRecv::Earcon { earcon } => {
         RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::Earcon(ClientEarcon { name: earcon }))
       }
-      // Stock TTS plays a pre-cached audio file by name; closer to an earcon than text-to-speech
       StockInterAppRecv::GetTts { file } => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::Earcon(ClientEarcon {
         name: format!("spotify-stock:{file}"),
       })),
 
-      // Stock doesn't carry a call_id; the phone surface uses an empty
-      // string as a sentinel for "the active call".
       StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Phone(ClientToBridgePhoneMsg::Answer(PhoneCallAction {
         call_id: String::new(),
       })),
@@ -901,14 +895,8 @@ impl RecvMsgData {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SuperbirdPhoneCallImage { phone_number })
       }
 
-      // SMS send has no companion path: iAP2 doesn't expose it and the
-      // modern Phone surface has no message-send verb. Webapp's stub
-      // promise stays unresolved, which is fine - stock declares but
-      // never calls this in any captured build.
       StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
 
-      // Instrumentation, logs, crash reports, search/recommendations
-      // shapes the daemon ignores.
       StockInterAppRecv::CrashReport(_)
       | StockInterAppRecv::LogMessage(_)
       | StockInterAppRecv::PitstopLog(_)
@@ -927,10 +915,6 @@ impl RecvMsgData {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetSessionState)
       }
 
-      // Stock declares these verbs but no store/component ever invokes them.
-      // Player-state derivatives are read off the SpotifyPlayerState payload;
-      // ratings are retired by Spotify; the rest are stubs for features that
-      // never shipped. Swallow rather than implement.
       StockInterAppRecv::GetCapabilities {}
       | StockInterAppRecv::GetShuffle {}
       | StockInterAppRecv::GetRepeat {}
@@ -946,8 +930,6 @@ impl RecvMsgData {
       | StockInterAppRecv::SetRating
       | StockInterAppRecv::StartRadio => RecvMsgData::Hole,
 
-      // Deprecated verbs kept on the enum for round-trip parsing of
-      // older stock builds; the daemon never actions them.
       StockInterAppRecv::_PlayItem
       | StockInterAppRecv::_PlayUri
       | StockInterAppRecv::_SeekToPosition
@@ -1419,7 +1401,6 @@ mod test {
       ..Default::default()
     };
     let track = super::media_item_to_stock_track(item);
-    // a non-empty uri is what makes the stock npv transport controls live.
     assert_eq!(track.uri, "iap2:track:a");
     assert_eq!(track.uid, "iap2:track:a");
   }
@@ -1464,16 +1445,12 @@ mod test {
         track,
         ..
       } => {
-        // a non-empty context keeps the stock "let's drive" empty-context modal away.
         assert_eq!(context_uri, "iap2:track:y");
         assert_eq!(context_title, "");
-        // skip rides hid; seek follows the elapsed-time gate; like has no target;
-        // shuffle is off because its state is unknown.
         assert!(playback_restrictions.can_skip_next);
         assert!(playback_restrictions.can_seek);
         assert!(!playback_restrictions.can_like);
         assert!(!playback_restrictions.can_toggle_shuffle);
-        // a non-empty track uri is what enables the transport controls.
         assert_eq!(track.uri, "iap2:track:y");
       }
       other => panic!("expected SpotifyPlayerState, got {other:?}"),

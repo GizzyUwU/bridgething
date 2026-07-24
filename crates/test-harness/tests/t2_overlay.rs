@@ -1,10 +1,3 @@
-//! Tier-2: the daemon's cdp overlay injection against a real headless chromium.
-//! The daemon's chrome worker dials a fixed debug port (BRIDGETHING_CHROME_PORT),
-//! installs the embedded overlay bundle via addScriptToEvaluateOnNewDocument, and
-//! the served page mounts the shadow host. One test fn: the env var is process
-//! global, and this file is its own test binary. Skips (does not fail) when no
-//! chromium binary is present.
-
 use std::time::Duration;
 
 use bridgething_test_harness::Harness;

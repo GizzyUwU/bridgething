@@ -1,9 +1,3 @@
-//! Auth flow: drives the `0xAA00..0xAA05` exchange against the MFi
-//! coprocessor. Owns its own state (`AuthState`) and reaches the chip
-//! through an [`MfiAccess`] handle the parent session loans on each
-//! call. `AuthFlow::handles` lets the session dispatch by msg-id range
-//! without each flow having to peek at unrelated CSMs.
-
 use bridgething_mfi::CHALLENGE_LEN;
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -49,8 +43,6 @@ impl AuthFlow {
     self.state == AuthState::Authenticated
   }
 
-  /// Process one auth-range CSM. `Some(event)` means "emit this terminal event and disconnect
-  /// the link"; `None` means handled internally (may have emitted a non-terminal event already).
   pub(super) async fn handle<M: MfiAccess>(
     &mut self,
     frame: CsmFrame,

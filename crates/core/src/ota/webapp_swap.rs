@@ -1,9 +1,3 @@
-//! Builtin-webapp OTA backend. Extracts the streamed zip bundle and
-//! validates the manifest id is hub or stock, then parks the validated
-//! tree at a stable `.incoming.<name>` path on the bandaid bind-mount
-//! (`/opt/bridgething/webapps`). The live rotate and the single service
-//! restart happen later, on `OtaActivate`, via `staging::commit`.
-
 use std::{
   io,
   path::{Path, PathBuf},

@@ -41,6 +41,7 @@ public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
     public let imageZck: OtaArtifactDigest?
     public let imageBootZck: OtaArtifactDigest?
     public let webapps: [String: OtaArtifactDigest]
+    public let daemonPatches: [String: OtaArtifactDigest]
 
     private enum CodingKeys: String, CodingKey {
         case daemon
@@ -48,6 +49,7 @@ public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
         case imageZck = "image_zck"
         case imageBootZck = "image_boot_zck"
         case webapps
+        case daemonPatches = "daemon_patches"
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +59,7 @@ public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
         imageZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageZck)
         imageBootZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageBootZck)
         webapps = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .webapps) ?? [:]
+        daemonPatches = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .daemonPatches) ?? [:]
     }
 }
 
@@ -154,5 +157,14 @@ public struct OtaArtifactURLs: Sendable, Equatable {
             .appendingPathComponent(name)
             .appendingPathComponent(version)
             .appendingPathComponent("\(name).zip")
+    }
+
+    public static func daemonPatch(rootURL: URL, channel: String, toVersion: String, fromVersion: String) -> URL {
+        rootURL
+            .appendingPathComponent("daemon")
+            .appendingPathComponent(channel)
+            .appendingPathComponent(toVersion)
+            .appendingPathComponent("patches")
+            .appendingPathComponent("from-\(fromVersion).zst")
     }
 }

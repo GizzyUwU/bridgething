@@ -1,21 +1,3 @@
-//! Device-half (iPhone-side) iAP2 emulator for over-air testing.
-//!
-//! Drives a real accessory through the iAP2 lifecycle the way an iPhone
-//! does: the device-role link ([`Link::run_device`]) completes the
-//! handshake, then this scripted session driver walks authentication,
-//! identification, the NowPlaying / artwork pushes, HID enablement, and
-//! the External Accessory gateway stream. It consumes [`Iap2Event`] from
-//! the link and emits [`Iap2Command::Send`] back, exactly mirroring
-//! [`crate::session::Iap2Session`] one role over.
-//!
-//! No MFi anywhere: the emulator issues the auth challenge and accepts
-//! whatever the accessory's real coprocessor signs without validating
-//! against Apple's CA (it is the device side, and cannot validate). This
-//! matches the test-harness "no MFi stubbing" posture - real chip on the
-//! accessory, no fake on either side.
-//!
-//! [`Link::run_device`]: crate::Link::run_device
-
 mod ea;
 
 use bytes::{Bytes, BytesMut};

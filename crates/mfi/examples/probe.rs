@@ -1,14 +1,3 @@
-//! Smoke-test a real MFi chip via the device-side `bridgething-mfi-proxy`.
-//!
-//! Run on the host. The proxy must be reachable over TCP - either bound
-//! directly to the device IP or surfaced through an SSH port-forward
-//! (`ssh -L 9090:127.0.0.1:9090 root@bridgething.local`). All read paths
-//! are exercised; signing is skipped because it requires a live iPhone
-//! challenge.
-//!
-//! Usage: `cargo run -p bridgething-mfi --example probe -- <host:port>`
-//! Default target: `127.0.0.1:9090`.
-
 use std::{env, process::ExitCode};
 
 use bridgething_mfi::{MfiAuth, RemoteI2c};

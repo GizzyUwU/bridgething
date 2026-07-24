@@ -942,7 +942,6 @@ mod tests {
     )
     .await
     .unwrap();
-    // served per-read from disk, zero resident memory bytes
     assert_eq!(a.memory_byte_total, 0);
     let got = a.handle_get("lib/root/0".into()).await.unwrap();
     assert_eq!(&got.bytes[..], b"grid-thumb");
@@ -973,7 +972,6 @@ mod tests {
     .unwrap();
     drop(a);
 
-    // restart: the Ttl blob has no row, so the orphan sweep removes it.
     let (events_tx2, _) = broadcast::channel(16);
     let (_cmd_tx2, cmd_rx2) = mpsc::channel(16);
     let mut a2 = AssetActor::new(db, blobs.clone(), cmd_rx2, events_tx2)
@@ -987,7 +985,6 @@ mod tests {
   #[tokio::test]
   async fn age_times_size_evicts_large_stale_before_small() {
     let mut a = fresh().await;
-    // one large entry inserted first (stale), then many small ones.
     let big = Bytes::from(vec![0u8; MEMORY_BUDGET_BYTES / 2]);
     a.handle_insert("big".into(), big, None, Retention::MEM_LRU)
       .await
@@ -998,8 +995,6 @@ mod tests {
         .await
         .unwrap();
     }
-    // inserting another large entry must evict the stale large one, not the
-    // small thumbs (age * size picks the stale big victim).
     let big2 = Bytes::from(vec![2u8; MEMORY_BUDGET_BYTES / 2]);
     a.handle_insert("big2".into(), big2, None, Retention::MEM_LRU)
       .await
@@ -1059,7 +1054,6 @@ mod tests {
     a.handle_set_retention("m".into(), Retention::DISK_PINNED)
       .await
       .unwrap();
-    // unchanged: still a memory entry
     assert_eq!(a.entries.get("m").unwrap().tier(), Tier::Memory);
   }
 
@@ -1201,13 +1195,11 @@ mod tests {
     a.handle_insert("art/new".into(), Bytes::from_static(b"new"), None, Retention::DISK_LRU)
       .await
       .unwrap();
-    // inserts within one second tie on accessed_at, so set it explicitly to assert ordering.
     a.entries.get_mut("preset/0").unwrap().accessed_at = 100;
     a.entries.get_mut("art/old").unwrap().accessed_at = 10;
     a.entries.get_mut("art/new").unwrap().accessed_at = 50;
     assert_eq!(a.pick_disk_evictable_victim().as_deref(), Some("art/old"));
     a.evict_entry("art/old").await;
-    // pinned presets are filtered out even when oldest, so the next victim is the remaining art.
     a.entries.get_mut("preset/0").unwrap().accessed_at = 1;
     assert_eq!(a.pick_disk_evictable_victim().as_deref(), Some("art/new"));
   }
@@ -1216,27 +1208,22 @@ mod tests {
 
   #[test]
   fn disk_over_limit_trips_on_budget_alone() {
-    // ample free space, but the cache is past its soft byte budget.
     assert!(disk_over_limit(600 * MB, 4096 * MB, 512 * MB, 128 * MB));
   }
 
   #[test]
   fn disk_over_limit_trips_on_free_floor_alone() {
-    // cache is small, but the partition has dipped below the free-space floor.
     assert!(disk_over_limit(10 * MB, 64 * MB, 512 * MB, 128 * MB));
   }
 
   #[test]
   fn disk_over_limit_satisfied_when_under_budget_and_above_floor() {
     assert!(!disk_over_limit(400 * MB, 256 * MB, 512 * MB, 128 * MB));
-    // exactly at the budget and exactly at the floor are both within limits.
     assert!(!disk_over_limit(512 * MB, 128 * MB, 512 * MB, 128 * MB));
   }
 
   #[test]
   fn disk_over_limit_models_reserve_floor() {
-    // reserve raises the floor to headroom + need; a partition that satisfies the
-    // bare headroom can still trip once the incoming download is accounted for.
     let headroom = 128 * MB;
     let need = 300 * MB;
     let reserve_floor = headroom + need;
@@ -1251,7 +1238,6 @@ mod tests {
     a.handle_insert("art/lru".into(), Bytes::from_static(b"lru"), None, Retention::DISK_LRU)
       .await
       .unwrap();
-    // a disk cache holding only non-pinned art yields no pinned victim.
     assert!(a.pick_disk_pinned_victim().is_none());
     a.handle_insert(
       "preset/a".into(),
@@ -1271,7 +1257,6 @@ mod tests {
     .unwrap();
     a.entries.get_mut("preset/a").unwrap().accessed_at = 5;
     a.entries.get_mut("preset/b").unwrap().accessed_at = 50;
-    // oldest-accessed pinned entry is the emergency victim; lru art is never returned here.
     assert_eq!(a.pick_disk_pinned_victim().as_deref(), Some("preset/a"));
   }
 }

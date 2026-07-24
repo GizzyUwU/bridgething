@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const B62: &[u8; 62] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";

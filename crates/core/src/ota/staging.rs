@@ -1,14 +1,3 @@
-//! Shared staging primitives for bandaid OTA pieces (daemon + builtin
-//! webapp). A piece is staged -- validated payload landed at a stable
-//! `.incoming` path with nothing live yet -- by the kind-specific backend.
-//! The orchestrator then commits the whole batch atomically per-piece and
-//! restarts the service once on `OtaActivate`.
-//!
-//! `commit` rotates `current -> previous` (the rollback copy) then
-//! `incoming -> current`; both renames are same-fs on the bandaid, so each
-//! is atomic. The pre-batch `previous` is intentionally cleared during
-//! `stage` to free bandaid space and recreated here by the rotate.
-
 use std::{
   io,
   path::{Path, PathBuf},

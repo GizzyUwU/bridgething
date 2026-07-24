@@ -55,9 +55,6 @@ pub(crate) fn unwrap_box(ty: &Type) -> Option<&Type> {
   }
 }
 
-/// Qualify `ty` for use inside a `mod __X_responses { ... }` scope.
-/// Bare idents get `super::`, `Box<T>` becomes `::std::boxed::Box<super::T>`,
-/// already-rooted paths pass through unchanged.
 fn qualify_payload_type(ty: &Type) -> TokenStream2 {
   use syn::{GenericArgument, PathArguments};
 
@@ -73,12 +70,10 @@ fn qualify_payload_type(ty: &Type) -> TokenStream2 {
       .map(|s| s.ident == "crate" || s.ident == "self" || s.ident == "super")
       .unwrap_or(false);
 
-  // single-segment: super-qualify user types, std-qualify Box (prelude; `super::Box` breaks).
   if !absolute && path.segments.len() == 1 {
     let seg = path.segments.first().expect("len 1 verified");
     let ident = &seg.ident;
 
-    // Recurse into generic args so `Box<Foo>` qualifies the inner Foo.
     let qualified_args = match &seg.arguments {
       PathArguments::None => quote!(),
       PathArguments::AngleBracketed(ab) => {
@@ -134,8 +129,6 @@ impl Direction {
     }
   }
 
-  /// Path to the matching outer wire data enum. Lives in `lib::gateway`
-  /// for the Bluetooth pair, `lib::client` for the WebSocket pair.
   fn wire_data_path(self, lib: &TokenStream2) -> TokenStream2 {
     match self {
       Self::BridgeToGateway => quote!(#lib::gateway::BridgeToGatewayMsgData),

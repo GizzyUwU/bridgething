@@ -1,11 +1,3 @@
-//! End-to-end tests for the iAP2 control session: drives a fake peer
-//! that completes the link handshake, walks the auth + identification
-//! exchange, and asserts the [`Iap2Session`] task emits
-//! `Authenticated` then `Identified`. Two more tests cover the
-//! `AuthenticationFailed` and `IdentificationRejected` paths. All
-//! three use a hand-rolled [`FakeMfi`] impl of [`MfiAccess`] so the
-//! tests do not need to import or run a `MockTransport`.
-
 mod common;
 
 use std::time::Duration;

@@ -1,15 +1,3 @@
-//! Receiver-side routing for inbound `TransferFragment` / `TransferAbandon`.
-//! A consumer binds a sink for a transfer id before fragments can arrive
-//! (pull surfaces bind at request time, push surfaces at their begin
-//! request), then fragments route by id: memory sinks reassemble in place
-//! under a hard cap, forward sinks relay to the owning subsystem (OTA disk
-//! pump, range-proxy HTTP body). Memory fragments reassemble inline on the
-//! caller (they never block); forward fragments are handed to a per-transfer
-//! demux task that owns the blocking send to the consumer so a stalled
-//! consumer (slow range client, fsync hitch) never head-of-line-blocks the
-//! shared inbound bus. Fragments for unknown ids are dropped - a cancelled or
-//! timed-out stream, not an error.
-
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
@@ -165,7 +153,6 @@ impl TransferSinks {
       loop {
         let notified = self.inner.progress.notified();
         tokio::pin!(notified);
-        // register for wakeups before the check so a fragment between them is not lost
         notified.as_mut().enable();
         {
           let mut bindings = self.inner.bindings.lock().unwrap();
@@ -253,8 +240,6 @@ mod tests {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     sinks.bind_memory(id);
-    // a well-behaved companion sends exactly total_size; a final fragment that grows the buffer past
-    // the declared total is trailing junk and must fail rather than cache the over-long asset.
     sinks.fragment(id, 0, frag(b"hello"));
     sinks.fragment(id, 5, frag(b" world"));
     assert!(
@@ -313,7 +298,6 @@ mod tests {
       TransferEvent::Abandon { reason } => assert_eq!(reason, "curl gave up"),
       other => panic!("expected abandon, got {other:?}"),
     }
-    // abandon unbinds; later fragments drop silently and the demux closes the consumer channel.
     sinks.fragment(id, 2, frag(b"bb"));
     assert!(rx.recv().await.is_none());
   }
@@ -322,7 +306,6 @@ mod tests {
   async fn forward_stall_past_buffer_abandons_off_the_bus() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    // hold the consumer without ever draining it so both the demux and ingest buffers fill.
     let _rx = sinks.bind_forward(id);
     let mut abandoned = false;
     for offset in 0..(FORWARD_INGEST_CAPACITY + FORWARD_CONSUMER_CAPACITY + 8) as u32 {
@@ -345,8 +328,6 @@ mod tests {
     let id = Uuid::now_v7();
     let rx = sinks.bind_forward(id);
     drop(rx);
-    // the demux only learns the consumer is gone when it fails to forward; drive one fragment through
-    // and let it run, then the binding is cleared.
     sinks.fragment(id, 0, frag(b"aa"));
     for _ in 0..100 {
       if sinks.inner.bindings.lock().unwrap().get(&id).is_none() {

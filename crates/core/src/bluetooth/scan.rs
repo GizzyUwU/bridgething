@@ -1,12 +1,3 @@
-//! aggressive interlaced inquiry scan so the device shows up fast in ios
-//! settings / EAAccessoryManager while discoverable. bluez only toggles
-//! inquiry scan on/off via the Discoverable property and leaves the scan
-//! activity at the controller default (~11 ms window every 2.56 s, ~0.4%
-//! duty), which is why discovery otherwise takes tens of seconds. neither
-//! bluez D-Bus nor the mgmt api exposes scan activity, so it goes over a
-//! raw HCI socket. the controller resets these to default on every adapter
-//! power-on, so they are reapplied each time discoverable is enabled.
-
 use std::{
   io,
   os::fd::{AsRawFd, OwnedFd},
@@ -18,9 +9,6 @@ use super::hci::{hci_index, open_raw_hci};
 
 const HCI_COMMAND_PKT: u8 = 0x01;
 
-// Write_Inquiry_Scan_Activity (OGF 0x03, OCF 0x1E) and Write_Inquiry_Scan_Type
-// (OCF 0x43). interval/window are LE counts of 0.625 ms slots: 0x0200 = 320 ms
-// interval, 0x0100 = 160 ms window (50% duty), type 0x01 = interlaced.
 const OP_WRITE_INQ_SCAN_ACTIVITY: u16 = 0x0c1e;
 const OP_WRITE_INQ_SCAN_TYPE: u16 = 0x0c43;
 const INQ_SCAN_INTERVAL: u16 = 0x0200;

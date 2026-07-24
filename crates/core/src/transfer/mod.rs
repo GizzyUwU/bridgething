@@ -1,25 +1,3 @@
-//! Disk-backed chunked transfer primitive. The single intermediate
-//! buffer for any wire surface that uses a `Begin` + `Chunk` shape -
-//! today that's OTA artifact streaming.
-//!
-//! Each transfer lives as two files under `transfers_dir`: a `.partial`
-//! holding the bytes received so far and a `.meta` json sidecar
-//! recording `(id, expected_size, expected_sha256?, received,
-//! last_touched_unix)`. Filenames are `hex(sha256(id))` so arbitrary
-//! ids (including ones with `/` from the asset namespace) are
-//! filesystem-safe without escaping.
-//!
-//! Bytes never accumulate in memory: each chunk is appended to the
-//! partial file as it arrives, the meta sidecar is rewritten, and the
-//! Bytes is dropped. Peak daemon-side memory cost is one chunk in
-//! flight regardless of total transfer size.
-//!
-//! Resume across daemon restarts: on bootstrap, every meta sidecar is
-//! loaded; partial files longer than `meta.received` (post-power-loss
-//! state where bytes hit the file but the meta write didn't) are
-//! truncated. The companion's next `begin` for that id sees the
-//! recovered offset and continues.
-
 mod actor;
 pub mod outbound;
 pub mod sinks;

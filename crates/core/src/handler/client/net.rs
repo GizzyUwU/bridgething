@@ -211,7 +211,6 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     let open = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     if snapshot.gateway.is_none() || !snapshot.available.net_fetch {
-      // stream_open has no synchronous reply, so rejection goes out as a StreamError bus event.
       let error = if snapshot.gateway.is_none() {
         NetError::NoGateway
       } else {

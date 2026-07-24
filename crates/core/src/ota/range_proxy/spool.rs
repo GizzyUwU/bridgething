@@ -1,9 +1,3 @@
-//! disk-backed spool decoupling companion range ingest from swupdate reads.
-//! the ingest pump appends fragments and acks on receipt; the HTTP body
-//! tails the file, blocking at EOF until more bytes commit. the file is
-//! unlinked at creation so it lives only as the two open fds and any exit
-//! path (completion, abandon, panic, daemon restart) reclaims the disk.
-
 use std::path::Path;
 
 use tokio::{

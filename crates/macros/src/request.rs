@@ -68,7 +68,6 @@ impl Direction {
     }
   }
 
-  /// Outer wire data type the request lifts into / the response arrives on.
   fn outer_wire(self, lib: &TokenStream2) -> TokenStream2 {
     match self {
       Self::BridgeToGateway => quote!(#lib::gateway::BridgeToGatewayMsgData),
@@ -78,7 +77,6 @@ impl Direction {
     }
   }
 
-  /// Inner enum for a given surface ident. `<Direction><Surface>Msg`.
   fn inner_for(self, lib: &TokenStream2, surface: &Ident) -> TokenStream2 {
     let prefix = match self {
       Self::BridgeToGateway => "BridgeToGateway",
@@ -101,12 +99,9 @@ struct RequestAttr {
   request_variant: Ident,
   response: Type,
   response_variant: Ident,
-  /// Wire variant is `Variant(Box<T>)` but `Self::Response = T`. `extract` auto-derefs,
-  /// `encode_response` auto-boxes, and the cross-direction assertion checks `PhantomData<Box<T>>`.
   boxed_response: bool,
   error: Option<Type>,
   error_variant: Option<Ident>,
-  /// Same as `boxed_response` for the domain-error variant.
   boxed_error: bool,
 }
 
@@ -198,7 +193,6 @@ fn lib_crate_path() -> TokenStream2 {
   }
 }
 
-/// Returns true if the request payload is a unit struct (no fields).
 fn is_unit_struct(ast: &DeriveInput) -> syn::Result<bool> {
   match &ast.data {
     Data::Struct(s) => match &s.fields {

@@ -1,7 +1,3 @@
-//! Queue visibility scenarios: whatever order the companion's claim, snapshot, and
-//! queueChanged land in on connect, the daemon must converge to serving the held queue,
-//! and the QueueChanged broadcast must actually reach clients.
-
 use std::time::Duration;
 
 use bridgething_gateway::Gateway;
@@ -149,8 +145,6 @@ async fn connect_order_snapshot_queue_claim_serves_the_queue() {
   assert_queue_visible(&harness, "snapshot-queue-claim").await;
 }
 
-/// A companion blip retains the held queue; the reconnecting companion re-claims and re-sends its
-/// snapshot but may dedup the unchanged queue away, so the daemon must serve the retained one.
 #[tokio::test]
 async fn reconnect_without_a_queue_resend_serves_the_retained_queue() {
   let harness = Harness::start().await.expect("harness start");
@@ -172,8 +166,6 @@ async fn reconnect_without_a_queue_resend_serves_the_retained_queue() {
   assert_queue_visible(&harness, "post-reconnect").await;
 }
 
-/// The queue broadcast must reach clients on connect, not only live in daemon state: a client
-/// attached before the companion must observe a player frame carrying the upcoming tracks.
 #[tokio::test]
 async fn connect_broadcasts_the_queue_to_attached_clients() {
   let harness = Harness::start().await.expect("harness start");

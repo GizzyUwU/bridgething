@@ -1768,6 +1768,26 @@ data class TransferRef (
 	val sha256: String? = null
 )
 
+/// Delta algorithm the daemon applies to reconstruct a full artifact from a
+/// pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
+/// is the currently-installed artifact.
+@Serializable
+enum class OtaPatchAlgorithm(val string: String) {
+	@SerialName("zstdPatchFrom")
+	ZstdPatchFrom("zstdPatchFrom"),
+}
+
+/// Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
+/// receiving it the daemon applies `algorithm` against its current artifact
+/// and verifies the reconstruction is `result_size` bytes hashing to
+/// `result_sha256` before it reaches staging.
+@Serializable
+data class OtaPatch (
+	val algorithm: OtaPatchAlgorithm,
+	val resultSha256: String,
+	val resultSize: UInt
+)
+
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the first
@@ -1786,12 +1806,18 @@ data class TransferRef (
 /// `update_url_base` is image-kind only: the server prefix the companion
 /// may refetch the .zck delta from on cache miss while serving range
 /// requests during the Writing phase. Ignored for non-image kinds.
+/// 
+/// `patch`, when present, marks `transfer` as a delta rather than the whole
+/// artifact: the daemon reconstructs against its currently-installed artifact
+/// of this `kind` before staging. Daemon-kind only today. Absent for full
+/// pushes.
 @Serializable
 data class OtaBegin (
 	val kind: OtaKind,
 	val updateId: String,
 	val updateUrlBase: String? = null,
-	val transfer: TransferRef
+	val transfer: TransferRef,
+	val patch: OtaPatch? = null
 )
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte

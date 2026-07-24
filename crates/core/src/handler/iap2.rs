@@ -1,10 +1,3 @@
-//! Inbound iAP2 SessionEvent router.
-//!
-//! The iAP2 manager emits per-peer `Iap2Event`s upstream over a public
-//! mpsc; the daemon's main loop reads from that channel and calls
-//! `Iap2EventRouter::route` for each event. State mutation lives here,
-//! one variant per arm.
-
 use std::{
   collections::HashMap,
   sync::Arc,

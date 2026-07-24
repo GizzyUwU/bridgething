@@ -1,15 +1,3 @@
-//! Wait + dedup helpers for asset fetches that race against producers.
-//!
-//! `wait_for_asset` is a timeout-bounded subscribe-then-poll over
-//! [`AssetCacheEvent`] used by every consumer that wants to give a
-//! producer (iAP2 FileTransfer, chunked companion push) a chance to
-//! land bytes before the consumer sees `NotFound`.
-//!
-//! [`AssetWaitTracker`] coalesces concurrent fetches for the same id
-//! down to a single upstream lookup and short-circuits repeated
-//! `NotFound`s with a small TTL so a misbehaving webapp can't drown
-//! the daemon in companion round trips for one missing id.
-
 use std::{
   collections::HashMap,
   sync::Arc,

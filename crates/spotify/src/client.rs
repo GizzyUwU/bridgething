@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
@@ -107,7 +105,6 @@ impl BrowseCache {
 
   fn note_playlists_changed(&mut self) {
     self.rootlist = None;
-    // playlist hydrations carry mutable name/cover; catalog metadata (tracks/albums/...) is immutable
     self
       .hydrated
       .retain(|uri, _| !uri.starts_with("spotify:playlist:") && !uri.ends_with(":collection"));
@@ -1559,9 +1556,6 @@ mod tests {
     fn on_library_changed(&self, _scope: LibraryScope) {}
   }
 
-  // routes worker auth to a canned token, refuses client-token minting, records every spclient hit.
-  // when resume_flip is set, a resume command flips the cluster to that state, simulating a
-  // reachable phone that actually starts playback.
   #[derive(Default)]
   struct RouteTransport {
     hits: Arc<StdMutex<Vec<(String, String)>>>,
@@ -1629,8 +1623,6 @@ mod tests {
       .collect()
   }
 
-  // records wake calls; optionally publishes a cluster on wake to simulate the phone's spotify
-  // registering after being woken.
   struct FakeWaker {
     calls: Arc<AtomicUsize>,
     reasons: Arc<StdMutex<Vec<WakeReason>>>,
@@ -1681,8 +1673,6 @@ mod tests {
   }
 
   impl Rig {
-    // a subsequent resume command flips the cluster to this state (a reachable phone that
-    // actually starts playing when commanded).
     async fn flip_to_on_resume(&self, cluster: Cluster) {
       *self.resume_flip.lock().unwrap() = Some((self.client.shared.clone(), cluster));
     }
@@ -1793,7 +1783,6 @@ mod tests {
 
   #[tokio::test]
   async fn connect_resume_transfers_parked_session_to_the_phone() {
-    // the b16tran repro: idle session parked on an always-on speaker, phone present
     let r = rig(
       Some(cluster(
         "avr-1",
@@ -1874,8 +1863,6 @@ mod tests {
 
   #[tokio::test]
   async fn connect_resume_wakes_and_targets_the_phone_when_absent() {
-    // only an idle speaker registered: the phone's spotify is cold. wake it, then resume at the
-    // phone that appears, never the speaker.
     let woken = cluster(
       "",
       false,
@@ -1920,9 +1907,6 @@ mod tests {
 
   #[tokio::test(start_paused = true)]
   async fn connect_resume_escalates_to_wake_when_the_resume_lands_nowhere() {
-    // the killed base case: the cluster still lists the phone but its spotify is suspended and
-    // unreachable, so the resume goes into the void. escalate to the platform wake, then resume
-    // again at the phone once it re-registers.
     let woken = cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)]);
     let r = rig(
       Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
@@ -1957,7 +1941,6 @@ mod tests {
 
   #[tokio::test(start_paused = true)]
   async fn connect_resume_escalation_targets_the_phone_that_registers_after_wake() {
-    // the relaunched spotify can come back under a fresh device id; the retry must re-resolve.
     let woken = cluster("", false, &[("phone-2", DeviceType::SMARTPHONE)]);
     let r = rig(
       Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
@@ -1975,7 +1958,6 @@ mod tests {
 
   #[tokio::test(start_paused = true)]
   async fn connect_resume_escalation_stands_down_when_the_wake_resumes_playback() {
-    // the daemon wake leg can resume playback by itself (hid play tap); no second resume then.
     let woken = cluster("phone-1", true, &[("phone-1", DeviceType::SMARTPHONE)]);
     let r = rig(
       Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
@@ -1993,8 +1975,6 @@ mod tests {
 
   #[tokio::test(start_paused = true)]
   async fn connect_resume_never_wakes_twice() {
-    // the wake path already woke once; an unconfirmed resume afterwards stands down instead of
-    // launching spotify again.
     let woken = cluster(
       "",
       false,

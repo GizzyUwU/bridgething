@@ -532,8 +532,6 @@ mod test {
       .0
     };
 
-    // the android store hardcodes isRingingOutgoing = false, so there is no
-    // outgoing-ring state to map onto; it may only surface once connected
     assert_eq!(state_for(PhoneCallStatus::Sending), StockLegacyPhoneCallState::Idle);
     assert_eq!(state_for(PhoneCallStatus::Ringing), StockLegacyPhoneCallState::Idle);
     assert_eq!(state_for(PhoneCallStatus::Active), StockLegacyPhoneCallState::Offhook);
@@ -567,7 +565,6 @@ mod test {
       format_nanp("3f8a1c2d-9b4e-4a7f-8c1d-2e6b9f0a1c34"),
       "3f8a1c2d-9b4e-4a7f-8c1d-2e6b9f0a1c34"
     );
-    // an opaque handle containing exactly ten digits is still not a phone number
     assert_eq!(format_nanp("a1b2c3d4e5-f6a7-8b9c-0d"), "a1b2c3d4e5-f6a7-8b9c-0d");
   }
 }

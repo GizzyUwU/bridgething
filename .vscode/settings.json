@@ -42,6 +42,6 @@
       }
     ]
   },
-  "rust-analyzer.rustfmt.overrideCommand": ["cargo", "+nightly", "fmt"],
+  "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
   "cmake.ignoreCMakeListsMissing": true
 }

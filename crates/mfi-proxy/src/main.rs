@@ -1,16 +1,4 @@
 #![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
-//! Device-side proxy that exposes the MFi chip over TCP.
-//!
-//! Run on the Car Thing during dev iteration; pair with
-//! [`bridgething_mfi::RemoteI2c`] on the dev host. Single-client at a
-//! time - when one client disconnects the next can connect. The chip is
-//! a single-resource so concurrency would be a footgun anyway.
-//!
-//! Usage: `bridgething-mfi-proxy [BIND] [DEVICE] [follower]`
-//!
-//! Defaults: `0.0.0.0:9090 /dev/i2c-3 0x10`. The follower address may be
-//! passed as decimal or `0x`-prefixed hex.
-
 use std::{env, net::TcpListener, path::PathBuf, process::ExitCode};
 
 #[cfg(target_os = "linux")]

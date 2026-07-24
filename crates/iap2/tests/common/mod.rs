@@ -1,14 +1,3 @@
-//! Shared helpers for iap2 integration tests.
-//!
-//! Each test file declares `mod common;` and consumes:
-//! - LSP builders (`peer_lsp_builder`, `accessory_lsp`)
-//! - Wire I/O helpers (`write_link`, `read_link`)
-//! - Setup primitives (`spawn_link_with`, `drive_peer_handshake`)
-//! - `recv_with_timeout` for event-channel polling
-//!
-//! Per-test-file scaffolds (`Established`, `Harness`) compose these
-//! into higher-level fixtures.
-
 use std::time::Duration;
 
 use bridgething_iap2::{
@@ -24,8 +13,6 @@ use tokio_util::codec::{Decoder, Encoder};
 
 pub const PEER_INITIAL_PSN: u8 = 50;
 
-/// Variable LSP knobs the tests tweak; everything else stays at the
-/// default the fake peer would happily accept.
 #[derive(Debug, Clone)]
 pub struct LspBuilder {
   pub max_outgoing: u8,
@@ -74,8 +61,6 @@ impl LspBuilder {
   }
 }
 
-/// Fast-handshake LinkConfig for tests. Detect every 50 ms, 5-second
-/// handshake budget.
 pub fn fast_link_config(our_lsp: Lsp) -> LinkConfig {
   let mut config = LinkConfig::new(our_lsp);
   config.detect_interval = Duration::from_millis(50);
@@ -104,9 +89,6 @@ pub async fn recv_with_timeout<T>(rx: &mut mpsc::Receiver<T>, timeout: Duration)
   tokio::time::timeout(timeout, rx.recv()).await.ok().flatten()
 }
 
-/// Wire up a duplex pair, spawn the link with the given config, and
-/// hand back the peer end + the channels the link is using. Caller
-/// drives the handshake from the peer side.
 pub fn spawn_link(
   config: LinkConfig,
 ) -> (
@@ -122,9 +104,6 @@ pub fn spawn_link(
   (peer, cmd_tx, events_rx, handle)
 }
 
-/// Drive the peer side of detect + SYN + read-our-SYN + read-our-ACK,
-/// returning the buffer + codec the caller should keep using and the
-/// PSN the accessory chose for itself.
 pub async fn drive_peer_handshake(peer: &mut DuplexStream, peer_lsp: Lsp) -> (BytesMut, LinkCodec, u8) {
   peer.write_all(&DETECT_MARKER).await.unwrap();
   let mut codec = LinkCodec;

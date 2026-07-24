@@ -1,8 +1,3 @@
-//! Integration tests for the iAP2 link's Established phase: DATA send +
-//! recv, ACK piggyback, retransmit, EAK, window backpressure, ack-delay.
-//! Drives a hand-rolled fake peer over `tokio::io::duplex` with short
-//! timing values so retransmit + ack-delay fire within a few hundred ms.
-
 mod common;
 
 use std::time::Duration;

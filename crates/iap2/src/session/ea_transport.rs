@@ -1,33 +1,14 @@
-//! Role-agnostic External Accessory stream transport for iAP2 link
-//! session id 3. Both roles frame EA stream data identically: a u16-BE
-//! stream-id prefix per chunk, split at the negotiated link payload
-//! budget, with priority lanes drained in order (Normal, Bulk,
-//! Background) at chunk boundaries. Within a lane, consecutive frames
-//! for the same stream coalesce so every link packet fills to the
-//! negotiated budget - partially-filled packets waste slots in the
-//! small `max_outgoing` window. EA is a byte stream to the app on the
-//! other side, so packet boundaries are invisible. The accessory
-//! ([`super::external_accessory::EaFlow`]) and the device emulator
-//! share this; only the control-plane CSMs that open and close streams
-//! differ by role.
-
 use bytes::{Bytes, BytesMut};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{frame::LINK_FRAME_OVERHEAD, link::Iap2Command};
 
-/// Link session id used by `Lsp::accessory_default` for EA traffic. Must match the
-/// `SessionTriple { session_type: 2, ... }` declared in the SYN.
 pub(crate) const EA_LINK_SESSION_ID: u8 = 3;
-
-/// u16-BE stream-id prefixed onto every EA link payload.
 const EA_STREAM_ID_PREFIX_LEN: usize = 2;
-
 const LANE_CAPACITY: usize = 16;
 
 type FramedBytes = (u16, Bytes);
 
-/// Lane priority hint a consumer attaches when sending bytes on an EA stream.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EaPriority {
   #[default]
@@ -42,8 +23,6 @@ pub enum EaSendError {
   ChannelClosed,
 }
 
-/// Outbound side of an EA stream, bound to one stream id. [`EaStreamSender::send`] tags each frame
-/// with that id and posts it to the matching priority lane on the chunker's fan-in.
 #[derive(Debug, Clone)]
 pub struct EaStreamSender {
   stream_id: u16,
@@ -70,9 +49,6 @@ impl EaStreamSender {
   }
 }
 
-/// Owns the priority-lane fan-in and the chunker task that drains it
-/// onto link session 3. Hand out per-stream [`EaStreamSender`]s with
-/// [`EaChunker::sender`].
 pub(crate) struct EaChunker {
   normal_tx: mpsc::Sender<FramedBytes>,
   bulk_tx: mpsc::Sender<FramedBytes>,
@@ -111,9 +87,6 @@ impl EaChunker {
   }
 }
 
-/// Strip the leading u16-BE stream-id prefix from a session-3 link
-/// payload, returning `(stream_id, rest)`. `None` if the payload is too
-/// short to carry a prefix.
 pub(crate) fn split_stream_frame(payload: &Bytes) -> Option<(u16, Bytes)> {
   if payload.len() < 2 {
     return None;
@@ -123,9 +96,6 @@ pub(crate) fn split_stream_frame(payload: &Bytes) -> Option<(u16, Bytes)> {
 }
 
 const fn max_chunk_payload(peer_max_len: u16) -> usize {
-  // the link spends LINK_FRAME_OVERHEAD per packet and we prepend the stream-id prefix; both come
-  // out of the peer's max_len. budgeting only the prefix overflows the link, which then re-splits
-  // the packet into an unprefixed continuation frame and corrupts the EA byte stream.
   let overhead = LINK_FRAME_OVERHEAD + EA_STREAM_ID_PREFIX_LEN;
   let total = peer_max_len as usize;
   if total <= overhead { 1 } else { total - overhead }
@@ -150,9 +120,6 @@ async fn chunker_task(
       }
     }
 
-    // build one link packet: bytes from the head frame, topped up from
-    // consecutive same-stream frames until the budget fills or the next
-    // frame belongs to a different stream.
     fn next_packet(&mut self, max_payload: usize) -> Option<(u16, Bytes)> {
       let stream_id = self.queue.front().map(|(id, _)| *id)?;
       let mut out = BytesMut::with_capacity(max_payload.min(64 * 1024));
@@ -177,7 +144,6 @@ async fn chunker_task(
     rx,
     queue: std::collections::VecDeque::new(),
   };
-  // index = priority order: 0 normal, 1 bulk, 2 background.
   let mut lanes = [lane(normal_rx), lane(bulk_rx), lane(background_rx)];
 
   loop {
@@ -308,7 +274,6 @@ mod tests {
     let (_g_tx, g_rx) = mpsc::channel(8);
     tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
 
-    // two 3-byte frames for one stream: 6 bytes pack as 4 + 2, not 3 + 3.
     n_tx.send((0x0100, Bytes::from_static(&[1, 2, 3]))).await.unwrap();
     n_tx.send((0x0100, Bytes::from_static(&[4, 5, 6]))).await.unwrap();
     drop(n_tx);
@@ -405,8 +370,6 @@ mod tests {
 
   #[tokio::test]
   async fn prefixed_packet_never_exceeds_link_payload_budget() {
-    // a full chunk plus its stream-id prefix must fit one link packet; if it overflows the link
-    // re-splits it into an unprefixed continuation frame and corrupts the EA byte stream.
     let peer_max_len: u16 = 2048;
     let link_budget = peer_max_len as usize - LINK_FRAME_OVERHEAD;
     let max_chunk = max_chunk_payload(peer_max_len);

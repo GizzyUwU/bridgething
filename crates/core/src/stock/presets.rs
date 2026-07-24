@@ -1,16 +1,3 @@
-//! Stock preset persistence.
-//!
-//! Stock presets sit in the same per-app KV namespace `client.store`
-//! writes to: `kv.data_*` under `Uuid::nil()`. A modern webapp running
-//! without an active id (`active_webapp` returns `None`) reads/writes
-//! the same scope through `Store.Get`/`Put`/`Delete`, so a debugging
-//! webapp can inspect or edit stock presets via the same wire surface.
-//!
-//! Slots are stored as their own JSON blobs (`presets:1`..`presets:4`)
-//! to avoid contention on per-slot writes; reads use a single prefixed
-//! query and writes go through one transaction so a four-slot SetPreset
-//! is one commit, not four.
-
 use libbridgething::stock::StockPreset;
 use uuid::Uuid;
 

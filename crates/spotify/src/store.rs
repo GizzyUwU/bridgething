@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::path::{Path, PathBuf};
 
 use crate::{auth::TokenStore, http::random_hex};

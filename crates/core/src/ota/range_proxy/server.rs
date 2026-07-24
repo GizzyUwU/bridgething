@@ -1,15 +1,3 @@
-//! axum loopback server. Routes `GET /<asset>` with a `Range:` header
-//! into wire `OtaAssetRange` requests, streams the resulting bytes back
-//! as `206 Partial Content` (single-range or `multipart/byteranges`).
-//! Bound to 127.0.0.1 only.
-//!
-//! libswupdate's delta channel resumes an interrupted download with
-//! `Range: bytes=N-` (`CURLOPT_RESUME_FROM_LARGE`), expecting the same
-//! response body continued from byte N. The broker remembers the parts a
-//! fresh GET requested; a resume rebuilds the body layout, replays it
-//! from N, and re-requests only the companion data still owed. A 416 on
-//! resume is a hard, unretryable swupdate abort, so resume must succeed.
-
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{

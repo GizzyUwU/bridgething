@@ -1,15 +1,3 @@
-//! The Driver/Observer seam: capability traits a scenario body binds on, so
-//! one body lifts to every tier that satisfies its bounds.
-//!
-//! A tier advertises capabilities by implementing these traits; a scenario is
-//! generic over the ones it needs and the per-tier test wrapper instantiates
-//! it. Capabilities a tier lacks (AppState off-device, CDP over the tunnel)
-//! are simply not implemented there, so a scenario needing them does not lift.
-//!
-//! The gateway companion is uniform: the same [`Gateway`] rides the T1
-//! in-process duplex and both T3 over-air transports, so [`DeviceTier`] selects
-//! the transport while one scenario body covers all of them.
-
 use anyhow::Result;
 use async_trait::async_trait;
 use bluer::Address;
@@ -20,53 +8,38 @@ use bridgething_iap2::{DeviceEmulatorHandle, SessionEvent, csm::now_playing::Now
 
 use crate::{DeviceHarness, FrameObserver, Harness, Iap2OutboundObserver, MockWsClient};
 
-/// Drives a gateway companion (announce / authority / now-playing). Uniform
-/// across tiers: T1 in-process duplex, T3 real radio over rfcomm or iAP2 EA.
 #[async_trait]
 pub trait GatewayDriver {
   async fn gateway(&self) -> Result<Gateway>;
 }
 
-/// Drives the iAP2 control session as the iPhone media source. T1/T2 inject
-/// `SessionEvent`s; T3 drives the device-half emulator over the real radio.
 #[async_trait]
 pub trait Iap2SourceDriver {
   type Source: Iap2Source;
   async fn iap2_source(&self) -> Result<Self::Source>;
 }
 
-/// The push surface a scenario drives once it holds an iAP2 source.
 #[async_trait]
 pub trait Iap2Source: Send + Sync {
   async fn push_now_playing(&self, update: Iap2NowPlaying) -> Result<()>;
   async fn push_artwork(&self, transfer_id: u8, bytes: Vec<u8>) -> Result<()>;
 }
 
-/// Opens a modern-mode client, the live recipient a now-playing broadcast
-/// egresses to (and what the frame-tap observes).
 #[async_trait]
 pub trait ModernClientDriver {
   async fn modern_client(&self) -> Result<MockWsClient>;
 }
 
-/// Observes the daemon's egress frame stream, the portable assertion surface
-/// available at every tier.
 #[async_trait]
 pub trait FrameObserve {
   async fn frames(&self) -> Result<FrameObserver>;
 }
 
-/// Drives webapp commands (player / net / asset / config / webapp / geo)
-/// through the real client SDK, the same surface an on-device webapp uses.
 #[async_trait]
 pub trait CommandDriver {
   async fn command_client(&self) -> Result<CommandClient>;
 }
 
-/// Observes outbound iAP2 transport commands (HID pulses, SetNPI). Headless
-/// only: the tap is fed by the in-process coordinator's drain of the transport
-/// channel, so scenarios binding this lift to T1 (not the over-air tiers,
-/// where the live session consumes the channel and the iPhone is the observer).
 #[async_trait]
 pub trait Iap2OutboundObserve {
   async fn iap2_outbound(&self) -> Result<Iap2OutboundObserver>;
@@ -118,8 +91,6 @@ impl Iap2SourceDriver for Harness {
   }
 }
 
-/// T1/T2 iAP2 source: injects `SessionEvent`s on a fixed peer address, the
-/// same channel the real `Iap2Manager` feeds.
 pub struct HarnessIap2Source {
   iap2: Iap2InjectTx,
   addr: Address,
@@ -177,8 +148,6 @@ impl Iap2SourceDriver for DeviceHarness {
   }
 }
 
-/// T3 iAP2 source: drives the device-half emulator's control session over the
-/// real radio via its runtime handle.
 pub struct DeviceIap2Source {
   handle: DeviceEmulatorHandle,
 }
@@ -196,17 +165,12 @@ impl Iap2Source for DeviceIap2Source {
   }
 }
 
-/// Which over-air transport a T3 gateway scenario uses. The same `Gateway`
-/// rides both, so one scenario body lifts across them.
 #[derive(Clone, Copy)]
 pub enum OverAirTransport {
   Rfcomm,
   Iap2Ea,
 }
 
-/// A T3 tier bound to one over-air gateway transport. Wraps a [`DeviceHarness`]
-/// (a type cannot implement [`GatewayDriver`] twice) and delegates the observer
-/// and client capabilities to it.
 pub struct DeviceTier {
   harness: DeviceHarness,
   transport: OverAirTransport,

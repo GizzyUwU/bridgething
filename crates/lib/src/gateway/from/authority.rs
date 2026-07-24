@@ -24,10 +24,6 @@ pub struct AuthorityRelease {
   pub scope: CompanionAuthorityScope,
 }
 
-/// Companion declares per-scope authority. `Release` is the "stop
-/// preferring my data for this scope" signal. Non-now-playing claims
-/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
-/// hold until release / disconnect / app-change arbitration.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

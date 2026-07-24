@@ -1,13 +1,3 @@
-//! A/B slot bookkeeping over u-boot env. Owns:
-//! - reading the currently-active slot to derive the inactive target
-//!   for an OTA install
-//! - resetting the new slot's try counter and flipping `want_boot=kernel`
-//!   so the next reboot actually attempts the freshly-written image
-//!
-//! The active-slot bootenv flip itself is in the .swu's sw-description
-//! `bootenv:` block - swupdate writes that atomically with the
-//! partition writes, so we don't touch `slot_active` here.
-
 use tokio::process::Command;
 
 use crate::paths::{ON_DEVICE_SENTINEL, is_on_device};

@@ -1,14 +1,3 @@
-//! Daemon-wide sqlite connection and unified migrator.
-//!
-//! One database file (`bridgething.db` under `state_dir`) backs both
-//! the asset cache and the persistent app state. WAL is on so the
-//! actor-owned asset writer doesn't block AppState's CRUD reads. The
-//! `synchronous=NORMAL` pragma trades the rare-edge "lose the last
-//! committed transaction on power-loss" guarantee for a large fsync
-//! reduction on every commit; whole-database corruption stays
-//! impossible the way fsync-on-every-write file-blob persistence does
-//! not.
-
 use std::path::Path;
 
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
@@ -16,12 +5,6 @@ use sea_orm_migration::{MigrationTrait, MigratorTrait, async_trait};
 
 use crate::{asset, state};
 
-/// Open the daemon's persistent sqlite database, run all pending
-/// migrations from every domain (asset cache, app state), and return
-/// a connection handle that callers can clone freely.
-///
-/// Pass `None` to open an in-memory database; this is the no-persist
-/// path and is identical at the SQL layer to the on-disk version.
 pub async fn open(path: Option<&Path>) -> Result<DatabaseConnection, DbErr> {
   let url = match path {
     Some(p) => {

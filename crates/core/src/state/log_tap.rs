@@ -1,12 +1,3 @@
-//! Tracing-backed log tap for `system.logsTail` / `system.logsSubscribe`.
-//!
-//! A `tracing_subscriber::Layer` siphons every event the global filter
-//! lets through into a bounded ring buffer (for one-shot `LogsTail`)
-//! and a broadcast channel (for live `LogsSubscribe` fan-out). Each
-//! webapp subscription is a tokio task that filters the broadcast
-//! against (level set, target/message substring) and pushes matching
-//! `LogEntry` events to the owning webapp via `WireEventBus`.
-
 use std::{
   collections::{HashMap, VecDeque},
   future::Future,

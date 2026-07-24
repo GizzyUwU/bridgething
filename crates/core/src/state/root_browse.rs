@@ -40,7 +40,6 @@ impl RootBrowseCache {
       return Ok(cached.result.clone());
     }
     let result = fetch().await?;
-    // a new generation invalidates every shape, not just the one being refetched
     guard.retain(|_, cached| cached.generation == generation);
     guard.insert(
       shape,

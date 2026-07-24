@@ -1,16 +1,3 @@
-//! libswupdate FFI driver. Streams the .swu bytes over libswupdate's
-//! install IPC socket (`ipc_inst_start_ext` / `ipc_send_data` /
-//! `ipc_end`) and forwards progress messages from the separate
-//! progress IPC socket (`progress_ipc_connect` / `progress_ipc_receive`)
-//! into the OTA orchestrator's progress callback.
-//!
-//! All libswupdate calls are blocking syscalls against unix sockets
-//! and live in `spawn_blocking` tasks so the tokio runtime stays free.
-//! Cancellation post-stream-start is best-effort: closing the install
-//! fd causes swupdate to abort the in-flight install on the daemon
-//! side; mid-FAILURE the orchestrator surfaces `Cancelled` to the
-//! caller and the failed slot retains its prior contents.
-
 use std::{
   ffi::CString,
   io::Read,
@@ -192,9 +179,7 @@ fn install_blocking(swu_path: PathBuf, selector: Selector) -> Result<(), Error> 
   let total_len = file.metadata()?.len();
   let mut buf = vec![0u8; CHUNK_SIZE];
 
-  // SAFETY: every libswupdate IPC call below is documented blocking-but-safe;
-  // `req` lives on this stack frame for the entire `ipc_inst_start_ext`
-  // call and is not retained by the library beyond that.
+  // SAFETY: every libswupdate IPC call below is documented blocking-but-safe
   unsafe {
     let mut req: sys::swupdate_request = std::mem::zeroed();
     sys::swupdate_prepare_req(&mut req);
@@ -238,9 +223,7 @@ fn install_blocking(swu_path: PathBuf, selector: Selector) -> Result<(), Error> 
 }
 
 fn progress_reader(tx: mpsc::Sender<sys::progress_msg>) {
-  // SAFETY: `progress_ipc_connect` returns a unix-socket fd or a negative
-  // error; `progress_ipc_receive` blocks until a message arrives or the
-  // socket closes. `msg` is fully populated by libswupdate before return.
+  // SAFETY: `progress_ipc_connect` returns a unix-socket fd or a negative error
   unsafe {
     let mut fd = sys::progress_ipc_connect(true);
     if fd < 0 {

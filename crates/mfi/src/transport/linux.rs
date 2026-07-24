@@ -1,5 +1,3 @@
-//! Linux i2c-dev transport for the MFi chip.
-
 use std::{
   io,
   path::{Path, PathBuf},
@@ -11,12 +9,9 @@ use i2cdev::{core::I2CDevice, linux::LinuxI2CDevice};
 use super::{RETRY_DELAY, RETRY_LIMIT, Transport};
 use crate::error::TransportError;
 
-/// Configuration for a [`LinuxI2c`] transport.
 #[derive(Debug, Clone)]
 pub struct LinuxI2cConfig {
-  /// Path to the i2c bus device, e.g. `/dev/i2c-3`.
   pub device: PathBuf,
-  /// 7-bit follower address of the chip on the bus.
   pub address: u16,
 }
 
@@ -35,7 +30,6 @@ impl LinuxI2cConfig {
   }
 }
 
-/// Linux i2c-dev transport.
 pub struct LinuxI2c {
   dev: LinuxI2CDevice,
 }

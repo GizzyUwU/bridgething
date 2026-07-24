@@ -1,9 +1,3 @@
-//! Stub backend. Emits fake progress so the orchestrator + handler +
-//! host gateway pieces can be exercised end-to-end without a working
-//! libswupdate. The .swu is already on disk at `swu_path` (the
-//! ChunkedTransfer partial); the stub doesn't touch it - just ticks
-//! 0..=100 over a fixed-duration window. Cancelable.
-
 use std::path::Path;
 
 use libbridgething::OtaPhase;

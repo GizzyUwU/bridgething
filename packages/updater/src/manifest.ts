@@ -6,12 +6,27 @@ export type OtaManifestChannel = {
   releases: string[];
 };
 
+export type ArtifactDigest = {
+  size: number;
+  sha256: string;
+};
+
+export type ReleaseArtifacts = {
+  daemon?: ArtifactDigest;
+  image_swu?: ArtifactDigest;
+  image_zck?: ArtifactDigest;
+  image_boot_zck?: ArtifactDigest;
+  webapps?: Record<string, ArtifactDigest>;
+  daemon_patches?: Record<string, ArtifactDigest>;
+};
+
 export type OtaManifestRelease = {
   version: string;
   channel: string;
   yanked: string | null;
   deprecated: boolean;
   builtinWebapps: Record<string, string>;
+  artifacts?: ReleaseArtifacts;
 };
 
 export type OtaDiscoverManifest = {
@@ -35,6 +50,7 @@ type RawRelease = {
   yanked: string | null;
   deprecated: boolean;
   builtin_webapps?: Record<string, string>;
+  artifacts?: ReleaseArtifacts;
 };
 
 type RawManifest = {
@@ -78,6 +94,7 @@ export async function fetchManifest(rootURL: string): Promise<OtaDiscoverManifes
           yanked: r.yanked,
           deprecated: r.deprecated,
           builtinWebapps: r.builtin_webapps ?? {},
+          artifacts: r.artifacts,
         },
       ]),
     ),
@@ -124,6 +141,15 @@ export function otaArtifactUrls(opts: {
     imageZck: `${imagesDir}/${imageName}.zck`,
     imageBootZck: `${imagesDir}/${imageName}-boot.zck`,
   };
+}
+
+export function daemonPatchUrl(opts: {
+  rootURL: string;
+  channel: string;
+  toVersion: string;
+  fromVersion: string;
+}): string {
+  return `${opts.rootURL}/daemon/${opts.channel}/${opts.toVersion}/patches/from-${opts.fromVersion}.zst`;
 }
 
 export function builtinWebappUrl(opts: { rootURL: string; channel: string; name: string; version: string }): string {

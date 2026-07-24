@@ -1,29 +1,3 @@
-//! Model-based property engine - Mode 1: deterministic
-//! differential. A proptest strategy generates random sequences over the atomic
-//! inbound vocabulary; each event is applied to both the real headless daemon
-//! and the reference [`Model`], and after every event the daemon's merged
-//! projection must equal the model's. A divergence is either a daemon bug or a
-//! model bug - both worth knowing.
-//!
-//! The vocabulary spans both sources: iAP2 deltas + artwork (where the cover-art
-//! family lives - the production flicker was a no-companion phone) and companion
-//! deltas + authority claim/release (the authority-gated merge: fallthrough and
-//! the artwork-no-fallthrough rule). Companion disconnect and the chaos /
-//! invariants mode land next.
-//!
-//! Time is frozen out of scope: the vocabulary is inbound-only (no transport or
-//! seek intents armed), sequences run sub-second (authority never goes stale),
-//! and the extrapolated `position_ms` is not in the compared projection. Each
-//! case gets a fresh `Harness` (the Player is a single global actor with no
-//! reset, so peer-id namespacing cannot isolate it) on its own runtime so a
-//! dropped daemon's detached tasks die with the runtime.
-//!
-//! The barrier is combined: after every event we wait for the daemon's player
-//! projection AND its live authority scopes to match the model. The authority
-//! half is load-bearing - a bare claim has no player-observable effect, and the
-//! companion handler spawns per message, so without it a claim would race a
-//! following companion delta.
-
 use std::{collections::HashSet, time::Duration};
 
 use bluer::Address;
@@ -46,8 +20,6 @@ use libbridgething::{
 use proptest::prelude::*;
 
 const CONVERGE: Duration = Duration::from_millis(500);
-/// The player actor must produce no snapshot tick for this long before the
-/// daemon is considered quiescent (no command in flight).
 const STABLE_WINDOW: Duration = Duration::from_millis(20);
 
 fn daemon_projection(state: &State) -> Projection {
@@ -62,11 +34,6 @@ fn daemon_authority(state: &State) -> HashSet<CompanionAuthorityScope> {
   state.authority.live_scopes().into_iter().collect()
 }
 
-// the engine compares the full correct projection. the held bug #1 (the
-// pid-hex overload) makes this diverge - on the artwork ids and on track_id (a
-// dropped-art recompute leaves a stale cache-frozen track) - and that red is
-// the point: it documents the bug and proves the engine's reach. it goes green
-// when bug #1 is fixed. do not mask fields to keep it green.
 fn projection_matches(
   state: &State,
   expected: &Projection,
@@ -75,10 +42,6 @@ fn projection_matches(
   daemon_projection(state) == *expected && daemon_authority(state) == *expected_authority
 }
 
-/// Wait until the daemon matches the model AND the player actor has gone quiet
-/// (no snapshot tick for `STABLE_WINDOW`), so no command is in flight when the
-/// caller applies the next event. Generic over the watch payload to avoid naming
-/// the snapshot type.
 async fn converge<T>(
   harness: &Harness,
   player_watch: &mut tokio::sync::watch::Receiver<T>,
@@ -90,13 +53,11 @@ async fn converge<T>(
     if projection_matches(harness.state(), expected, expected_authority) {
       player_watch.mark_unchanged();
       match tokio::time::timeout(STABLE_WINDOW, player_watch.changed()).await {
-        // window elapsed (or actor gone): quiescent - confirm still matched
         Err(_) | Ok(Err(_)) => {
           if projection_matches(harness.state(), expected, expected_authority) {
             return true;
           }
         }
-        // a tick arrived: a command landed, re-check
         Ok(Ok(())) => {}
       }
     } else {
@@ -108,7 +69,6 @@ async fn converge<T>(
   }
 }
 
-/// Minimal announce so the daemon registers + marks the companion connected.
 fn caps() -> GatewayCapabilities {
   GatewayCapabilities {
     gateway: GatewayInfo {
@@ -156,12 +116,6 @@ async fn apply_to_daemon(harness: &Harness, addr: Address, phone: &Gateway, even
   }
 }
 
-// --- strategies: a small value space so track changes, transfer-id reuse, and
-// idle deltas recur within a short sequence (the interesting collisions). ---
-
-// a media_item with no persistent_id is the iAP2 carry-forward delta. it trips
-// the held bug #1 (double-prefixed track id), so generating it makes the engine
-// red - which is correct: that input is real and the daemon mishandles it today.
 fn pid_strategy() -> impl Strategy<Value = Option<u64>> {
   prop_oneof![
     Just(None),
@@ -270,10 +224,6 @@ fn companion_pid() -> impl Strategy<Value = Option<String>> {
   ]
 }
 
-// Companion snapshots carry no artwork_id in this cut: companion-pushed assets
-// ride a separate AssetPush the model does not track, so a companion art id
-// would trip the dangling-art invariant. Omitting it still exercises the key
-// rule - companion-authoritative-with-no-art must NOT fall through to iAP2 art.
 fn companion_snapshot_strategy() -> impl Strategy<Value = PlayerState> {
   let track = prop_oneof![
     1 => Just(None),
@@ -321,8 +271,6 @@ fn scope_strategy() -> impl Strategy<Value = CompanionAuthorityScope> {
   ]
 }
 
-// these mirror the daemon's iAP2 -> lib translation so companion playback deltas
-// can be expressed in the same small value space as the iAP2 ones.
 fn translate_shuffle(mode: ShuffleMode) -> libbridgething::ShuffleMode {
   match mode {
     ShuffleMode::Off => libbridgething::ShuffleMode::Off,
@@ -354,11 +302,6 @@ fn events_strategy() -> impl Strategy<Value = Vec<ModelEvent>> {
   prop::collection::vec(event_strategy(), 1..=18)
 }
 
-// Mode 2 (chaos) vocabulary: broader than Mode 1 - includes the idle sentinel
-// (pid 0 + empty title), the YouTube case (pid 0 + real title), and no-pid
-// deltas. Mode 2 does not compare full state (the daemon's interleaving is
-// nondeterministic under the spawn races), so the bug-#1-poisoned paths are fine
-// here; it asserts only order-independent safety invariants.
 fn chaos_iap2_pid() -> impl Strategy<Value = Option<u64>> {
   prop_oneof![Just(None), Just(Some(0u64)), Just(Some(1)), Just(Some(2))]
 }
@@ -399,9 +342,6 @@ fn chaos_events_strategy() -> impl Strategy<Value = Vec<ModelEvent>> {
   prop::collection::vec(chaos_event_strategy(), 4..=24)
 }
 
-/// Wait until the player actor has gone quiet (no tick for `STABLE_WINDOW`),
-/// regardless of what state it settles to. Used by chaos mode, which fires a
-/// burst with no per-event barrier and then lets it drain.
 async fn quiesce<T>(player_watch: &mut tokio::sync::watch::Receiver<T>) {
   let deadline = tokio::time::Instant::now() + CONVERGE;
   loop {
@@ -430,8 +370,6 @@ fn liveness_npu() -> Iap2NowPlaying {
 proptest! {
   #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
 
-  /// The daemon's merged projection (and live authority) equals the reference
-  /// model's after every inbound event, for any sequence over the vocabulary.
   #[test]
   fn merge_matches_model(events in events_strategy()) {
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -454,14 +392,6 @@ proptest! {
         let expected = model.project();
         let expected_authority = model.authority_scopes();
 
-        // Quiescence barrier. The companion handler spawns per message and peer
-        // transitions fire a stray player SendState, so a command can be in flight
-        // across an event boundary and race the next event (e.g. a claim). Wait
-        // until the projection matches AND the player actor has gone quiet (no
-        // watch tick for STABLE_WINDOW), guaranteeing no command is in flight when
-        // the next event is applied - so the daemon never reorders relative to the
-        // sequential model. A bare authority claim enqueues no player command, so
-        // it is quiescent at once (and must leave the player projection unchanged).
         let converged = converge(&harness, &mut player_watch, &expected, &expected_authority).await;
 
         prop_assert!(
@@ -471,13 +401,10 @@ proptest! {
           daemon_authority(harness.state()),
         );
 
-        // every projected artwork id must reference an asset the daemon was told
-        // about (inserted or pending) - no dangling/synthesized art url.
         let known = model.known_asset_ids();
         if let Some(id) = &expected.wire_artwork_id {
           prop_assert!(known.contains(id), "wire artwork id {id} not in known assets {known:?}");
         }
-        // no idle-sentinel art url ever surfaces.
         if let Some(id) = &expected.wire_artwork_id {
           prop_assert!(!id.contains("0000000000000000"), "idle-sentinel art url surfaced: {id}");
         }
@@ -491,11 +418,6 @@ proptest! {
 proptest! {
   #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
-  /// Mode 2 - chaos. Fire a random multi-source burst with NO per-event barrier,
-  /// so the daemon's per-message spawning genuinely interleaves player + authority
-  /// + iAP2. The final state is nondeterministic, so assert only order-independent
-  /// safety invariants: the daemon never emits an idle-sentinel art url, and the
-  /// player actor is still alive after the burst (no deadlock/panic under racing).
   #[test]
   fn chaos_burst_holds_safety_invariants(events in chaos_events_strategy()) {
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -511,13 +433,11 @@ proptest! {
       phone.capabilities().announce(caps()).await.expect("announce");
       let mut player_watch = harness.state().player.snapshot_watch();
 
-      // fire the burst with no barrier - the daemon's spawning races them.
       for event in &events {
         apply_to_daemon(&harness, addr, &phone, event).await.expect("inject");
       }
       quiesce(&mut player_watch).await;
 
-      // safety invariant: no idle-sentinel art url, whatever the interleaving.
       let proj = daemon_projection(harness.state());
       for id in [&proj.wire_artwork_id, &proj.current_artwork_id].into_iter().flatten() {
         prop_assert!(
@@ -526,7 +446,6 @@ proptest! {
         );
       }
 
-      // liveness: the player actor still processes a fresh command after the burst.
       player_watch.mark_unchanged();
       harness
         .inject_iap2(addr, SessionEvent::NowPlayingUpdate(liveness_npu()))

@@ -403,9 +403,6 @@ impl From<tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>> for WSError {
   }
 }
 
-/// Generate `From<Vec<WSError>> for $err` that logs each broadcast failure
-/// and collapses to `$err::WS(WSError::BroadcastFailed)`. Implementations are
-/// identical across handler error types, so this keeps them as one shape.
 #[macro_export]
 macro_rules! impl_broadcast_failure_from {
   ($err:ty) => {

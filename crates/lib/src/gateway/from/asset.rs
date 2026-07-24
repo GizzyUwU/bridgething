@@ -5,8 +5,6 @@ use typeshare::typeshare;
 
 use super::transfer::TransferBody;
 
-/// Invalidate the daemon-side cached asset for `id`. The companion's
-/// escape hatch when it knows an asset it previously served is stale.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -16,11 +14,6 @@ pub struct AssetClear {
   pub id: String,
 }
 
-/// Typed terminal response for an `AssetRequest`. Small assets arrive
-/// inline; larger ones declare a stream whose ref id is the originating
-/// request id, with the bytes following as `TransferFragment` events on
-/// the bulk lane (so now-playing traffic preempts them between
-/// fragments).
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -32,8 +25,6 @@ pub struct AssetGotReply {
   pub body: TransferBody,
 }
 
-/// Domain error response for an `AssetRequest`: the companion does not
-/// have the requested asset.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

@@ -53,7 +53,6 @@ impl<P: Protocol> Clone for Connection<P> {
 }
 
 impl<P: Protocol> Connection<P> {
-  /// split the connector and spawn the driver on the current runtime.
   pub fn spawn<C: Connector<P>>(connector: C) -> Self {
     let (out, inbound) = connector.split();
     let (cmd_tx, cmd_rx) = mpsc::channel(CMD_CAP);
@@ -73,18 +72,15 @@ impl<P: Protocol> Connection<P> {
     }
   }
 
-  /// override the per-request response timeout (default 30s).
   pub fn with_timeout(mut self, timeout: Duration) -> Self {
     self.timeout = timeout;
     self
   }
 
-  /// subscribe to every inbound message that isn't a correlated response (events, broadcasts, stray responses).
   pub fn events(&self) -> broadcast::Receiver<P::InMsg> {
     self.events_tx.subscribe()
   }
 
-  /// fire-and-forget event (`meta = event`).
   pub async fn event<E>(&self, event: E) -> Result<(), SdkError>
   where
     E: WireEvent<P::OutData>,
@@ -92,7 +88,6 @@ impl<P: Protocol> Connection<P> {
     self.send_data(MsgMeta::Event, event.into(), Priority::Normal).await
   }
 
-  /// fire-and-forget command (`meta = command`).
   pub async fn command<C>(&self, command: C) -> Result<(), SdkError>
   where
     C: WireCommand<P::OutData>,
@@ -100,13 +95,11 @@ impl<P: Protocol> Connection<P> {
     self.send_data(MsgMeta::Command, command.into(), Priority::Normal).await
   }
 
-  ///  send arbitrary out-data with a chosen meta + priority.
   pub async fn send_data(&self, meta: MsgMeta, data: P::OutData, priority: Priority) -> Result<(), SdkError> {
     let msg = P::envelope(Uuid::now_v7(), meta, data);
     self.send_frame(PrioritizedFrame { priority, msg }).await
   }
 
-  /// typed request: ships `meta = request`, awaits the correlated response
   pub async fn request<R>(&self, request: R) -> Result<R::Response, RequestFailure<R::DomainError>>
   where
     R: WireRequest<Outbound = P::OutData, Inbound = P::InData>,
@@ -136,14 +129,12 @@ impl<P: Protocol> Connection<P> {
     }
   }
 
-  /// Send a raw correlated response for an inbound request id.
   pub async fn respond(&self, request_id: Uuid, data: P::OutData) -> Result<(), SdkError> {
     self
       .send_data(MsgMeta::Response(ResponseMeta { request_id }), data, Priority::Normal)
       .await
   }
 
-  /// Typed response: encode `R::Response` and ship it correlated to the request.
   pub async fn respond_to<R>(&self, request_id: Uuid, response: R::Response) -> Result<(), SdkError>
   where
     R: WireRequest<Outbound = P::InData, Inbound = P::OutData>,
@@ -151,7 +142,6 @@ impl<P: Protocol> Connection<P> {
     self.respond(request_id, R::encode_response(response)).await
   }
 
-  /// Typed domain-error response for an inbound request.
   pub async fn respond_err<R>(&self, request_id: Uuid, err: R::DomainError) -> Result<(), SdkError>
   where
     R: WireRequest<Outbound = P::InData, Inbound = P::OutData>,
@@ -159,7 +149,6 @@ impl<P: Protocol> Connection<P> {
     self.respond(request_id, R::encode_domain_error(err)).await
   }
 
-  /// Build a [`MsgHandle`] bound to an inbound message's id
   pub fn handle(&self, msg: &P::InMsg) -> MsgHandle<P> {
     MsgHandle::new(self.clone(), P::in_id(msg), P::in_meta(msg).clone())
   }
@@ -186,9 +175,6 @@ struct Driver<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> {
   pending: HashMap<Uuid, oneshot::Sender<P::InMsg>>,
 }
 
-/// What to do once a queued frame's send completes: ack the producer, or
-/// (for requests) drop the pending entry on failure so the awaiter
-/// resolves to Disconnected.
 enum Completion {
   Ack(oneshot::Sender<Result<(), TransportError>>),
   Request(Uuid),
@@ -208,9 +194,6 @@ const fn lane_index(priority: Priority) -> usize {
 }
 
 impl<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> Driver<P, O, I> {
-  // outbound frames queue per priority lane and drain strictly in lane
-  // order, one frame per turn, so a normal frame enqueued mid-transfer
-  // goes out ahead of every queued bulk/background fragment.
   async fn run(self) {
     let Driver {
       mut out,

@@ -208,7 +208,6 @@ mod tests {
     let cache = BrowseContentCache::default();
     let calls = AtomicU32::new(0);
 
-    // immutable album content ignores the generation: a reconnect (bumped gen) still hits the cache.
     fetch_count(&cache, "spotify:album:a", 0, &calls).await;
     fetch_count(&cache, "spotify:album:a", 1, &calls).await;
     assert_eq!(
@@ -217,7 +216,6 @@ mod tests {
       "album content is not keyed on the companion generation"
     );
 
-    // mutable playlist content is gen-keyed: a reconnect invalidates and refetches.
     fetch_count(&cache, "spotify:playlist:p", 0, &calls).await;
     fetch_count(&cache, "spotify:playlist:p", 1, &calls).await;
     assert_eq!(
@@ -236,13 +234,11 @@ mod tests {
     fetch_count(&cache, "spotify:artist:r", 0, &calls).await;
     assert_eq!(calls.load(Ordering::SeqCst), 2, "first lookups miss and fetch");
 
-    // past the mutable ttl but inside the catalog ttl: only the playlist refetches.
     tokio::time::advance(MUTABLE_TTL + Duration::from_secs(1)).await;
     fetch_count(&cache, "spotify:playlist:p", 0, &calls).await;
     fetch_count(&cache, "spotify:artist:r", 0, &calls).await;
     assert_eq!(calls.load(Ordering::SeqCst), 3, "playlist expired, artist still fresh");
 
-    // past the catalog ttl: the artist refetches too.
     tokio::time::advance(CATALOG_TTL).await;
     fetch_count(&cache, "spotify:artist:r", 0, &calls).await;
     assert_eq!(
@@ -266,7 +262,6 @@ mod tests {
       "cold-fill misses every entry"
     );
 
-    // touch entry 0 so it becomes most-recently-used, then overflow by one to evict the true lru (1).
     fetch_count(&cache, "spotify:album:0", 0, &calls).await;
     assert_eq!(
       calls.load(Ordering::SeqCst),
@@ -275,7 +270,6 @@ mod tests {
     );
     fetch_count(&cache, "spotify:album:overflow", 0, &calls).await;
 
-    // entry 0 (recently touched) is retained; entry 1 (the lru) was evicted and refetches.
     fetch_count(&cache, "spotify:album:0", 0, &calls).await;
     assert_eq!(
       calls.load(Ordering::SeqCst),

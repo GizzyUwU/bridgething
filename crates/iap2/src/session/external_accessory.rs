@@ -1,33 +1,3 @@
-//! External Accessory flow: bridges iAP2 link session_id 3 (the
-//! ExternalAccessory link session declared in
-//! `Lsp::accessory_default`) plus the four `0xEA0x` control-session
-//! CSMs into a clean per-EA-stream byte-channel surface for upstream
-//! consumers.
-//!
-//! Inbound `StartExternalAccessoryProtocolSession` opens a per-stream
-//! state, replies with a `StatusExternalAccessoryProtocolSession::Ok`,
-//! and emits `SessionEvent::EaStreamOpened` carrying the byte
-//! channels the consumer will read/write. Inbound link DATA on
-//! session_id 3 is split by the leading u16-BE EA-stream-id and
-//! forwarded into the matching per-stream inbound channel. Outbound
-//! traffic rides the shared [`EaChunker`], which drains Normal-first
-//! and splits each frame at the link payload budget.
-//!
-//! Stream close (peer Stop, link tear-down, or the consumer dropping the
-//! channel ends) tears down the per-stream state and emits
-//! `SessionEvent::EaStreamClosed`.
-//!
-//! `ensure_app_launch_requested` is the post-Identified hook the session
-//! calls once per inbound control CSM (not a timer): it dispatches
-//! `RequestAppLaunch` with the configured bundle id (typically
-//! `com.bridgething.gateway`). iOS either foregrounds the matching app,
-//! opens a Settings deeplink, or silently no-ops if the app isn't
-//! installed. It is suppressed while an EA stream is open and re-armed
-//! when iOS reaps the companion (a peer Stop, or the inbound consumer
-//! dropping) with the control link still up. A global cooldown caps the
-//! send rate so a stream flap cannot spam it, and an attempt cap gives up
-//! on a link where the companion never opens a stream.
-
 use std::{
   collections::HashMap,
   time::{Duration, Instant},

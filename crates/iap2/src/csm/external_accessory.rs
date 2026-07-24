@@ -1,35 +1,3 @@
-//! Typed CSMs for the iAP2 External Accessory bring-up surface.
-//!
-//! Four messages live here:
-//!
-//! - [`StartExternalAccessoryProtocolSession`] (`0xEA00`) - iPhone to
-//!   accessory. iOS opens an EA session for a protocol string the
-//!   accessory declared in `IdentificationInformation` param 10 (one
-//!   `EaProtocol` entry). Carries the matching `protocol_id` plus the
-//!   iOS-allocated `session_id` (the EA stream id, opaque u16).
-//! - [`StopExternalAccessoryProtocolSession`] (`0xEA01`) - iPhone to
-//!   accessory. Tears down a previously-opened stream. Reused
-//!   `session_id` values are allowed afterwards.
-//! - [`RequestAppLaunch`] (`0xEA02`) - accessory to iPhone. Asks iOS
-//!   to foreground the app with the given bundle id. The call is
-//!   silently ignored if the app isn't installed or doesn't list the
-//!   matching EA protocol in `UISupportedExternalAccessoryProtocols`.
-//!   The [`AppLaunchMethod`] param is the only iAP2-side knob that
-//!   controls whether iOS shows the per-app "would like to communicate
-//!   with" permission prompt; we always send `WithoutUserAlert` so iOS
-//!   wakes the companion silently (background-mode if the device is
-//!   locked or another app is foreground).
-//! - [`StatusExternalAccessoryProtocolSession`] (`0xEA03`) - accessory
-//!   to iPhone. Reply to `StartES`. `Ok` (`0`) opens the stream;
-//!   `Close` (`1`) refuses (unknown `protocol_id`, capacity exhausted,
-//!   etc.).
-//!
-//! Stream payloads themselves do not ride on the control session;
-//! they ride on iAP2 link session id 3 (declared as
-//! `SessionType::ExternalAccessory` in `Lsp::accessory_default`) with
-//! a u16 BE EA-stream-id prefix per chunk. The session id picked here
-//! is what tags those chunks.
-
 use bytes::Bytes;
 
 use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldDecode, CsmParamFieldEncode};
@@ -44,9 +12,6 @@ pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
   StopExternalAccessoryProtocolSession::CSM_MSG_ID,
 ];
 
-/// `0xEA00` iPhone -> accessory. `protocol_id` matches an `EaProtocol::id`
-/// declared in `IdentificationInformation` param 10; `session_id` is
-/// iOS's opaque stream key, unique within an iAP2 link.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xEA00)]
 pub struct StartExternalAccessoryProtocolSession {
@@ -56,8 +21,6 @@ pub struct StartExternalAccessoryProtocolSession {
   pub session_id: u16,
 }
 
-/// `0xEA01` iPhone -> accessory. Tears down a stream previously
-/// opened by `StartExternalAccessoryProtocolSession`.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xEA01)]
 pub struct StopExternalAccessoryProtocolSession {
@@ -65,9 +28,6 @@ pub struct StopExternalAccessoryProtocolSession {
   pub session_id: u16,
 }
 
-/// `AppLaunchMethod` enum (param 1 of `RequestAppLaunch`). Selects
-/// whether iOS shows the per-app permission prompt or launches silently.
-/// Defaults to [`WithUserAlert`] when the param is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AppLaunchMethod {
@@ -89,10 +49,6 @@ impl AppLaunchMethod {
   }
 }
 
-/// `0xEA02` accessory -> iPhone. `bundle_id` is a UTF-8 + NUL string
-/// matching the iOS app's `CFBundleIdentifier`. `launch_method` gates
-/// the per-app permission prompt; pass
-/// [`AppLaunchMethod::WithoutUserAlert`] to suppress it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestAppLaunch {
   pub bundle_id: String,
@@ -138,7 +94,6 @@ impl TryFrom<CsmFrame> for RequestAppLaunch {
   }
 }
 
-/// Status field of [`StatusExternalAccessoryProtocolSession`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EaSessionStatus {
@@ -160,9 +115,6 @@ impl EaSessionStatus {
   }
 }
 
-/// `0xEA03` accessory -> iPhone. Reply to
-/// `StartExternalAccessoryProtocolSession` with the same `session_id`
-/// the iPhone used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusExternalAccessoryProtocolSession {
   pub session_id: u16,

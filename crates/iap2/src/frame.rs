@@ -1,27 +1,10 @@
-//! iAP2 link-layer framing: the 9-byte link header, payload + checksum,
-//! the Link Synchronization Payload, and a `tokio_util::codec::Decoder`
-//! that drains a byte stream into [`LinkPacket`] values.
-//!
-//! The header begins with the magic bytes `0xFF 0x5A`. The detect marker
-//! `0xFF 0x55 0x02 0x00 0xEE 0x10` deliberately differs at byte 1 so the
-//! pre-handshake probe can never be confused with a real link packet.
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-/// Length of the link-layer header in bytes.
 pub const LINK_HEADER_LEN: usize = 9;
-
-/// One checksum byte trails every payload-bearing link packet.
 pub const PAYLOAD_TRAILER: usize = 1;
-
-/// Wire bytes a payload-bearing link packet spends on framing: header + trailing checksum.
 pub const LINK_FRAME_OVERHEAD: usize = LINK_HEADER_LEN + PAYLOAD_TRAILER;
-
-/// First two bytes of every link-layer packet.
 pub const LINK_MAGIC: [u8; 2] = [0xFF, 0x5A];
-
-/// The six-byte iAP2 detect marker, exchanged before any link packet.
 pub const DETECT_MARKER: [u8; 6] = [0xFF, 0x55, 0x02, 0x00, 0xEE, 0x10];
 
 bitflags::bitflags! {
@@ -55,9 +38,6 @@ impl SessionType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkHeader {
-  /// Total wire bytes from `start[0]` through the trailing payload checksum,
-  /// inclusive. Header-only packets carry `length = 9`; a packet with N
-  /// payload bytes carries `length = 9 + N + 1`.
   pub length: u16,
   pub control: ControlBits,
   pub seq: u8,
@@ -123,7 +103,6 @@ impl LinkHeader {
   }
 }
 
-/// A complete iAP2 link packet. `payload` is empty for header-only frames.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkPacket {
   pub header: LinkHeader,
@@ -146,8 +125,6 @@ impl LinkPacket {
   }
 }
 
-/// Link Synchronization Payload: the body of a SYN packet. The peer's
-/// proposal replaces our copy on receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lsp {
   pub version: u8,
@@ -261,8 +238,6 @@ pub enum FrameError {
   BadLspSessionList,
 }
 
-/// Modular-sum check. iAP2 calls these "checksums" but they are not CRCs:
-/// the sum of bytes through the checksum byte equals 0 mod 256.
 fn modular_sum_checksum(buf: &[u8]) -> u8 {
   let sum: u32 = buf.iter().map(|&b| b as u32).sum();
   ((-(sum as i32)) & 0xFF) as u8

@@ -1,11 +1,3 @@
-//! Established-phase state machine for the iAP2 link layer.
-//!
-//! Owns sequence-number tracking, the unacked-packet queue, the
-//! out-of-order receive buffer, and the timing decisions that drive
-//! retransmit + standalone ACK emission. Stateless byte-level helpers
-//! (codec encode, raw socket write) live in the parent module; this
-//! module reaches up via `super::` for them.
-
 use std::{
   collections::{BTreeMap, VecDeque},
   time::Duration,
@@ -199,7 +191,6 @@ impl EstablishedState {
   pub(super) fn handle_inbound_ack(&mut self, ack_value: u8) {
     while let Some(front) = self.unacked.front() {
       let dist = ack_value.wrapping_sub(front.seq);
-      // ack is last-received-in-sequence psn; dist 0..=127 acks this entry, 128..=255 stays queued.
       if dist <= 127 {
         self.unacked.pop_front();
       } else {

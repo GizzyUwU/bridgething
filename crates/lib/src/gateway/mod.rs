@@ -17,9 +17,6 @@ use crate::{
 };
 
 /// gateway -> bridgething
-/// messages from the gateway (mobile or desktop app) to bridgething.
-///
-/// these messages will pass over bluetooth.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
@@ -78,9 +75,6 @@ pub enum GatewayToBridgeMsgData {
 }
 
 /// bridgething -> gateway
-/// messages from bridgething to the gateway (mobile or desktop app).
-///
-/// these messages will pass over bluetooth.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
@@ -132,8 +126,6 @@ pub enum BridgeToGatewayMsgData {
   Forward(ForwardMessage),
   #[from]
   Error(WireError),
-  /// response, command received and won't have a completion
   Ack,
-  /// response, command has been completed
   Done,
 }

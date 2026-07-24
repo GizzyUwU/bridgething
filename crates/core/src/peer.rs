@@ -1,23 +1,3 @@
-//! Live peer-state tracker. Owns the runtime view of every paired or
-//! transient counterpart of the daemon (phone today, desktop later)
-//! and is the single broadcast site for any change to that view.
-//!
-//! Three transports feed it: BlueZ pairing (sets `paired`), the iAP2
-//! control session (sets `iap2`), and the bridgething gateway
-//! protocol (sets `companion`). Each transport's manager sends a
-//! command via [`PeerTracker`]'s channel; the actor task owns delta
-//! detection and fires both the new `BridgeToClientPeerMsg` snapshot
-//! and the legacy `BridgeToClientBluetoothMsg` /
-//! `BridgeToClientAssetMsg::GatewayStatus` events derived from the
-//! same transition. The legacy fires let the stock webapp keep
-//! working without it understanding the new state model.
-//!
-//! `PairingResult{success=true}` is fired separately via
-//! `confirm_pairing(mac)`, gated on a prior `note_pin_shown(mac)` from
-//! the BlueZ agent. This decouples PIN-clearing from `paired`
-//! transitions because BlueZ does not reliably toggle `Paired` during
-//! re-pair on a cached device.
-
 use std::{
   collections::{HashMap, HashSet},
   net::SocketAddr,
@@ -639,7 +619,6 @@ impl PeerActor {
       if let Err(err) = self.player.reset_companion().await {
         tracing::warn!(?err, "failed to reset player queue state on companion disconnect");
       }
-      // drop any log-tap streams the companion opened so the broadcast receiver + pump task don't leak across reconnects
       let drained = self.log_tap.drain_for_owner(LogOwner::Gateway(Some(addr)));
       if !drained.is_empty() {
         tracing::debug!(count = drained.len(), %addr, "drained gateway log subscriptions on companion disconnect");

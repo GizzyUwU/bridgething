@@ -1,10 +1,3 @@
-//! Webapp bundle application into the writable registry. The
-//! `OtaKind::InstalledWebapp` backend calls [`apply_and_announce`] on a
-//! fully-streamed bundle to install it and broadcast `WebappInstalled`;
-//! the first-boot example seeder ([`seed_examples`]) reuses
-//! `install_from_path` to install bundled samples once. Bytes arrive via
-//! the OTA orchestrator's `ChunkedTransfer`, not here.
-
 use std::path::{Path, PathBuf};
 
 use libbridgething::{
@@ -129,7 +122,6 @@ mod tests {
     assert!(reg.resolve(id_b).await.is_some(), "beta seeded");
     assert!(tokio::fs::try_exists(&marker).await.unwrap(), "marker written");
 
-    // delete one and re-seed: the marker gates, so it must not reappear.
     let dir_a = installed.join(id_a.simple().to_string());
     tokio::fs::remove_dir_all(&dir_a).await.unwrap();
     reg.rescan().await;

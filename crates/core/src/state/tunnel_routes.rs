@@ -1,10 +1,3 @@
-//! Per-tunnel inbound mailboxes for the SOCKS5 proxy. Each open tunnel
-//! holds an mpsc sender on the `(tunnel_id, peer)` boundary; the
-//! gateway-side `TunnelHandler` looks up by id and forwards `Data` /
-//! `Closed` events into the tunnel's bridging task. Drops on tunnel
-//! close + on companion disconnect (drained by the proxy module when
-//! it loses its outbound).
-
 use std::{
   collections::HashMap,
   sync::{Arc, RwLock},

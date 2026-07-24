@@ -1,21 +1,3 @@
-//! Drains pre-encoded outbound frames from the priority lanes (Normal,
-//! Bulk, Background), packing as many as fit into a single batch up to
-//! `max_batch_bytes`. Lanes are drained strictly in priority order
-//! every batch: higher lanes drain first and remaining space is filled
-//! opportunistically from lower ones via `try_recv` - we never wait on
-//! a lower lane, which is what preserves the higher lanes' latency.
-//!
-//! Frame ordering is FIFO within a lane. A frame larger than the batch
-//! budget is flushed solo (one frame per batch). Overflow (a frame that
-//! doesn't fit after earlier frames consumed the budget) is stashed in
-//! its lane's slot and seeded into the next batch in the same priority
-//! order.
-//!
-//! Owns the lane channels by value: the packer is the sole reader and
-//! the writer task it feeds is the sole writer. All lanes closing
-//! returns `None` from `next_batch`, which the writer task treats as
-//! shutdown.
-
 use tokio::sync::mpsc;
 use tokio_util::bytes::{Bytes, BytesMut};
 
@@ -31,7 +13,6 @@ impl Lane {
 }
 
 pub struct OutboundPacker {
-  // index = priority order: 0 normal, 1 bulk, 2 background.
   lanes: [Lane; 3],
   max_batch_bytes: usize,
 }
@@ -231,12 +212,9 @@ mod tests {
     b_tx.send(b(b"BBBB")).await.unwrap();
     drop(b_tx);
 
-    // Batch 1: NN + BB fit (4 bytes), BBBB stashed in the bulk slot.
     let batch1 = p.next_batch().await.unwrap();
     assert_eq!(&batch1[..], b"NNBB");
 
-    // Now queue more normal traffic. The Normal channel is drained
-    // before the stashed bulk gets a turn.
     n_tx.send(b(b"XX")).await.unwrap();
     drop(n_tx);
 
@@ -255,11 +233,9 @@ mod tests {
     g.send(b(b"GGGG")).await.unwrap();
     g.send(b(b"GGGG")).await.unwrap();
 
-    // Batch 1: first background frame fits, second stashed.
     let batch1 = p.next_batch().await.unwrap();
     assert_eq!(&batch1[..], b"GGGG");
 
-    // Bulk arrives; it outranks the stashed background frame.
     b_tx.send(b(b"BB")).await.unwrap();
     drop(b_tx);
     drop(g);

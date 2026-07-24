@@ -1,9 +1,3 @@
-//! Slice 1 proof: the device-role link (`Link::run_device`, the emulator's
-//! responder half) completes a real handshake against the accessory role
-//! (`Link::run`) over an in-process duplex. The accessory initiates the SYN;
-//! the device replies SYN|ACK. Both must reach Established carrying the
-//! peer's LSP, which proves the role inversion without any radio.
-
 #![cfg(feature = "emulator")]
 
 use std::time::Duration;
@@ -19,8 +13,6 @@ fn fast_config(initial_psn: u8, lsp: Lsp) -> LinkConfig {
   config
 }
 
-/// Mirrors the real iPhone's SYN|ACK LSP from the 2026-05-26 capture:
-/// max_outgoing 127, max_len 65535, sessions control/file-transfer/EA.
 fn device_lsp() -> Lsp {
   Lsp {
     version: 1,

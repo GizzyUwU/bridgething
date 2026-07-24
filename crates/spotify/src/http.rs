@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::{
   sync::Arc,
   time::{Duration, Instant},

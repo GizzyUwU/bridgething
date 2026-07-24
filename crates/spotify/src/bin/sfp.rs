@@ -1,15 +1,3 @@
-//! sfp: host cli for the spotify client. validates the wire surface
-//! against a live account using the worker-psk env contract.
-//!
-//!   SPOTIFY_AUTH_PSK              (required) gates the private-auth worker
-//!   SPOTIFY_AUTH_BASE            worker base url (default thinglabs.sh/auth)
-//!   SPOTIFY_PRIVATE_STATE        state dir (default .spotify-private)
-//!   SPOTIFY_CARTHING_REFRESH_TOKEN   optional: seed a token instead of pairing
-//!   SPOTIFY_USERNAME             optional: canonical username for library calls
-//!
-//! commands: probe (default) | pair | np | home | search <q> | devices |
-//!           pause | resume | next | prev | seek <ms> | play <uri>
-
 use std::{error::Error, path::PathBuf, sync::Arc, time::Duration};
 
 use librespot_protocol::{

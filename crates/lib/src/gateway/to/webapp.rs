@@ -10,9 +10,6 @@ use crate::{
   gateway::{TransferBody, WebappResourceKind},
 };
 
-/// Reply to `WebappResource`. `sha256` is the current content hash;
-/// `body` is absent when the requester's `have` already matched (its
-/// cache is current). Large bodies stream as fragments per `TransferBody`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -47,8 +44,6 @@ pub struct WebappConfigListReply {
   pub entries: Vec<ConfigEntry>,
 }
 
-/// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
-/// echoes what's now stored after the write (None for delete).
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -66,7 +61,6 @@ pub struct WebappConfigAck {
 #[ts(export, export_to = "gateway.ts")]
 pub struct WebappDocGetReply {
   pub key: String,
-  /// `None` when the key has never been written.
   pub value: Option<String>,
 }
 
@@ -79,7 +73,6 @@ pub struct WebappDocListReply {
   pub entries: Vec<DocEntry>,
 }
 
-/// Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -90,9 +83,6 @@ pub struct WebappDocAck {
   pub value: Option<String>,
 }
 
-/// Broadcast when the WEBAPP writes its doc namespace, so an open
-/// companion settings page sees device-side changes live. Gateway-origin
-/// writes are not echoed back (the writer already holds the ack).
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -127,9 +117,6 @@ pub struct WebappActive {
   pub name: Option<String>,
 }
 
-/// Event payload for an active-webapp change (any initiator). Distinct from
-/// `WebappActive` (a request response) so it carries the new app's declared
-/// art profile; the companion reads `art` directly to size its pushes.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -150,20 +137,14 @@ pub struct WebappActiveChanged {
 #[ts(export, export_to = "gateway.ts")]
 #[bridge_enum(into = crate::gateway::BridgeToGatewayMsgData)]
 pub enum BridgeToGatewayWebappMsg {
-  /// response to List
   #[bridge_response]
   Webapps(WebappList),
-  /// response to GetActive, and event broadcast on switch
   #[bridge_response]
   Active(WebappActive),
-  /// response to SwitchTo indicating the new active app
   #[bridge_response]
   Switched(WebappActive),
-  /// response to Uninstall carrying the active app after the uninstall settled
   #[bridge_response]
   Uninstalled(WebappActive),
-  /// domain-level error response for any webapp op (e.g. WebappNotFound,
-  /// CannotUninstallBuiltin, IdReserved)
   #[bridge_response]
   WebappError(WebappError),
   #[bridge_response]
@@ -180,18 +161,10 @@ pub enum BridgeToGatewayWebappMsg {
   DocList(WebappDocListReply),
   #[bridge_response]
   DocAck(WebappDocAck),
-  /// event: the active webapp wrote/deleted a doc key
   #[bridge_event]
   DocChanged(WebappDocChanged),
-  /// event: a webapp install (`OtaKind::InstalledWebapp`) completed
-  /// successfully; carries the installed webapp's metadata. The terminal
-  /// signal for an install; failures surface as `OtaError` on the system
-  /// surface.
   #[bridge_event]
   WebappInstalled(WebappInfo),
-  /// event: the active webapp changed (any initiator - hub tap, gateway
-  /// switchTo, uninstall fallback). carries the new app's id/name + declared
-  /// art profile so the companion sizes art pushes to what it renders.
   #[bridge_event]
   ActiveChanged(WebappActiveChanged),
 }

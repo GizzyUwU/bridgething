@@ -1,4 +1,4 @@
-import type { BridgethingGateway, OtaKind, OtaPhase, WebappInfo } from '@bridgething/gateway';
+import type { BridgethingGateway, OtaKind, OtaPatch, OtaPhase, WebappInfo } from '@bridgething/gateway';
 import { newUuid } from '@bridgething/lib/uuid';
 
 import type { AckWindowOptions } from './ack-window.js';
@@ -23,7 +23,7 @@ export type ProgressListener = (snapshot: OtaProgressSnapshot) => void;
 
 export type WebappInstallResult = { ok: true; info: WebappInfo } | { ok: false; reason: string };
 
-type BandaidArtifact = { kind: OtaKind; source: ArtifactSource };
+type BandaidArtifact = { kind: OtaKind; source: ArtifactSource; patch?: OtaPatch };
 
 export class OtaDriver {
   private readonly device: GatewayDevice;
@@ -69,8 +69,8 @@ export class OtaDriver {
     return snapshot;
   }
 
-  async pushDaemon(source: ArtifactSource, onProgress?: ProgressListener): Promise<OtaProgressSnapshot> {
-    return this.applyBandaidBatch([{ kind: 'daemon', source }], onProgress);
+  async pushDaemon(source: ArtifactSource, onProgress?: ProgressListener, patch?: OtaPatch): Promise<OtaProgressSnapshot> {
+    return this.applyBandaidBatch([{ kind: 'daemon', source, patch }], onProgress);
   }
 
   async pushBuiltinWebapp(source: ArtifactSource, onProgress?: ProgressListener): Promise<OtaProgressSnapshot> {
@@ -91,6 +91,7 @@ export class OtaDriver {
       updateId: sha256,
       updateUrlBase: null,
       transfer: { id: transferId, totalSize, sha256 },
+      patch: null,
     });
     if (!beginResult.ok) {
       return { ok: false, reason: describeBeginFailure(beginResult) };
@@ -145,6 +146,7 @@ export class OtaDriver {
         source: artifact.source,
         updateUrlBase: undefined,
         mode: 'stage',
+        patch: artifact.patch,
         onProgress,
       });
       if (snapshot.phase !== 'staged') return snapshot;
@@ -169,6 +171,7 @@ export class OtaDriver {
     source: ArtifactSource;
     updateUrlBase?: string;
     mode: DriveMode;
+    patch?: OtaPatch | null;
     onProgress?: ProgressListener;
   }): Promise<{ snapshot: OtaProgressSnapshot; updateId: string }> {
     const totalSize = args.source.size;
@@ -180,6 +183,7 @@ export class OtaDriver {
       updateId: sha256,
       updateUrlBase: args.updateUrlBase ?? null,
       transfer: { id: transferId, totalSize, sha256 },
+      patch: args.patch ?? null,
     });
     if (!beginResult.ok) {
       return { snapshot: { phase: 'failed', reason: describeBeginFailure(beginResult) }, updateId: sha256 };

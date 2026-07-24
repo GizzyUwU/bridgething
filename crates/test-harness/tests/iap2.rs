@@ -1,9 +1,3 @@
-//! iAP2 (iOS) scenarios driven in-process by injecting `SessionEvent`s into
-//! the same channel the real `Iap2Manager` feeds. The unmodified router does
-//! the merge, stock translation, and broadcast; only the radio + MFi are
-//! absent (those are the T3 over-the-air lane). The events here are exactly
-//! what a real iPhone's iAP2 session produces.
-
 use std::time::Duration;
 
 use bridgething::ClientMode;
@@ -34,10 +28,6 @@ fn companion_caps() -> GatewayCapabilities {
   }
 }
 
-/// Inject a single-source iAP2 now-playing delta with no companion present -
-/// the production cover-art-bug shape. iAP2 is the fallthrough source, so it
-/// merges without an authority claim. Proves the router runs in the headless
-/// lane and injected events route end-to-end into merged state.
 #[tokio::test]
 async fn iap2_single_source_now_playing() {
   let harness = Harness::start().await.expect("harness start");
@@ -71,18 +61,12 @@ async fn iap2_single_source_now_playing() {
   assert_eq!(track.artist.as_deref(), Some("iAP2 Artist"));
 }
 
-/// Inject a now-playing delta carrying an artwork transfer id, then deliver
-/// the artwork bytes a beat later (the real iPhone ordering). The merged art
-/// id must reach a connected client's broadcast, and the bytes must resolve
-/// into the asset cache. Exercises the artwork inject + frame observer.
 #[tokio::test]
 async fn iap2_artwork_resolves_and_appears_in_broadcast() {
   let harness = Harness::start().await.expect("harness start");
   let mut frames = harness.observe_frames();
   let _client = harness.connect_modern_client().await.expect("connect modern client");
 
-  // barrier: wait until the daemon has registered the client before driving
-  // a broadcast at it, else the broadcast can race ahead of registration.
   let registered = harness
     .wait_for(|state| state.client_man.client_count() >= 1, CONVERGE)
     .await;
@@ -129,7 +113,6 @@ async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
   let phone = harness.iap2_peer();
   let art_id = "iap2/art/0000000000001234/7";
 
-  // now-playing advertises artwork transfer id 7: arms the pending-art mapping.
   harness
     .inject_iap2(
       phone,
@@ -146,13 +129,11 @@ async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
     .await
     .expect("inject now-playing");
 
-  // transient placeholder: a 0-byte transfer for id 7.
   harness
     .iap2_artwork(phone, 7, Vec::new())
     .await
     .expect("inject 0-byte artwork");
 
-  // iOS re-transmits the real bytes for the SAME id, with no new now-playing delta.
   harness
     .iap2_artwork(phone, 7, vec![0xFF; 64])
     .await
@@ -177,13 +158,6 @@ async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
   );
 }
 
-/// Snapshot-driven companion authority with the iAP2 app-change gate. A spotify
-/// companion claims now-playing authority (declaring its app_bundle) and pushes a
-/// full `player.snapshot`; the merged now-playing must reflect the spotify track.
-/// When iAP2 then reports a DIFFERENT foreground app (youtube), the gate hands
-/// now-playing to iAP2 despite the still-claimed companion; when iAP2 returns to
-/// the spotify bundle, the companion is authoritative again - all without a fresh
-/// snapshot.
 #[tokio::test]
 async fn companion_snapshot_authoritative_and_iap2_app_change_gate() {
   let harness = Harness::start().await.expect("harness start");
@@ -247,7 +221,6 @@ async fn companion_snapshot_authoritative_and_iap2_app_change_gate() {
     "companion title authoritative"
   );
 
-  // iAP2 reports youtube as the foreground app: the gate overrides the still-claimed companion.
   harness
     .inject_iap2(
       phone_addr,
@@ -278,7 +251,6 @@ async fn companion_snapshot_authoritative_and_iap2_app_change_gate() {
     "diverging iAP2 foreground app did not hand now-playing to iAP2"
   );
 
-  // iAP2 returns to the spotify bundle: the companion re-takes without a fresh snapshot.
   harness
     .inject_iap2(
       phone_addr,
@@ -310,12 +282,6 @@ async fn companion_snapshot_authoritative_and_iap2_app_change_gate() {
   );
 }
 
-/// iOS sends now-playing as separate metadata and playback updates, and a
-/// non-Spotify app (YouTube, etc.) sends a playback-only delta (media_item
-/// None) when the user hits play/pause or seeks on the current track. With
-/// iAP2 the sole source (no companion claiming playback), those deltas must
-/// reach the webapp - the play/pause state and progress bar ride them. Guards
-/// against the "art loads but the transport looks dead" report.
 #[tokio::test]
 async fn iap2_playback_only_deltas_reach_webapp_without_companion() {
   let harness = Harness::start().await.expect("harness start");
@@ -328,7 +294,6 @@ async fn iap2_playback_only_deltas_reach_webapp_without_companion() {
 
   let phone = harness.iap2_peer();
 
-  // metadata leads, paused - the iOS ordering (media_item first, playback follows).
   harness
     .inject_iap2(
       phone,
@@ -353,7 +318,6 @@ async fn iap2_playback_only_deltas_reach_webapp_without_companion() {
     .await;
   assert!(started.is_some(), "metadata never reached a modern frame");
 
-  // playback-only delta: user hits play on the phone. media_item is None.
   harness
     .inject_iap2(
       phone,
@@ -378,7 +342,6 @@ async fn iap2_playback_only_deltas_reach_webapp_without_companion() {
     "iAP2 play-state delta never reached the webapp (transport looks dead)"
   );
 
-  // playback-only delta: user pauses on the phone. the toggle must reach the webapp.
   harness
     .inject_iap2(
       phone,

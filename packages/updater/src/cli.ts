@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-//! `bridgething-updater` - manifest-driven CLI. Connects to a Car Thing over the daemon's
-//! network gateway, resolves the target channel's `latest` composite version from the discover
-//! manifest, downloads whatever artifacts are missing, and pushes daemon and/or image OTA.
-
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +7,14 @@ import type { BridgeThingMeta } from '@bridgething/gateway';
 import { BridgethingGateway } from '@bridgething/gateway';
 
 import { OtaDriver, type OtaProgressSnapshot } from './driver.js';
-import { fetchManifest, imageVariantForChannel, otaArtifactUrls, parseCompositeVersion } from './manifest.js';
+import {
+  type OtaManifestRelease,
+  daemonPatchUrl,
+  fetchManifest,
+  imageVariantForChannel,
+  otaArtifactUrls,
+  parseCompositeVersion,
+} from './manifest.js';
 import { fileArtifactSource } from './node.js';
 import { NetworkAdapter } from './websocket.js';
 
@@ -123,7 +126,13 @@ async function main(): Promise<void> {
     if (!args.daemonOnly && meta.imageVersion !== composite.image) {
       ok = await runImagePush(driver, args, urls, `${channelName}-${composite.image}`);
     } else if (meta.appVersion !== composite.daemon) {
-      ok = await runDaemonPush(driver, args, urls.daemonBinary, composite.daemon);
+      ok = await runDaemonPush(driver, args, {
+        fullUrl: urls.daemonBinary,
+        toVersion: composite.daemon,
+        fromVersion: meta.appVersion,
+        channel: channelName,
+        release,
+      });
     } else {
       console.log('already up to date.');
     }
@@ -157,9 +166,48 @@ async function runImagePush(
   return reportOutcome(snapshot);
 }
 
-async function runDaemonPush(driver: OtaDriver, args: Args, url: string, version: string): Promise<boolean> {
-  console.log(`downloading daemon ${version} ...`);
-  const path = await downloadIfNeeded(url, args.cacheDir, `daemon-${version}`);
+async function runDaemonPush(
+  driver: OtaDriver,
+  args: Args,
+  opts: {
+    fullUrl: string;
+    toVersion: string;
+    fromVersion: string;
+    channel: string;
+    release: OtaManifestRelease | undefined;
+  },
+): Promise<boolean> {
+  const artifacts = opts.release?.artifacts;
+  const patchDigest = artifacts?.daemon_patches?.[opts.fromVersion];
+  const daemonDigest = artifacts?.daemon;
+
+  if (patchDigest && daemonDigest) {
+    console.log(`downloading daemon delta ${opts.fromVersion} -> ${opts.toVersion} ...`);
+    const patchUrl = daemonPatchUrl({
+      rootURL: args.root,
+      channel: opts.channel,
+      toVersion: opts.toVersion,
+      fromVersion: opts.fromVersion,
+    });
+    const patchPath = await downloadIfNeeded(
+      patchUrl,
+      args.cacheDir,
+      `daemon-${opts.toVersion}-from-${opts.fromVersion}.patch`,
+    );
+    const patchSource = await fileArtifactSource(patchPath);
+
+    console.log('pushing daemon delta OTA ...');
+    const snapshot = await driver.pushDaemon(patchSource, logProgress, {
+      algorithm: 'zstdPatchFrom',
+      resultSha256: daemonDigest.sha256,
+      resultSize: daemonDigest.size,
+    });
+    if (snapshot.phase !== 'failed') return reportOutcome(snapshot);
+    console.log(`daemon delta failed (${snapshot.reason}); falling back to full binary ...`);
+  }
+
+  console.log(`downloading daemon ${opts.toVersion} ...`);
+  const path = await downloadIfNeeded(opts.fullUrl, args.cacheDir, `daemon-${opts.toVersion}`);
   const source = await fileArtifactSource(path);
 
   console.log('pushing daemon OTA ...');

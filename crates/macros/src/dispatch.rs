@@ -136,7 +136,6 @@ fn snake_case_ident(ident: &Ident) -> Ident {
       out.push(*ch);
     }
   }
-  // Rust raw-identifier escape: a method named `type` etc. needs `r#type`.
   match out.as_str() {
     "type" | "fn" | "match" | "ref" | "self" | "use" | "mod" | "move" | "loop" | "let" | "if" | "else" | "for"
     | "while" | "in" | "do" | "return" | "yield" | "where" | "impl" | "trait" | "enum" | "struct" | "const"

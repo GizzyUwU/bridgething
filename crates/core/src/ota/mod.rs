@@ -1,43 +1,5 @@
-//! OTA orchestrator. Drives an update from "first chunk arriving on
-//! the wire" to "the new bits are live", emitting `OtaProgress` events
-//! at every phase transition and an `OtaError` on terminal failure.
-//!
-//! Three kinds, one phase machine:
-//!
-//! Image (`.swu`):
-//!
-//! ```text
-//! Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
-//!     --> Writing (libswupdate) --> Confirming --> Reboot
-//! ```
-//!
-//! Daemon (raw aarch64 binary) and BuiltinWebapp (zip of hub or stock):
-//!
-//! ```text
-//! Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
-//!     --> Writing (atomic rename on bandaid bind-mount) --> Reboot
-//! ```
-//!
-//! `Confirming` is image-only (slot try-counter flip). `Reboot` is
-//! universal: image fires systemd Reboot, daemon and builtin-webapp
-//! fire `systemctl restart bridgething.service`.
-//!
-//! Cancellation: image is cancelable through `Writing` (libswupdate
-//! honors mid-install cancel). Daemon and builtin-webapp are cancelable
-//! through `Streaming` only - the final rename has no half-state.
-//!
-//! Single-instance: a fresh `OtaBegin` arriving while an OTA is
-//! actively writing rejects with `OtaBeginRejected`. A new `OtaBegin`
-//! for a different update_id while one is in `Streaming` cancels the
-//! prior streaming run (the partial stays for resume) and starts the
-//! new one.
-//!
-//! Bytes never accumulate in memory: chunks land on
-//! `<state_dir>/transfers/<id>.partial` via `ChunkedTransfer`, and
-//! the kind-specific backend consumes from that on-disk file at write
-//! time.
-
 mod daemon_swap;
+mod patch;
 mod range_proxy;
 mod slots;
 mod staging;
@@ -57,7 +19,7 @@ use bluer::Address;
 use libbridgething::{
   OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
   gateway::{
-    BridgeToGatewaySystemMsgEvent, BridgeToGatewayTransferMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected,
+    BridgeToGatewaySystemMsgEvent, BridgeToGatewayTransferMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaPatch,
     TransferAck,
   },
 };
@@ -205,6 +167,7 @@ enum OtaState {
     peer: Option<Address>,
     transfer_id: uuid::Uuid,
     stream_rx: mpsc::Receiver<TransferEvent>,
+    patch: Option<OtaPatch>,
   },
   Writing {
     kind: OtaKind,
@@ -415,6 +378,13 @@ impl OtaActor {
       return;
     };
 
+    if req.patch.is_some() && !matches!(req.kind, OtaKind::Daemon) {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "patch delta is only supported for daemon updates".into(),
+      }));
+      return;
+    }
+
     let kind = req.kind;
     let target_dir = match kind {
       OtaKind::Image | OtaKind::InstalledWebapp => None,
@@ -457,6 +427,7 @@ impl OtaActor {
           peer,
           transfer_id: req.transfer.id,
           stream_rx,
+          patch: req.patch.clone(),
         };
         let _ = ack.send(Ok(OtaBeginAck {
           resume_from_offset: resume_from_offset as u32,
@@ -493,16 +464,23 @@ impl OtaActor {
   }
 
   async fn handle_stream_event(&mut self, event: TransferEvent) {
-    let (kind, current_id, expected_size, peer, transfer_id) = match &self.state {
+    let (kind, current_id, expected_size, peer, transfer_id, patch) = match &self.state {
       OtaState::Streaming {
         kind,
         update_id,
         expected_size,
         peer,
         transfer_id,
+        patch,
         ..
-      } => (*kind, update_id.clone(), *expected_size, *peer, *transfer_id),
-      // unreachable: the stream rx only exists inside Streaming
+      } => (
+        *kind,
+        update_id.clone(),
+        *expected_size,
+        *peer,
+        *transfer_id,
+        patch.clone(),
+      ),
       _ => return,
     };
 
@@ -543,7 +521,7 @@ impl OtaActor {
         self.last_streaming_emit_at = None;
         self.last_streaming_percent = None;
         self.sinks.unbind(transfer_id);
-        self.spawn_write(kind, current_id, peer, path).await;
+        self.spawn_write(kind, current_id, peer, path, patch).await;
       }
       Err(err) => {
         let code = transfer_error_code(&err);
@@ -601,7 +579,14 @@ impl OtaActor {
     }
   }
 
-  async fn spawn_write(&mut self, kind: OtaKind, update_id: String, peer: Option<Address>, payload: PathBuf) {
+  async fn spawn_write(
+    &mut self,
+    kind: OtaKind,
+    update_id: String,
+    peer: Option<Address>,
+    payload: PathBuf,
+    patch: Option<OtaPatch>,
+  ) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     self.state = OtaState::Writing {
       kind,
@@ -660,7 +645,7 @@ impl OtaActor {
       }
       OtaKind::Daemon | OtaKind::BuiltinWebapp => {
         tokio::spawn(async move {
-          let result = run_stage(&events_tx, kind, &payload, update_id, cancel_rx).await;
+          let result = run_stage(&events_tx, kind, &payload, update_id, patch, cancel_rx).await;
           let _ = tokio::fs::remove_file(&payload).await;
           let _ = self_tx.send(Command::StageFinished { result, peer }).await;
         });
@@ -851,6 +836,7 @@ async fn run_stage(
   kind: OtaKind,
   payload: &std::path::Path,
   update_id: String,
+  patch: Option<OtaPatch>,
   mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<StagedPiece, WriteError> {
   if check_cancel(&mut cancel_rx) {
@@ -862,10 +848,28 @@ async fn run_stage(
 
   emit_progress(events_tx, OtaPhase::Writing, 0, None).await;
   let piece = match kind {
-    OtaKind::Daemon => daemon_swap::stage(payload, update_id).await.map_err(|err| WriteError {
-      code: OtaErrorCode::WriteFailed,
-      msg: format!("daemon stage failed: {err}"),
-    })?,
+    OtaKind::Daemon => {
+      let reconstructed = match patch {
+        Some(spec) if crate::paths::is_on_device() => Some(
+          patch::apply(daemon_swap::current_binary_path(), payload.to_path_buf(), spec)
+            .await
+            .map_err(|err| WriteError {
+              code: OtaErrorCode::WriteFailed,
+              msg: format!("daemon patch apply failed: {err}"),
+            })?,
+        ),
+        _ => None,
+      };
+      let staged = reconstructed.as_deref().unwrap_or(payload);
+      let result = daemon_swap::stage(staged, update_id).await.map_err(|err| WriteError {
+        code: OtaErrorCode::WriteFailed,
+        msg: format!("daemon stage failed: {err}"),
+      });
+      if let Some(reconstructed) = &reconstructed {
+        let _ = tokio::fs::remove_file(reconstructed).await;
+      }
+      result?
+    }
     OtaKind::BuiltinWebapp => webapp_swap::stage(payload, update_id).await.map_err(|err| WriteError {
       code: OtaErrorCode::WriteFailed,
       msg: format!("builtin-webapp stage failed: {err}"),
@@ -1115,6 +1119,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1151,6 +1156,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         Some(peer),
       )
@@ -1216,6 +1222,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         Some(peer),
       )
@@ -1256,6 +1263,7 @@ mod tests {
             total_size: size - 1,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1290,6 +1298,7 @@ mod tests {
             total_size: size,
             sha256: Some(bogus_sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1323,6 +1332,7 @@ mod tests {
             total_size: size,
             sha256: None,
           },
+          patch: None,
         },
         None,
       )
@@ -1346,6 +1356,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1367,6 +1378,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1399,6 +1411,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1424,6 +1437,7 @@ mod tests {
             total_size: 32,
             sha256: Some("deadbeef".repeat(8)),
           },
+          patch: None,
         },
         None,
       )
@@ -1447,6 +1461,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1467,6 +1482,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha),
           },
+          patch: None,
         },
         None,
       )
@@ -1510,6 +1526,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         Some(peer_a),
       )
@@ -1537,6 +1554,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha),
           },
+          patch: None,
         },
         Some(peer_b),
       )
@@ -1563,6 +1581,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         Some(peer_a),
       )
@@ -1581,6 +1600,7 @@ mod tests {
             total_size: size,
             sha256: Some("deadbeef".repeat(8)),
           },
+          patch: None,
         },
         Some(peer_b),
       )
@@ -1605,6 +1625,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1665,6 +1686,7 @@ mod tests {
             total_size: size - 1,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1700,6 +1722,7 @@ mod tests {
             total_size: size,
             sha256: Some(bogus_sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1814,6 +1837,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1835,6 +1859,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha),
           },
+          patch: None,
         },
         None,
       )
@@ -1860,6 +1885,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )
@@ -1901,6 +1927,7 @@ mod tests {
             total_size: size,
             sha256: Some(sha.clone()),
           },
+          patch: None,
         },
         None,
       )

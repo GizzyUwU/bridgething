@@ -1,15 +1,3 @@
-//! Registry of which transport currently holds the connection to each
-//! gateway peer. Each transport (rfcomm, iap2 ea, network) registers on
-//! peer connect and unregisters on disconnect; `GatewayMan::send_all`
-//! consults the map to route addressed sends to a single transport
-//! (no fan-out clones) and broadcast sends only to transports that
-//! currently have ≥1 peer.
-//!
-//! Idempotent: `register(addr, kind)` is safe to call repeatedly with
-//! the same address (e.g. a transport that opens multiple session-level
-//! channels per peer); the first matching `unregister` removes the
-//! entry, so callers must avoid mismatched register/unregister counts.
-
 use std::{
   collections::{HashMap, HashSet},
   sync::{Arc, Mutex, OnceLock},

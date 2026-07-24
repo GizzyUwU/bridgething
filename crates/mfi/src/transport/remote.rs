@@ -1,32 +1,3 @@
-//! TCP transport for talking to the chip from a remote host.
-//!
-//! On the device, run [`serve`] against a [`LinuxI2c`] transport. On
-//! the dev host, [`RemoteI2c`] connects to that listener and looks
-//! exactly like any other [`Transport`] to [`MfiAuth`]. The wire format
-//! is sync-only and single-client; the chip is a single-resource so
-//! there's no concurrency to gain.
-//!
-//! Wire format (both directions):
-//!
-//! ```text
-//! [u8 tag][u32 length BE][N bytes payload]
-//! ```
-//!
-//! Request tags (host -> device):
-//! - `0x01 PREPARE`     - payload `[cmd: u8]`
-//! - `0x02 SMBUS_READ`  - payload `[cmd: u8, len: u8]`
-//! - `0x03 SMBUS_WRITE` - payload `[cmd: u8, data...]`
-//! - `0x04 RAW_READ`    - payload `[len: u32 BE]`
-//!
-//! Response tags (device -> host):
-//! - `0x80 OK`  - payload is response bytes (empty for prepare/write,
-//!   the requested bytes for reads)
-//! - `0x81 ERR` - payload is a UTF-8 error message
-//!
-//! [`LinuxI2c`]: super::LinuxI2c
-//! [`Transport`]: super::Transport
-//! [`MfiAuth`]: crate::MfiAuth
-
 use std::{
   io::{self, Read, Write},
   net::{TcpStream, ToSocketAddrs},
@@ -45,12 +16,8 @@ pub mod tag {
   pub const RESP_ERR: u8 = 0x81;
 }
 
-/// Hard cap on payload size to keep a malformed peer from making the
-/// other side allocate gigabytes. The chip's largest legal payload is
-/// the X.509 cert (a few KB); 1 MiB is comfortable headroom.
 pub const MAX_PAYLOAD: u32 = 1 << 20;
 
-/// Read one frame from the stream. Returns `(tag, payload)`.
 pub fn read_frame<R: Read>(r: &mut R) -> io::Result<(u8, Vec<u8>)> {
   let mut header = [0u8; 5];
   r.read_exact(&mut header)?;
@@ -67,7 +34,6 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<(u8, Vec<u8>)> {
   Ok((tag, payload))
 }
 
-/// Write one frame to the stream.
 pub fn write_frame<W: Write>(w: &mut W, tag: u8, payload: &[u8]) -> io::Result<()> {
   let len =
     u32::try_from(payload.len()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "payload too large"))?;
@@ -85,8 +51,6 @@ pub fn write_frame<W: Write>(w: &mut W, tag: u8, payload: &[u8]) -> io::Result<(
   w.flush()
 }
 
-/// Host-side transport that proxies each call over TCP to a [`serve`]
-/// loop running on the device.
 pub struct RemoteI2c {
   stream: TcpStream,
 }
@@ -159,10 +123,6 @@ impl Transport for RemoteI2c {
   }
 }
 
-/// Serve a single client over `stream`, dispatching each request to
-/// the supplied transport. Returns when the client disconnects cleanly
-/// or hits a fatal i/o error. Errors during request handling are sent
-/// back as `RESP_ERR` frames; they do not terminate the loop.
 pub fn serve<T, S>(mut stream: S, transport: &mut T) -> io::Result<()>
 where
   T: Transport,
@@ -240,7 +200,6 @@ mod tests {
 
   #[test]
   fn frame_rejects_oversized_length() {
-    // header claims 2 GiB; reader must refuse before allocating.
     let header = [tag::PREPARE, 0x80, 0x00, 0x00, 0x00];
     let mut cursor = Cursor::new(&header[..]);
     let err = read_frame(&mut cursor).unwrap_err();

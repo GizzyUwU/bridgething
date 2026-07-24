@@ -1,10 +1,3 @@
-//! Tier-3 host rig: drive a real booted Car Thing over the air.
-//!
-//! The over-air RFCOMM dial (real host radio -> the device's BCM chip -> bluez SPP) feeds the same
-//! `bridgething_gateway::Gateway` the in-process Android driver uses, and the
-//! tunneled frame-tap WS feeds the same `FrameObserver`. The device address
-//! comes from the environment so one rig points at whatever is on the bench.
-
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -27,22 +20,14 @@ use tokio_util::bytes::Bytes;
 use crate::{FrameObserver, MockWsClient, frame_tap_ws_observer};
 
 const DISCOVER_TIMEOUT: Duration = Duration::from_secs(20);
-
-/// How long to wait for the daemon to reach Identified, request app
-/// launch, and the emulator to open the EA gateway stream over a real
-/// radio (MFi cert exchange + link timing included).
 const EA_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A booted Car Thing reachable over the USB-gadget network (mDNS host) plus a
-/// real Bluetooth radio. `SUPERBIRD_HOST` (default `bridgething.local`) is the
-/// network host; `SUPERBIRD_BT_MAC` is the device's BT address.
 pub struct DeviceHarness {
   host: String,
   bt_addr: Address,
 }
 
 impl DeviceHarness {
-  /// Build from the environment. Errors if `SUPERBIRD_BT_MAC` is unset/malformed.
   pub fn from_env() -> Result<Self> {
     let host = std::env::var("SUPERBIRD_HOST").unwrap_or_else(|_| "bridgething.local".into());
     let raw =
@@ -60,36 +45,25 @@ impl DeviceHarness {
     }
   }
 
-  /// Observe the device's egress frames over the tunneled frame-tap WS bridge.
   pub async fn frame_tap(&self) -> Result<FrameObserver> {
     frame_tap_ws_observer(&format!("ws://{}:{}/", self.host, FRAME_TAP_PORT)).await
   }
 
-  /// Open a modern-mode WS to the device over the USB-gadget network.
   pub async fn connect_modern_client(&self) -> Result<MockWsClient> {
     let (stream, _resp) = connect_async(format!("ws://{}:{}/", self.host, BRIDGETHING_WS_MODERN_PORT)).await?;
     Ok(MockWsClient { stream })
   }
 
-  /// Dial the device's bridgething SPP over the real radio and drive it with the real gateway SDK.
-  /// Pairs Just Works and trusts on first run; bluez persists the bond.
   pub async fn connect_over_air(&self) -> Result<Gateway> {
     let stream = self.dial(BRIDGETHING_RFCOMM_CHANNEL).await?;
     Ok(Gateway::from_io(stream))
   }
 
-  /// Dial the device's bridgething SPP over the SAME ACL as an existing
-  /// connection (e.g. a running iap2 emulator), so a scenario can drive both
-  /// the iap2 control session AND a companion gateway concurrently. Skips the
-  /// stale-ACL cleanup that `connect_over_air` does as its first step.
   pub async fn connect_over_air_extra(&self) -> Result<Gateway> {
     let stream = self.dial_extra(BRIDGETHING_RFCOMM_CHANNEL).await?;
     Ok(Gateway::from_io(stream))
   }
 
-  /// Dial the device's iAP2 channel over the real radio and drive it with the device-half emulator.
-  /// The emulator walks auth and identification, then opens the EA gateway stream when the daemon
-  /// requests app launch; the returned [`Gateway`] rides that stream.
   pub async fn connect_over_air_iap2(&self) -> Result<Gateway> {
     let (link_command_tx, link_events_rx) = self.dial_iap2().await?;
     let (emu_events_tx, mut emu_events_rx) = mpsc::channel(64);
@@ -110,9 +84,6 @@ impl DeviceHarness {
     }
   }
 
-  /// Dial the device's iAP2 channel and run the device-half emulator in driven mode (no canned
-  /// subscribe push), returning a handle that pushes control-session NowPlaying and artwork on
-  /// demand. Resolves once identification completes, so pushes land on a subscribed accessory.
   pub async fn connect_iap2_emulator(&self) -> Result<DeviceEmulatorHandle> {
     let (link_command_tx, link_events_rx) = self.dial_iap2().await?;
     let (emu_events_tx, mut emu_events_rx) = mpsc::channel(64);
@@ -133,13 +104,10 @@ impl DeviceHarness {
         Err(_) => bail!("emulator did not reach identification within {EA_OPEN_TIMEOUT:?}"),
       }
     }
-    // Keep draining later milestones so the emulator never blocks emitting them.
     tokio::spawn(async move { while emu_events_rx.recv().await.is_some() {} });
     Ok(handle)
   }
 
-  /// Just-Works dial the iAP2 channel and run the device-role link, returning the command sender
-  /// and event receiver the emulator drives. Shared by the EA-gateway and driven-source paths.
   async fn dial_iap2(&self) -> Result<(mpsc::Sender<Iap2Command>, mpsc::Receiver<Iap2Event>)> {
     let stream = self.dial(IAP2_RFCOMM_CHANNEL).await?;
     let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(64);
@@ -153,15 +121,10 @@ impl DeviceHarness {
     Ok((link_command_tx, link_events_rx))
   }
 
-  /// Just-Works pair (the no-auth posture) + trust, then dial the given RFCOMM
-  /// channel. bluez persists the bond, so re-dials skip pairing.
   async fn dial(&self, channel: u8) -> Result<rfcomm::Stream> {
     self.dial_inner(channel, true).await
   }
 
-  /// Dial a second RFCOMM channel on the same ACL, without dropping the link
-  /// first. Use after a `dial()` to add another connection (e.g. running the
-  /// iap2 emulator AND a gateway companion against the same device).
   pub async fn dial_extra(&self, channel: u8) -> Result<rfcomm::Stream> {
     self.dial_inner(channel, false).await
   }
@@ -190,8 +153,6 @@ impl DeviceHarness {
     let _ = device.set_trusted(true).await;
 
     if drop_acl_first {
-      // drop any lingering ACL first: an iAP2 session left by a prior scenario can
-      // poison a fresh rfcomm dial on the same link (host-side BT state, not the daemon).
       let _ = device.disconnect().await;
       tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -201,7 +162,6 @@ impl DeviceHarness {
       .with_context(|| format!("rfcomm connect to channel {channel}"))
   }
 
-  /// Ensure bluez knows the target, discovering briefly if it does not.
   async fn ensure_known(&self, adapter: &Adapter) -> Result<Device> {
     if adapter.device_addresses().await?.contains(&self.bt_addr) {
       return Ok(adapter.device(self.bt_addr)?);
@@ -225,8 +185,6 @@ impl DeviceHarness {
   }
 }
 
-/// Device-half link config matching the real iPhone's SYN|ACK LSP
-/// (max_outgoing 127, max_len 65535, sessions control/file-transfer/EA).
 fn iap2_device_config() -> LinkConfig {
   let lsp = Lsp {
     version: 1,
@@ -259,7 +217,6 @@ fn iap2_device_config() -> LinkConfig {
   config
 }
 
-/// Adapt a [`DeviceEaStream`] into a [`Gateway`] by bridging its channels through a duplex pair.
 fn bridge_ea_stream(stream: DeviceEaStream) -> Gateway {
   let DeviceEaStream {
     mut inbound_rx,

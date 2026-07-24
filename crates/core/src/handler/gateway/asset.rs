@@ -97,7 +97,6 @@ mod tests {
     let (assets, sinks, _join) = fresh_cache().await;
     let transfer_id = Uuid::now_v7();
     let payload: &[u8] = b"streamed-art-bytes";
-    // mirror the inbound loop: the sink is bound synchronously before the terminal reply is handled.
     sinks.bind_memory(transfer_id);
     let reply = AssetGotReply {
       id: "spotify/img/248/stream".into(),
@@ -113,7 +112,6 @@ mod tests {
       let sinks = sinks.clone();
       tokio::spawn(async move { cache_late_asset(assets, sinks, reply).await })
     };
-    // fragments follow the terminal reply on the wire, in offset order.
     sinks.fragment(transfer_id, 0, Bytes::copy_from_slice(payload));
     task.await.unwrap();
     let got = assets.get("spotify/img/248/stream").await.unwrap().expect("cached");

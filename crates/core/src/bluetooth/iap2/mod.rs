@@ -1,21 +1,3 @@
-//! iAP2 over RFCOMM. Registers the iAP2 accessory profile, accepts
-//! iPhone connect requests, and spawns one [`Iap2Session`] per active
-//! link. MFi chip access is required;
-//! initialization probes the chip first and skips profile registration
-//! entirely if the probe fails (Car Things without working MFi silicon
-//! still get a usable daemon, just no iOS support).
-//!
-//! Session events are emitted upstream via the public `Iap2Event`
-//! channel returned from `init`. The daemon's main loop reads from
-//! that channel and routes each event through `Iap2EventRouter`. The
-//! manager itself stays out of state mutation.
-//!
-//! The MFi transport is build-mode-gated: debug builds connect through
-//! `RemoteI2c` to the device-side `bridgething-mfi-proxy` (host iteration
-//! reaches the chip remotely), while release builds open `/dev/i2c-3`
-//! directly. Reading `SUPERBIRD_HOST` selects the device for the dev
-//! path; production never consults it.
-
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
@@ -61,12 +43,6 @@ const RECONNECT_DIAL_SETTLE: Duration = Duration::from_secs(8);
 const RECONNECT_KICK_CAPACITY: usize = 16;
 const SESSION_DEAD_CAPACITY: usize = 16;
 
-/// SDP record advertised for the iAP2 RFCOMM listener. iOS does
-/// not engage iAP2 on the auto-generated record bluez emits when only
-/// `Profile { uuid, channel, ... }` is supplied - it specifically wants
-/// the BluetoothProfileDescriptorList entry pointing at SerialPort
-/// (0x1101 v1.0). Without that, iOS Bluetooth Settings shows
-/// "<name> is Not Supported" without ever opening RFCOMM.
 fn iap2_service_record() -> String {
   format!(
     r#"<?xml version="1.0" encoding="UTF-8" ?>

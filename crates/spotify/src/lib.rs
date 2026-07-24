@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 pub mod aplogin;
 pub mod auth;
 pub mod client;

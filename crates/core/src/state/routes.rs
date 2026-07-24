@@ -1,15 +1,3 @@
-//! Per-id routing tables for the Net surface. A `RouteTable` maps a
-//! companion-side id (WebSocket `connection_id`, stream `stream_id`)
-//! to the webapp socket that owns it. Inbound events from the
-//! companion arrive tagged with the id; the daemon looks up the
-//! owner and forwards. Reverse-direction commands from the webapp
-//! verify ownership before being forwarded.
-//!
-//! Cleanup paths: terminal events (`WsClosed`/`WsErrorEvent`,
-//! `StreamEnd`/`StreamError`) drop the entry. Webapp disconnect
-//! drains every entry the webapp owned. Companion disconnect drains
-//! every entry, period.
-
 use std::{
   collections::HashMap,
   net::SocketAddr,

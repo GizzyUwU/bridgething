@@ -1,7 +1,3 @@
-//! End-to-end loopback test for the iAP2 link wedge: drives a hand-rolled
-//! fake peer over `tokio::io::duplex` and asserts the link reaches
-//! Established with the peer's LSP intact.
-
 use std::time::Duration;
 
 use bridgething_iap2::{
@@ -88,16 +84,12 @@ async fn handshake_reaches_established_and_peer_lsp_propagates() {
   let peer_seq: u8 = 50;
 
   let peer_handle = tokio::spawn(async move {
-    // Send the peer's detect marker first; our side may also be sending
-    // its own concurrently, which the codec will resync past.
     peer.write_all(&DETECT_MARKER).await.unwrap();
 
-    // Send the peer's SYN.
     let mut peer_codec = LinkCodec;
     let syn = LinkPacket::with_payload(ControlBits::SYN, peer_seq, 0, 0, peer_lsp_v.encode());
     write_packet(&mut peer, &mut peer_codec, syn).await;
 
-    // Read our SYN. Codec resyncs past any leading detect markers we sent.
     let mut peer_buf = BytesMut::with_capacity(256);
     let our_syn = read_one_packet(&mut peer, &mut peer_buf, &mut peer_codec).await;
     assert!(our_syn.header.control.contains(ControlBits::SYN));
@@ -105,7 +97,6 @@ async fn handshake_reaches_established_and_peer_lsp_propagates() {
     let our_proposed_lsp = Lsp::decode(&our_syn.payload).expect("decode our LSP");
     assert_eq!(our_proposed_lsp.sessions.len(), 1);
 
-    // Read our standalone ACK for the peer's SYN.
     let our_ack = read_one_packet(&mut peer, &mut peer_buf, &mut peer_codec).await;
     assert!(our_ack.header.control.contains(ControlBits::ACK));
     assert!(!our_ack.header.control.contains(ControlBits::SYN));
@@ -161,7 +152,6 @@ async fn disconnect_command_sends_rst_and_returns_ok() {
     (peer, peer_buf, peer_codec)
   });
 
-  // Wait until the link reports Established before issuing the disconnect.
   let event = tokio::time::timeout(Duration::from_secs(3), events_rx.recv())
     .await
     .unwrap()

@@ -63,12 +63,6 @@ impl SuperbirdMeta {
   }
 }
 
-/// Single source of truth for device meta. Wraps the immutable static
-/// [`SuperbirdMeta`] together with the live, user-settable nickname.
-///
-/// Mutation goes through [`set_nickname`](DeviceMeta::set_nickname), which
-/// writes KV and updates an internal watch channel that subscribers read to
-/// fan out the change. No caller should fan out manually.
 #[derive(Debug, Clone)]
 pub struct DeviceMeta {
   inner: Arc<Inner>,

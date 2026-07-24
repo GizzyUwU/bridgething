@@ -1,11 +1,3 @@
-//! The runtime drive surface: with the subscribe-time canned push
-//! suppressed (`without_now_playing`), a `DeviceEmulatorHandle` sequences
-//! a NowPlaying delta and an artwork transfer on demand. The accessory's
-//! own `SessionEvent` stream must emit exactly the driven delta (carrying
-//! the paired artwork id) and the artwork bytes, in order - proving the
-//! handle drives the control session the same way `inject_iap2` does
-//! in-process.
-
 #![cfg(feature = "emulator")]
 
 mod emu;
@@ -21,15 +13,11 @@ use emu::recv_with_timeout;
 
 #[tokio::test]
 async fn emulator_handle_drives_now_playing_and_artwork() {
-  // Larger than one accessory link packet (max_len 2048) so the transfer
-  // chunks into FirstData/Data/LastData.
   let artwork = Bytes::from(vec![0x5Eu8; 5000]);
   let (mut harness, mut emu_events, handle) = emu::spawn(emu::identification_config(), None, |emulator| {
     emulator.without_now_playing()
   });
 
-  // Drive only after identification so the control session and file
-  // transfer are up; nothing was pushed unsolicited.
   loop {
     match recv_with_timeout(&mut emu_events, Duration::from_secs(10)).await {
       Some(EmulatorEvent::Identified) => break,

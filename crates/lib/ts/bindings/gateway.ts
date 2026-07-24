@@ -737,8 +737,19 @@ export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart>; b
  * `update_url_base` is image-kind only: the server prefix the companion
  * may refetch the .zck delta from on cache miss while serving range
  * requests during the Writing phase. Ignored for non-image kinds.
+ *
+ * `patch`, when present, marks `transfer` as a delta rather than the whole
+ * artifact: the daemon reconstructs against its currently-installed artifact
+ * of this `kind` before staging. Daemon-kind only today. Absent for full
+ * pushes.
  */
-export type OtaBegin = { kind: OtaKind; updateId: string; updateUrlBase: string | null; transfer: TransferRef };
+export type OtaBegin = {
+  kind: OtaKind;
+  updateId: string;
+  updateUrlBase: string | null;
+  transfer: TransferRef;
+  patch: OtaPatch | null;
+};
 
 /**
  * Successful response to `OtaBegin`. `resume_from_offset` is the byte
@@ -753,6 +764,21 @@ export type OtaBeginAck = { resumeFromOffset: number };
  * update_id with mismatched size/sha, budget exhausted).
  */
 export type OtaBeginRejected = { reason: string };
+
+/**
+ * Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
+ * receiving it the daemon applies `algorithm` against its current artifact
+ * and verifies the reconstruction is `result_size` bytes hashing to
+ * `result_sha256` before it reaches staging.
+ */
+export type OtaPatch = { algorithm: OtaPatchAlgorithm; resultSha256: string; resultSize: number };
+
+/**
+ * Delta algorithm the daemon applies to reconstruct a full artifact from a
+ * pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
+ * is the currently-installed artifact.
+ */
+export type OtaPatchAlgorithm = 'zstdPatchFrom';
 
 export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
 

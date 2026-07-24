@@ -1,8 +1,3 @@
-//! Identification flow: drives the `0x1D00..0x1D03` exchange.
-//! Receives `StartIdentification`, replies with the
-//! `IdentificationInformation` that wraps the caller's
-//! [`IdentificationConfig`], then waits for accept-or-reject.
-
 use tokio::sync::mpsc;
 
 use super::{SessionEvent, emit, send_csm};
@@ -45,8 +40,6 @@ impl IdentificationFlow {
     self.state == IdentState::Accepted
   }
 
-  /// Process one identification-range CSM. `Some` means "terminal,
-  /// emit + tear down."
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,

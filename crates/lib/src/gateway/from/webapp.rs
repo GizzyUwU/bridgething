@@ -5,7 +5,6 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-/// Marker struct for the `List` request - pairs with `BridgeToGatewayWebappMsg::Webapps`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = GatewayToBridge,
@@ -16,7 +15,6 @@ use uuid::Uuid;
 )]
 pub struct ListWebapps;
 
-/// Marker struct for the `GetActive` request - pairs with `BridgeToGatewayWebappMsg::Active`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = GatewayToBridge,
@@ -67,7 +65,6 @@ pub struct WebappUninstall {
   pub id: Uuid,
 }
 
-/// Which bundle file a `WebappResource` request targets.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -77,10 +74,6 @@ pub enum WebappResourceKind {
   Settings,
 }
 
-/// On-demand fetch of a webapp bundle resource (icon bytes, companion
-/// settings page). `have` carries the sha256 the requester already
-/// caches; a match returns a bodyless reply so unchanged resources
-/// never re-cross the link.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -278,20 +271,14 @@ pub struct WebappDocDelete {
 #[ts(export, export_to = "gateway.ts")]
 #[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
 pub enum GatewayToBridgeWebappMsg {
-  /// request: bridge replies with `Webapps`
   #[bridge_request]
   List,
-  /// request: bridge replies with `Active`
   #[bridge_request]
   GetActive,
-  /// command: switch the kiosk to the named webapp; bridge replies with `Switched`
   #[bridge_request]
   SwitchTo(WebappSwitchTo),
-  /// command: remove the named installed webapp; bridge replies with `Uninstalled`
-  /// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
   #[bridge_request]
   Uninstall(WebappUninstall),
-  /// request: bridge replies with `Resource`
   #[bridge_request]
   Resource(WebappResource),
   #[bridge_request]

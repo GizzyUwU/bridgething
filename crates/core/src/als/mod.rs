@@ -1,21 +1,3 @@
-//! ALS (ambient light sensor) driver + backlight policy. Owns the
-//! TMD2772 IIO node and the pwm-backlight sysfs entry; reads the
-//! photodiode raw count, applies a median + log10 + ease-toward-target
-//! pipeline, and either drives `/sys/class/backlight/backlight/brightness`
-//! directly (Auto) or holds a webapp-set level (Manual).
-//!
-//! The mainline tsl2772 driver boots the chip at minimum sensitivity
-//! (1x analog gain, single 2.73 ms ADC cycle, ~1024 max counts), far
-//! below useful range. The daemon writes `in_intensity0_calibscale` and
-//! `in_intensity0_integration_time` at startup to put the chip in a
-//! regime where typical room ambient produces tens of counts and direct
-//! daylight produces low thousands. Without this the screen barely
-//! responds short of a flashlight.
-//!
-//! Wire surface: `BridgeToClientHardwareMsg::AmbientLightUpdate` fires
-//! on raw-sample changes; `BrightnessChanged` fires on mode/level/
-//! effective-level transitions; `HardwareStateGet` returns a snapshot.
-
 use std::{
   collections::VecDeque,
   path::{Path, PathBuf},
@@ -120,9 +102,6 @@ impl Inner {
     self.current_ticks as f32 / self.max_brightness as f32
   }
 
-  /// 0..=100 ambient brightness, natural direction. Low = dark room, high =
-  /// bright room. Stock translation inverts at the edge for sp-als-backlight
-  /// payload compatibility.
   fn ambient_level(&self) -> u8 {
     if self.max_brightness == 0 {
       return 0;

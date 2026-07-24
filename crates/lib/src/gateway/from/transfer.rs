@@ -7,11 +7,6 @@ use uuid::Uuid;
 
 use crate::gateway::TransferAck;
 
-/// Handle to a fragment stream, embedded in the typed message that
-/// opens a transfer (a pull reply or a push begin). The bytes travel
-/// out-of-band as `TransferFragment` events keyed by `id`; the
-/// transfer completes when `total_size` bytes have arrived. For pull
-/// replies `id` is the originating request id.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -25,11 +20,6 @@ pub struct TransferRef {
   pub sha256: Option<String>,
 }
 
-/// Standard embedding for a byte payload that may or may not warrant a
-/// fragment stream. Senders pick by size: a small payload rides inline
-/// in the carrying message (one frame, no machinery); a large one
-/// declares a stream and fragments follow. Receivers resolve both arms
-/// through one path.
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -46,10 +36,6 @@ pub enum TransferBody {
   Stream(TransferRef),
 }
 
-/// One slice of a transfer's bytes. Variable-size and offset-addressed:
-/// fragments are sent in offset order on the transfer's priority lane,
-/// sized by the sender to its preemption budget. Receivers route by
-/// `transfer_id` to the sink bound when the transfer opened.
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -67,9 +53,6 @@ pub struct TransferFragment {
   pub bytes: Vec<u8>,
 }
 
-/// Sender-side abort of an in-flight transfer (source lost the bytes,
-/// upstream fetch failed). The receiver drops the bound sink; partial
-/// disk state is kept for resumable transfers and discarded otherwise.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

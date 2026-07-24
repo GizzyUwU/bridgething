@@ -8,9 +8,6 @@ authors.workspace = true
 homepage.workspace = true
 
 [features]
-# device-half (iPhone-side) iAP2 emulator for T3 over-air testing. Off in prod;
-# the daemon never enables it. Adds the responder link role + a scripted
-# device-side session driver under src/emulator/.
 emulator = []
 
 [dependencies]

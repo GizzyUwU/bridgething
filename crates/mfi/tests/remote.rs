@@ -1,10 +1,3 @@
-//! End-to-end test of the remote-i²c wire protocol.
-//!
-//! Spins up a TCP listener on a loopback port, runs `serve` against a
-//! seeded [`MockTransport`] in a worker thread, and drives an
-//! [`MfiAuth<RemoteI2c>`] from the main thread. Exercises the full
-//! request/response shape for every wire op.
-
 use std::{net::TcpListener, thread};
 
 use bridgething_mfi::{
@@ -19,9 +12,6 @@ const TEST_SERIAL: [u8; SERIAL_LEN] = [
 const TEST_CHALLENGE: [u8; CHALLENGE_LEN] = [0xCC; CHALLENGE_LEN];
 const TEST_RESPONSE: [u8; RESPONSE_LEN] = [0xDD; RESPONSE_LEN];
 
-/// Spin up a single-shot proxy server bound to a loopback port. Returns
-/// `(port, join_handle)`. The server seeds the mock with the standard
-/// fixture and serves exactly one client.
 fn spawn_proxy() -> (u16, thread::JoinHandle<()>) {
   let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
   let port = listener.local_addr().unwrap().port();
@@ -94,14 +84,10 @@ fn sign_round_trips_over_tcp() {
 
 #[test]
 fn server_propagates_chip_errors() {
-  // Build a server with no cert seeded so the cert read fails on the
-  // device side; the client should see the error string surfaced as a
-  // transport error.
   let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
   let port = listener.local_addr().unwrap().port();
   let handle = thread::spawn(move || {
     let mut mock = MockTransport::new();
-    // No registers seeded - any read attempt errors at the mock level.
     let (stream, _) = listener.accept().expect("accept loopback");
     let _ = serve_remote(stream, &mut mock);
   });

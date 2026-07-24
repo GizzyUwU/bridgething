@@ -1,5 +1,3 @@
-//! High-level driver for the MFi authentication coprocessor.
-
 use std::time::Duration;
 
 use crate::{
@@ -10,19 +8,6 @@ use crate::{
 
 const SIGN_POLL_DELAY: Duration = Duration::from_millis(500);
 
-/// MFi authentication coprocessor.
-///
-/// Generic over the transport so callers can swap in a [`MockTransport`]
-/// for unit tests. The default transport is [`LinuxI2c`]; use
-/// [`MfiAuth::open_default`] / [`MfiAuth::with_transport`] to construct.
-///
-/// The chip is single-resource on a shared I²C bus and the operations
-/// here cannot interleave safely. `&mut self` enforces that at compile
-/// time; for cross-task use, wrap in `tokio::sync::Mutex` (or run on a
-/// dedicated blocking thread).
-///
-/// [`MockTransport`]: crate::MockTransport
-/// [`LinuxI2c`]: crate::LinuxI2c
 pub struct MfiAuth<T: Transport> {
   transport: T,
 }
@@ -40,28 +25,18 @@ impl<T: Transport> MfiAuth<T> {
     &mut self.transport
   }
 
-  /// Read the chip's firmware version byte.
   pub fn version(&mut self) -> Result<u8> {
     self.read_byte(cmd::VERSION)
   }
 
-  /// Read the chip's last error code.
   pub fn last_error(&mut self) -> Result<u8> {
     self.read_byte(cmd::ERROR)
   }
 
-  /// Read the chip's status byte. `STATUS_READY` (0x10) means a sign
-  /// request has completed and the response register can be read.
   pub fn status(&mut self) -> Result<u8> {
     self.read_byte(cmd::STATUS)
   }
 
-  /// Read the X.509 certificate length (bytes) from the chip.
-  ///
-  /// The chip needs the same prepare-then-settle-then-raw-read shape
-  /// `cert()` uses: it NAKs the next command-byte write while it is
-  /// still readying the response, so the SMBus block-read path (which
-  /// would re-issue the register byte) cannot be used here.
   pub fn cert_len(&mut self) -> Result<u16> {
     self.transport.prepare(cmd::CERT_LEN).map_err(Error::Transport)?;
     self.transport.sleep(CERT_SETTLE);
@@ -70,9 +45,6 @@ impl<T: Transport> MfiAuth<T> {
     Ok(u16::from_be_bytes(buf))
   }
 
-  /// Read the X.509 certificate into the provided buffer. Returns the
-  /// number of bytes written. Errors with [`Error::BufferTooSmall`] if
-  /// the buffer is shorter than the chip's reported certificate length.
   pub fn cert_into(&mut self, out: &mut [u8]) -> Result<usize> {
     let len = usize::from(self.cert_len()?);
     if out.len() < len {
@@ -87,8 +59,6 @@ impl<T: Transport> MfiAuth<T> {
     Ok(len)
   }
 
-  /// Read the X.509 certificate. Allocates a `Vec<u8>` of the exact
-  /// length reported by the chip.
   pub fn cert(&mut self) -> Result<Vec<u8>> {
     let len = usize::from(self.cert_len()?);
     let mut out = vec![0u8; len];
@@ -98,7 +68,6 @@ impl<T: Transport> MfiAuth<T> {
     Ok(out)
   }
 
-  /// Read the chip's serial / unique-identifier register.
   pub fn serial(&mut self) -> Result<[u8; SERIAL_LEN]> {
     self.transport.prepare(cmd::SERIAL).map_err(Error::Transport)?;
     let mut out = [0u8; SERIAL_LEN];
@@ -106,12 +75,6 @@ impl<T: Transport> MfiAuth<T> {
     Ok(out)
   }
 
-  /// Run the chip's challenge-response signing flow.
-  ///
-  /// Writes the 32-byte challenge, verifies the chip echoes back the
-  /// expected length, kicks off signing, sleeps ~500ms, polls status,
-  /// and reads the 64-byte response. Blocking; the iAP2 layer is
-  /// expected to call this from a blocking task.
   pub fn sign(&mut self, challenge: &[u8; CHALLENGE_LEN]) -> Result<[u8; RESPONSE_LEN]> {
     self
       .transport
@@ -161,12 +124,10 @@ impl<T: Transport> MfiAuth<T> {
 
 #[cfg(target_os = "linux")]
 impl MfiAuth<crate::LinuxI2c> {
-  /// Open the chip with the default `/dev/i2c-3` config.
   pub fn open_default() -> Result<Self> {
     Self::open(&crate::LinuxI2cConfig::default())
   }
 
-  /// Open the chip with the given linux i2c-dev config.
   pub fn open(config: &crate::LinuxI2cConfig) -> Result<Self> {
     let t = crate::LinuxI2c::open(config).map_err(Error::Transport)?;
     Ok(Self::with_transport(t))

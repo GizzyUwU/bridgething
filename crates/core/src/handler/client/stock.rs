@@ -876,8 +876,6 @@ async fn warm_preset_art(state: &State, bluetooth: &BluetoothMan, id: &str) {
   if matches!(state.assets.contains(id).await, Ok(true)) {
     return;
   }
-  // route through the coalesced fetch_or_wait pull path so a concurrent get + this warm dedup to one
-  // companion request and a miss arms the negative cache; pin on success.
   super::asset::fetch_via_companion(state, bluetooth, id, Retention::DISK_PINNED).await;
 }
 

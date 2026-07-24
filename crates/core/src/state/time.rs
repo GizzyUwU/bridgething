@@ -1,12 +1,3 @@
-//! Wall-clock authority. Holds the most recent `TimeInfo` snapshot
-//! the daemon has been told about - by the iAP2 control session
-//! (`DeviceTimeUpdate`) when an iPhone is connected, by the gateway
-//! companion (`GatewayToBridgeTimeMsg::Snapshot`) otherwise. Webapps
-//! query through the Time SDK surface; broadcast happens on every
-//! apply, and the system clock is updated through systemd's timedate1
-//! D-Bus surface when the new value differs by more than one second
-//! from the local clock.
-
 use std::{
   sync::Arc,
   time::{SystemTime, UNIX_EPOCH},
@@ -66,9 +57,6 @@ impl TimeManager {
       guard.state.utc_offset_minutes = Some(tz_offset_minutes);
       guard.state.dst_offset_minutes = Some(dst_offset_minutes);
 
-      // iAP2 has no IANA name; synthesize a fixed-offset zone so the
-      // system clock picks up the user's wall offset. Don't overwrite
-      // a previously-applied IANA name from the companion path.
       let existing_iana = guard.state.tz_iana.clone();
       if existing_iana.is_none() {
         match synthetic_zone.as_ref() {

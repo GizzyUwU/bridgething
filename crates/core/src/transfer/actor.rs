@@ -47,8 +47,6 @@ struct Meta {
   expected_size: u64,
   #[serde(skip_serializing_if = "Option::is_none")]
   expected_sha256: Option<String>,
-  received: u64,
-  last_touched_unix: i64,
   partial_path: PathBuf,
 }
 
@@ -203,7 +201,6 @@ impl ChunkedTransferActor {
         return Err(TransferError::ConflictingBegin { id });
       }
       existing.last_touched_unix = unix_now();
-      write_meta(&existing.meta_path, &meta_from(existing)).await?;
       return Ok(existing.received);
     }
 
@@ -312,7 +309,6 @@ impl ChunkedTransferActor {
     transfer.received += chunk_len;
     transfer.last_touched_unix = unix_now();
     self.total_disk_bytes = self.total_disk_bytes.saturating_add(chunk_len);
-    write_meta(&transfer.meta_path, &meta_from(transfer)).await?;
 
     if !last {
       return Ok(WriteOutcome::Continue {
@@ -427,27 +423,29 @@ async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, T
   let meta: Meta = serde_json::from_slice(&raw)?;
 
   let partial_path = meta.partial_path.clone();
-  if !partial_path.exists() {
+  let Ok(fs_meta) = tokio::fs::metadata(&partial_path).await else {
     return Ok(None);
-  }
+  };
 
-  let actual_size = tokio::fs::metadata(&partial_path).await?.len();
-  if actual_size > meta.received {
+  let actual_size = fs_meta.len();
+  if actual_size > meta.expected_size {
     let f = OpenOptions::new().write(true).open(&partial_path).await?;
-    f.set_len(meta.received).await?;
+    f.set_len(meta.expected_size).await?;
   }
-  if actual_size < meta.received {
-    let f = OpenOptions::new().write(true).open(&partial_path).await?;
-    f.set_len(actual_size).await?;
-  }
-  let received = std::cmp::min(actual_size, meta.received);
+  let received = std::cmp::min(actual_size, meta.expected_size);
+  let last_touched_unix = fs_meta
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+    .map(|d| d.as_secs() as i64)
+    .unwrap_or_else(unix_now);
 
   Ok(Some(Transfer {
     id: meta.id,
     expected_size: meta.expected_size,
     expected_sha256: meta.expected_sha256,
     received,
-    last_touched_unix: meta.last_touched_unix,
+    last_touched_unix,
     partial_path,
     meta_path: meta_path.to_path_buf(),
     file: None,
@@ -509,8 +507,6 @@ fn meta_from(t: &Transfer) -> Meta {
     id: t.id.clone(),
     expected_size: t.expected_size,
     expected_sha256: t.expected_sha256.clone(),
-    received: t.received,
-    last_touched_unix: t.last_touched_unix,
     partial_path: t.partial_path.clone(),
   }
 }

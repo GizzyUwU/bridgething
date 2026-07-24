@@ -1,17 +1,3 @@
-//! SOCKS5 -> Tunnel bridge. Binds 127.0.0.1:1080 by default. Chromium
-//! is launched with `--proxy-server=socks5://127.0.0.1:1080`; its
-//! default loopback bypass keeps the webapp bundle and local websocket
-//! direct, so only external egress lands here. Each accepted connection
-//! runs the SOCKS5 handshake, checks the active webapp's manifest for
-//! the `net.proxy` permission, then opens a tunnel through the connected
-//! companion via the gateway-side `Tunnel` surface and bridges bytes
-//! both ways.
-//!
-//! Wire-inefficient when multiple peers are connected: `Tunnel.Open`
-//! request goes to every peer, and `Tunnel.Data` / `Tunnel.Close`
-//! commands broadcast on the Bulk lane. Companions that don't own
-//! the `tunnel_id` are expected to drop.
-
 use std::{
   io,
   net::{IpAddr, SocketAddr},
@@ -194,9 +180,6 @@ async fn socks_handshake(stream: &mut TcpStream) -> io::Result<SocksRequest> {
 }
 
 async fn write_socks_reply(stream: &mut TcpStream, rep: u8) -> io::Result<()> {
-  // BND.ADDR = 0.0.0.0, BND.PORT = 0 - clients tolerate this, and the
-  // daemon doesn't have a meaningful local bind address for the
-  // companion-bridged connection.
   let frame = [SOCKS_VERSION, rep, SOCKS_RESERVED, SOCKS_ATYP_IPV4, 0, 0, 0, 0, 0, 0];
   stream.write_all(&frame).await
 }

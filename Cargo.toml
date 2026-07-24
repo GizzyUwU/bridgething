@@ -5,17 +5,18 @@ members = ["crates/*", "tools/codegen"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.94"
-version = "0.2.3"
+version = "0.3.0"
 license = "MIT"
 authors = ["Joey Eamigh"]
 homepage = "https://bridgething.com"
 
 [workspace.dependencies]
-bridgething-iap2 = { version = "0.2.0", path = "crates/iap2" }
-bridgething-mfi = { version = "0.2.0", path = "crates/mfi" }
-bridgething-swupdate-sys = { version = "0.2.0", path = "crates/swupdate-sys" }
-bridgething-gateway = { version = "0.2.0", path = "crates/gateway-rs" }
-bridgething-client = { version = "0.2.0", path = "crates/client-rs" }
+bridgething-iap2 = { version = "*", path = "crates/iap2" }
+bridgething-mfi = { version = "*", path = "crates/mfi" }
+bridgething-swupdate-sys = { version = "*", path = "crates/swupdate-sys" }
+bridgething-gateway = { version = "*", path = "crates/gateway-rs" }
+bridgething-client = { version = "*", path = "crates/client-rs" }
+
 serde = { version = "1.0.228" }
 serde_json = { version = "1.0.149" }
 uuid = { version = "1.23.1" }

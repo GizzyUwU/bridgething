@@ -1,15 +1,3 @@
-//! iAP2 link-layer state machine: drives the byte stream from initial
-//! detect handshake through SYN negotiation into Established, then runs
-//! the reliable-delivery state machine (sequence numbers, retransmit,
-//! ACK piggyback / standalone, EAK, send-window backpressure) until
-//! either side disconnects.
-//!
-//! CSM-level handlers (auth, identification, NowPlaying, EA dispatch)
-//! sit on top: they consume `Iap2Event::DataReceived` and produce
-//! `Iap2Command::Send`. The link layer is session-id-agnostic; chunking
-//! and reassembly are this layer's job, byte-content interpretation is
-//! the consumer's.
-
 mod established;
 
 use std::time::Duration;

@@ -1,9 +1,6 @@
 use libbridgething::{Device, DeviceType};
 use sea_orm::entity::prelude::*;
 
-/// Persistent record of a peer the daemon has ever talked to. The
-/// in-memory `PeerTracker` derives its working set on every connect /
-/// disconnect; this table is the slow-path, cross-boot ledger.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "devices")]
 pub struct Model {

@@ -82,7 +82,6 @@ impl Daemon {
   }
 }
 
-/// actual daemon entry point
 pub async fn run_daemon() {
   init(DaemonConfig::real()).await.run().await;
 }
@@ -97,6 +96,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   notifier.status("initializing bridgething...");
   let static_meta = state::meta::SuperbirdMeta::read_or_default().await;
+  let serial_number = static_meta.serial_number.clone();
   tracing::debug!("metadata: {:?}", &static_meta);
 
   let (client_man, mut client_listener) = net::create_client_manager();
@@ -186,7 +186,18 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     devices: devices.clone(),
     peers: peers.clone(),
   };
-  let (bluetooth, bluetooth_bootstrap) = BluetoothManager::create();
+  let (bluetooth, bluetooth_bootstrap) = BluetoothManager::create(
+    serial_number
+      .chars()
+      .rev()
+      .take(4)
+      .collect::<Vec<_>>()
+      .into_iter()
+      .rev()
+      .collect::<Vec<_>>()
+      .try_into()
+      .unwrap_or(['D', 'E', 'A', 'D']),
+  );
 
   let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2.telephony.clone());
   let time = TimeManager::new(bus.clone());
@@ -347,7 +358,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let handle_signals = config.handle_signals;
 
   let loop_fut = Box::pin(async move {
-    // keep alive in future
     let _asset_invalidator = _asset_invalidator;
     let _ota_handle = _ota_handle;
     let _bluetooth_handle = bluetooth_handle;
@@ -428,7 +438,6 @@ pub struct DaemonConfig {
   pub state_dir: Option<PathBuf>,
   pub webapps_dir: Option<PathBuf>,
   pub ro_webapps_dir: Option<PathBuf>,
-  // first-boot example-webapp seed source; None disables seeding (headless).
   pub examples_dir: Option<PathBuf>,
 }
 

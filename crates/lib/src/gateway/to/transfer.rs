@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 use crate::gateway::{TransferAbandon, TransferFragment};
 
-/// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

@@ -69,12 +69,6 @@ async fn invoke_set_timezone(_name: &str) -> Result<(), TimeSysError> {
   Err(TimeSysError::Disabled)
 }
 
-/// Convert an iAP2 `(tz_offset_minutes, dst_offset_minutes)` pair to a
-/// fixed-offset Olson zone like `Etc/GMT+5`. iAP2 carries no IANA zone
-/// name, only a numeric offset, so the synthesised name is the only
-/// way to keep glibc-aware time pretty-printing happy. The Etc/GMT+N
-/// names invert sign (POSIX historical convention): a +5h zone is
-/// `Etc/GMT-5`, a -5h zone is `Etc/GMT+5`.
 pub fn fixed_offset_zone_name(tz_offset_minutes: i16, dst_offset_minutes: i8) -> Option<String> {
   let total = i32::from(tz_offset_minutes) + i32::from(dst_offset_minutes);
   if total % 60 != 0 {

@@ -1,47 +1,18 @@
-//! Typed CSMs for the iAP2 identification handshake.
-//!
-//! After authentication, iPhone sends `StartIdentification` (0x1D00)
-//! and the accessory replies with `IdentificationInformation`
-//! (0x1D01) - a large CSM declaring our name, model, supported
-//! messages, transport components, language preferences, and any EA
-//! protocols we'll consume. iPhone responds with either
-//! `IdentificationAccepted` (0x1D02) or `IdentificationRejected`
-//! (0x1D03), the latter carrying a presence-only param for each
-//! `IdentificationInformation` param it took issue with.
-//!
-//! `IdentificationInformation` is hand-rolled rather than macro-derived
-//! because of its shape: 17+ params, optionals, lists, group-typed
-//! sub-blocks, and a non-contiguous param-id space (values jump from
-//! 17 to 20 to skip vehicle/CarPlay components we don't use).
-
 use bytes::Bytes;
 
 use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldEncode, encode_param_block};
 
-/// CSMs the accessory sends in this layer. Empty: identification is a
-/// framework message and listing it makes the iPhone reject params 6/7.
-/// Only app-level CSMs belong in the messages_sent list.
 pub const SENT_BY_ACCESSORY: &[u16] = &[];
-
-/// CSMs the accessory accepts in this layer. Empty for the same
-/// reason as `SENT_BY_ACCESSORY`.
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[];
 
-/// `0x1D00` iPhone -> accessory. Begins identification; accessory
-/// replies with `IdentificationInformation`.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x1D00)]
 pub struct StartIdentification;
 
-/// `0x1D02` iPhone -> accessory. Identification succeeded; the link
-/// is fully open for steady-state CSMs.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x1D02)]
 pub struct IdentificationAccepted;
 
-/// `0x1D03` iPhone -> accessory. Each present param's id matches an
-/// `IdentificationInformation` param the iPhone rejected. The accessory
-/// should RST and not retry on the same RFCOMM connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentificationRejected {
   pub rejected_params: Vec<u16>,
@@ -83,9 +54,6 @@ impl TryFrom<CsmFrame> for IdentificationRejected {
   }
 }
 
-/// Power-providing capability declared in `IdentificationInformation`
-/// param 8. Production always sets `None`: the Car Thing never sources
-/// power to the iPhone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PowerProvidingCapability {
@@ -94,9 +62,6 @@ pub enum PowerProvidingCapability {
   Advanced = 2,
 }
 
-/// `MatchAction` for an EA protocol entry. Controls the iOS App
-/// Discovery flow when no app declaring this protocol is installed; the
-/// per-app launch prompt is `RequestAppLaunch.launch_method` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EaProtocolMatchAction {
@@ -105,9 +70,6 @@ pub enum EaProtocolMatchAction {
   NoAlertAction = 2,
 }
 
-/// One supported External Accessory protocol entry. Encoded as a
-/// group-typed param 10 inside `IdentificationInformation`, one
-/// occurrence per entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EaProtocol {
   pub id: u8,
@@ -127,8 +89,6 @@ impl EaProtocol {
   }
 }
 
-/// `HIDComponentFunction` enum values for the function field in an
-/// `iAP2HIDComponent` group. Bridgething only emits `MediaPlaybackRemote`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum HidComponentFunction {
@@ -142,9 +102,6 @@ pub enum HidComponentFunction {
   BrailleDisplayKeyboard = 10,
 }
 
-/// One iAP2 HID component entry. Encoded as a group-typed param 18
-/// inside `IdentificationInformation`. Without this declaration iOS
-/// parses the descriptor but silently drops every report sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HidComponent {
   pub id: u16,
@@ -162,18 +119,11 @@ impl HidComponent {
   }
 }
 
-/// One Bluetooth transport component entry. Encoded as a group-typed
-/// param 17 inside `IdentificationInformation`.
-///
-/// `supports_iap2_connection` is presence-only: emitted as field 2 with
-/// an empty payload when true, omitted when false. A 1-byte `[0x01]`
-/// (the default `bool` impl) makes the iPhone reject the whole group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BluetoothTransportComponent {
   pub id: u16,
   pub name: String,
   pub supports_iap2_connection: bool,
-  /// Six-byte BT MAC, big-endian (the same byte order BlueZ prints).
   pub mac: [u8; 6],
 }
 
@@ -190,11 +140,6 @@ impl BluetoothTransportComponent {
   }
 }
 
-/// All caller-supplied fields for the `IdentificationInformation` CSM.
-///
-/// `additional_messages_*` lets higher layers add their own CSM ids;
-/// the always-present layer ids are merged in by
-/// [`IdentificationInformation`] at encode time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentificationConfig {
   pub name: String,
@@ -215,9 +160,6 @@ pub struct IdentificationConfig {
   pub additional_messages_received_from_accessory: Vec<u16>,
 }
 
-/// Per-device fields that vary between Car Things; everything else in
-/// `IdentificationConfig` is locked to product-level constants. Pass to
-/// [`IdentificationConfig::for_carthing`] to build a populated config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CarthingIdentification {
   pub serial_number: String,
@@ -226,8 +168,6 @@ pub struct CarthingIdentification {
 }
 
 impl IdentificationConfig {
-  /// Build a config from the per-device fields, with all other fields
-  /// at their production defaults; mutate the result to extend them.
   pub fn for_carthing(args: CarthingIdentification) -> Self {
     Self {
       name: "Bridgething".into(),
@@ -259,8 +199,6 @@ impl IdentificationConfig {
   }
 }
 
-/// `0x1D01` accessory -> iPhone. Wraps an [`IdentificationConfig`]; the
-/// `From` impl serializes every field into its param id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentificationInformation {
   pub config: IdentificationConfig,
@@ -335,8 +273,6 @@ impl From<IdentificationInformation> for CsmFrame {
   }
 }
 
-/// Param id carrying one EA protocol group inside
-/// `IdentificationInformation`; repeated once per declared protocol.
 #[cfg(feature = "emulator")]
 const EA_PROTOCOL_PARAM: u16 = 10;
 
@@ -354,7 +290,6 @@ impl EaProtocolMatchAction {
 
 #[cfg(feature = "emulator")]
 impl EaProtocol {
-  /// Decode one EA protocol group (the inverse of [`EaProtocol::into_group`]).
   fn from_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
     use super::CsmParamFieldDecode;
     let mut params = super::decode_param_block(payload)?;
@@ -375,9 +310,6 @@ impl EaProtocol {
   }
 }
 
-/// Device-side: extract the EA protocols the accessory declared in a
-/// received `IdentificationInformation`, so the emulator learns the
-/// gateway protocol id from the wire rather than hardcoding it.
 #[cfg(feature = "emulator")]
 pub(crate) fn parse_ea_protocols(frame: &CsmFrame) -> Result<Vec<EaProtocol>, CsmDecodeError> {
   let mut out = Vec::new();

@@ -1,43 +1,17 @@
-//! In-memory mock transport for tests.
-//!
-//! Models the chip's "first transaction wakes me up, NAKs while asleep"
-//! behavior - set `asleep = N` and the next N transactions will NAK
-//! before the chip "wakes" and replies. The retry loop inside each
-//! method matches `LinuxI2c`'s contract.
-
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 use super::{RETRY_LIMIT, Transport};
 use crate::{cmd, error::TransportError};
 
-/// Shared state between a [`MockTransport`] and the test that drives it.
 #[derive(Debug)]
 pub struct MockTransportState {
-  /// Registers indexed by command byte. SMBus reads return the entry;
-  /// SMBus writes overwrite it. Raw reads return the entry whose key
-  /// matches the most recent successful `prepare()`.
   pub registers: HashMap<u8, Vec<u8>>,
-  /// The cmd byte the last successful `prepare()` selected.
   pub last_prepared: Option<u8>,
-  /// Number of upcoming i²c attempts to fail with `ChipUnresponsive`
-  /// before the chip "wakes". Decremented on every attempt (whether
-  /// the attempt is a successful prepare or a real op).
   pub asleep: u8,
-  /// Total i²c attempts (NAKs + successes). Useful to assert retry
-  /// behavior fired.
   pub attempt_count: u32,
-  /// Sleep durations recorded; lets tests assert delays without
-  /// actually waiting.
   pub sleeps: Vec<Duration>,
-  /// What `STATUS` returns on the NEXT read after a sign trigger has
-  /// been observed. Defaults to `STATUS_READY` so the happy path
-  /// works without configuration.
   pub status_after_trigger: u8,
-  /// What `CHALLENGE_LEN` returns. Defaults to the expected value so
-  /// the happy path works without configuration.
   pub challenge_echo: u16,
-  /// Set internally when a `START_RESPONSE` trigger is observed. The
-  /// next `STATUS` read consumes it and returns `status_after_trigger`.
   triggered: bool,
 }
 
@@ -103,10 +77,6 @@ impl MockTransport {
     self.state.borrow_mut().status_after_trigger = status;
   }
 
-  /// Run an op with retry-on-asleep semantics matching `LinuxI2c`.
-  /// Each attempt counts toward `attempt_count`; if `asleep > 0` the
-  /// attempt NAKs and decrements asleep. After `RETRY_LIMIT` consecutive
-  /// NAKs the call returns `ChipUnresponsive`.
   fn with_retry<F, T>(&mut self, mut op: F) -> Result<T, TransportError>
   where
     F: FnMut(&mut MockTransportState) -> Result<T, TransportError>,

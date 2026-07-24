@@ -1,13 +1,3 @@
-//! Telephony flow: subscribes to call-state and communications updates
-//! after identification reaches Accepted, decodes inbound updates, and
-//! turns outbound action commands from the daemon into the right CSMs
-//! on the wire.
-//!
-//! Subscribe-by-listing: `StartCallStateUpdates` and
-//! `StartCommunicationsUpdates` carry one empty-payload TLV per
-//! attribute id; iPhone only pushes the listed fields. No special
-//! per-message-id gating beyond what the standard CSMs already encode.
-
 use tokio::sync::mpsc;
 
 use super::{SessionEvent, emit, send_csm};

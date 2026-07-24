@@ -509,7 +509,6 @@ fn validate_value(field: &ConfigField, value: &str) -> Result<(), String> {
       {
         return Err(format!("value longer than max_length {max}"));
       }
-      // pattern enforcement is gateway-side
     }
     ConfigField::Number(f) => {
       let n = value

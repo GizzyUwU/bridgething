@@ -6,10 +6,6 @@ use typeshare::typeshare;
 
 use crate::{PlayContext, QueuePosition, RepeatMode};
 
-/// Play a URI on the gateway. `context` lets the gateway honor playlist
-/// / album semantics for skip-next when both sides understand the
-/// scheme. The daemon parses the scheme and only forwards if a
-/// connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -62,8 +58,6 @@ pub struct SetRepeat {
   pub mode: RepeatMode,
 }
 
-/// Set absolute playback rate. `1.0` is normal speed; gateways with
-/// limited speed support clamp to their nearest supported value.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -72,8 +66,6 @@ pub struct SetSpeed {
   pub speed: f32,
 }
 
-/// `duration_ms = None` turns crossfade off; `Some(0)` is also off but
-/// distinguishes intent.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -83,11 +75,6 @@ pub struct SetCrossfade {
   pub duration_ms: Option<u32>,
 }
 
-/// Bridge -> gateway player verbs. The companion-side SDK dispatches each
-/// to its native player integration (Spotify SDK, Apple Music SDK,
-/// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` - daemon never forwards a URI no
-/// connected gateway claims.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]

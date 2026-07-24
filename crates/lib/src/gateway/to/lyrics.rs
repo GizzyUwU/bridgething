@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-/// Identifies a track for lyrics lookup. Different resolvers consume
-/// different subsets: lrclib does signature lookup (artist + track +
-/// album + duration), other resolvers may use ISRC or platform-specific
-/// ids. Populate what's available; resolvers ignore the rest.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

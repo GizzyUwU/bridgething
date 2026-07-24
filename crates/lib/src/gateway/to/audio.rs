@@ -21,10 +21,6 @@ pub struct SetMute {
   pub muted: bool,
 }
 
-/// Fire-and-forget TTS request. `id` is webapp-assigned (no request
-/// round-trip) and used for cancellation + matching back-to-back
-/// `TtsStarted`/`TtsEnded` events. `voice` selects from
-/// `AudioCapabilities.voices`; `None` uses the gateway's default.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -48,8 +44,6 @@ pub struct TtsCancel {
   pub id: Uuid,
 }
 
-/// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
-/// surface as `AudioError::EarconNotFound`.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

@@ -1,11 +1,3 @@
-//! Backend dispatch for the OTA write phase. With the `swupdate`
-//! cargo feature, [`install_swu`] hands the on-disk `.swu` to
-//! libswupdate via the FFI; without it, [`install_swu`] is a stub
-//! that emits scripted progress so the rest of the OTA flow can be
-//! exercised in dev. Both paths take the file path of the
-//! already-on-disk `.swu` (the ChunkedTransfer partial) and stream
-//! it from disk - bytes never accumulate in memory.
-
 mod stub;
 
 #[cfg(feature = "swupdate")]
@@ -17,7 +9,7 @@ use libbridgething::OtaPhase;
 use tokio::sync::watch;
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
+#[allow(dead_code)]
 pub struct ProgressTick {
   pub phase: OtaPhase,
   pub percent: u8,
@@ -29,14 +21,14 @@ pub struct ProgressTick {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
+#[allow(dead_code)]
 pub struct Selector {
   pub software_set: String,
   pub running_mode: String,
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
+#[allow(dead_code)]
 pub enum Error {
   #[error("operation cancelled")]
   Cancelled,

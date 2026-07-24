@@ -1,18 +1,3 @@
-//! HID flow: declares the accessory's virtual HID device once
-//! identification reaches Accepted, then translates inbound transport
-//! commands into press/release `AccessoryHIDReport` pairs on the iAP2
-//! control session.
-//!
-//! Bridgething uses HID exclusively as the **outbound** path for media
-//! intents when the companion has not claimed `NowPlayingPlayback`
-//! authority. Hardware events (wheel rotation, presets, back/settings)
-//! are captured by the on-device webapp; HID never carries them.
-//!
-//! Each transport tap fires two `AccessoryHIDReport`s back-to-back: a
-//! press frame with the chosen bit(s) set, then a release frame with all
-//! bits cleared. iOS treats a missing release as a held button. The
-//! release is delayed by [`TAP_RELEASE_DELAY`] to give iOS a clean edge.
-
 use std::time::Duration;
 
 use bytes::Bytes;

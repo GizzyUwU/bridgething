@@ -1,25 +1,3 @@
-//! Shared LE-bonded session to an iPhone. ANCS (notifications) and AMS
-//! (media-player volume) are two GATT services on one iPhone over a
-//! single LE bond, so this module owns the connection, discovery, and
-//! lifecycle once and runs both as consumers off the same resolved
-//! services. A second discovery/connection per service would be a
-//! parallel LE codepath.
-//!
-//! The LE link is iPhone-driven: the phone is LE central and connects to
-//! our advertised peripheral (advertisement + pair-trigger GATT service,
-//! both registered for the daemon's lifetime); the accessory is GATT
-//! client reading ANCS/AMS. So the session's job is discovery + lifecycle,
-//! not connection management.
-//!
-//! Each consumer degrades independently: ANCS absent (notifications
-//! disabled) or unauthorized does not stop AMS, and AMS absent does not
-//! stop ANCS. Connection-level loss (a present service's stream ending)
-//! re-discovers both; ANCS appearing later (the user authorizes) is
-//! caught by a slow re-probe while AMS keeps serving.
-//!
-//! The per-peer session starts on iAP2 `LinkEstablished` (`attach`) and
-//! is torn down on link loss (`detach`).
-
 use std::{sync::Arc, time::Duration};
 
 use bluer::{Adapter, Address, Device, gatt::remote::Service};
@@ -68,10 +46,11 @@ pub struct LeManager {
 pub(crate) struct LeBootstrap {
   rx: mpsc::Receiver<LeCommand>,
   ancs_auth: Arc<std::sync::Mutex<AncsAuthState>>,
+  serial_suffix: [char; 4],
 }
 
 impl LeManager {
-  pub(crate) fn allocate() -> (Self, LeBootstrap) {
+  pub(crate) fn allocate(serial_suffix: [char; 4]) -> (Self, LeBootstrap) {
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
     let ancs_auth = Arc::new(std::sync::Mutex::new(AncsAuthState::Unknown));
     (
@@ -79,7 +58,11 @@ impl LeManager {
         tx,
         ancs_auth: ancs_auth.clone(),
       },
-      LeBootstrap { rx, ancs_auth },
+      LeBootstrap {
+        rx,
+        ancs_auth,
+        serial_suffix,
+      },
     )
   }
 
@@ -141,19 +124,20 @@ impl LeBootstrap {
         None
       }
     };
-    let advertisement = match LeAdvertisement::register(&adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
-      Ok(handle) => {
-        tracing::info!("LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
-        Some(handle)
-      }
-      Err(err) => {
-        tracing::warn!(
-          ?err,
-          "LE advertisement register failed; iOS notifications + volume state unavailable"
-        );
-        None
-      }
-    };
+    let advertisement =
+      match LeAdvertisement::register(self.serial_suffix, &adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
+        Ok(handle) => {
+          tracing::info!("LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
+          Some(handle)
+        }
+        Err(err) => {
+          tracing::warn!(
+            ?err,
+            "LE advertisement register failed; iOS notifications + volume state unavailable"
+          );
+          None
+        }
+      };
     let dispatcher = LeDispatcher {
       adapter: Arc::new(adapter),
       adapter_dbus_path,
@@ -163,6 +147,7 @@ impl LeBootstrap {
       auth_reporter: AuthStateReporter::new(bluetooth, self.ancs_auth),
       advertisement,
       acl_down_since: None,
+      serial_suffix: self.serial_suffix,
       _pair_trigger: pair_trigger,
     };
     tokio::spawn(dispatcher.run(self.rx))
@@ -178,6 +163,7 @@ struct LeDispatcher {
   auth_reporter: AuthStateReporter,
   advertisement: Option<LeAdvertisement>,
   acl_down_since: Option<time::Instant>,
+  serial_suffix: [char; 4],
   _pair_trigger: Option<PairTrigger>,
 }
 
@@ -223,7 +209,7 @@ impl LeDispatcher {
     if let Some(old) = self.advertisement.take() {
       old.unregister().await;
     }
-    match LeAdvertisement::register(&self.adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
+    match LeAdvertisement::register(self.serial_suffix, &self.adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
       Ok(handle) => self.advertisement = Some(handle),
       Err(err) => tracing::warn!(?err, "LE advertisement re-register failed; will retry"),
     }
@@ -400,7 +386,6 @@ async fn enumerate_services(
     let Some(rest) = path.as_str().strip_prefix(&prefix) else {
       continue;
     };
-    // a child char/desc carries a further path segment; only the bare service node is wanted.
     if rest.contains('/') || !ifaces.keys().any(|i| i.as_str() == GATT_SERVICE_INTERFACE) {
       continue;
     }

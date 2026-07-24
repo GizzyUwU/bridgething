@@ -24,10 +24,6 @@ pub struct Lyrics {
   pub source: String,
 }
 
-/// Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
-/// to completion without a hit (e.g. lrclib 404, no fallback configured)
-/// and is distinct from `LyricsErrorReply` which signals a transient
-/// failure (network, parse, resolver-internal error).
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

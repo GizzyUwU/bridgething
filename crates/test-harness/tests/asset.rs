@@ -1,9 +1,3 @@
-//! Asset family (T1-only): stock `get_image` and modern `asset.get` share one
-//! id-keyed resolution path. Covers cache-hit serve, the `iap2/art/...` lane that
-//! must never be fetched from the companion, fail-fast when a companion drops an
-//! in-flight pull-on-miss request, and the companion-served pull bodies: inline,
-//! fragment-streamed, and fragment-streamed under concurrent background traffic.
-
 use std::time::Duration;
 
 use base64::Engine;

@@ -2923,6 +2923,29 @@ public struct TransferRef: Codable, Sendable {
 	}
 }
 
+/// Delta algorithm the daemon applies to reconstruct a full artifact from a
+/// pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
+/// is the currently-installed artifact.
+public enum OtaPatchAlgorithm: String, Codable, Sendable {
+	case zstdPatchFrom
+}
+
+/// Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
+/// receiving it the daemon applies `algorithm` against its current artifact
+/// and verifies the reconstruction is `result_size` bytes hashing to
+/// `result_sha256` before it reaches staging.
+public struct OtaPatch: Codable, Sendable {
+	public let algorithm: OtaPatchAlgorithm
+	public let resultSha256: String
+	public let resultSize: UInt32
+
+	public init(algorithm: OtaPatchAlgorithm, resultSha256: String, resultSize: UInt32) {
+		self.algorithm = algorithm
+		self.resultSha256 = resultSha256
+		self.resultSize = resultSize
+	}
+}
+
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the first
@@ -2941,17 +2964,24 @@ public struct TransferRef: Codable, Sendable {
 /// `update_url_base` is image-kind only: the server prefix the companion
 /// may refetch the .zck delta from on cache miss while serving range
 /// requests during the Writing phase. Ignored for non-image kinds.
+/// 
+/// `patch`, when present, marks `transfer` as a delta rather than the whole
+/// artifact: the daemon reconstructs against its currently-installed artifact
+/// of this `kind` before staging. Daemon-kind only today. Absent for full
+/// pushes.
 public struct OtaBegin: Codable, Sendable {
 	public let kind: OtaKind
 	public let updateId: String
 	public let updateUrlBase: String?
 	public let transfer: TransferRef
+	public let patch: OtaPatch?
 
-	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef) {
+	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef, patch: OtaPatch?) {
 		self.kind = kind
 		self.updateId = updateId
 		self.updateUrlBase = updateUrlBase
 		self.transfer = transfer
+		self.patch = patch
 	}
 }
 

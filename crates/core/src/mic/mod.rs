@@ -1,15 +1,3 @@
-//! Mic capture + voice-stream policy. Owns the on-device 4-mic array
-//! through ALSA, holds the muted/capturing state, and ships PCM frames
-//! over the gateway Bulk lane to the connected companion. Frame
-//! cadence and format are constant per session; backpressure is
-//! propagated by dropping frames at the capture boundary rather than
-//! buffering, since streams must never accumulate in memory.
-//!
-//! Wire surface (gateway-bound, Bulk lane):
-//!   `BridgeToGatewayVoiceMsg::{StreamOpen, Frame, StreamClose}`
-//! Wire surface (client-bound, Normal):
-//!   `BridgeToClientVoiceMsg::StateChanged`
-
 use std::sync::Arc;
 
 use libbridgething::{
@@ -30,9 +18,6 @@ use crate::{bluetooth::BluetoothMan, net::WireEventBus};
 #[cfg(feature = "mic")]
 mod alsa_capture;
 
-/// PCM format this session captures at. The value is fixed at the
-/// session boundary so the companion can decode without having to
-/// retain per-frame metadata.
 #[derive(Debug, Clone, Copy)]
 pub struct CaptureFormat {
   pub sample_rate_hz: u32,

@@ -177,9 +177,6 @@ impl ClientHandler {
         );
       }
 
-      // response-meta inbound messages are intercepted by `ClientListener::recv`
-      // and routed to `ClientManager::complete_pending` before they reach the
-      // handler. anything that arrives here is a bug.
       RecvMsgData::Response { request_id, .. } => {
         tracing::error!(
           "({}) Response-meta message {request_id} reached the handler - listener interception is broken",

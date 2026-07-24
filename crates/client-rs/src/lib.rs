@@ -1,11 +1,3 @@
-//! Ergonomic Rust SDK for the client (webapp) side of the bridgething
-//! wire protocol. A webapp speaks `ClientToBridgeMsg` outbound over the
-//! daemon's local WebSocket and receives `BridgeToClientMsg` (JSON text
-//! frames). Built on [`bridgething_sdk_runtime`]: the generic `event` /
-//! `command` / `request` methods are type-checked against the wire
-//! marker traits, with the named per-surface methods layered on by
-//! codegen.
-
 mod transport;
 
 #[path = "surface.generated.rs"]
@@ -25,10 +17,8 @@ use tokio_tungstenite::connect_async;
 pub use transport::Ws;
 use uuid::Uuid;
 
-/// Default local client WebSocket.
 pub const DEFAULT_URL: &str = "ws://127.0.0.1:8891/";
 
-/// Wire-protocol binding for the webapp side.
 pub struct ClientProtocol;
 
 impl Protocol for ClientProtocol {
@@ -51,14 +41,12 @@ impl Protocol for ClientProtocol {
   }
 }
 
-/// A connected webapp client.
 #[derive(Clone)]
 pub struct Client {
   conn: Connection<ClientProtocol>,
 }
 
 impl Client {
-  /// Connect to a daemon's client WebSocket.
   pub async fn connect(url: &str) -> Result<Self, TransportError> {
     let (ws, _) = connect_async(url)
       .await
@@ -68,29 +56,24 @@ impl Client {
     })
   }
 
-  /// Override the per-request response timeout (default 30s).
   pub fn with_timeout(self, timeout: Duration) -> Self {
     Self {
       conn: self.conn.with_timeout(timeout),
     }
   }
 
-  /// Inbound messages that aren't correlated responses.
   pub fn events(&self) -> broadcast::Receiver<BridgeToClientMsg> {
     self.conn.events()
   }
 
-  /// Raw connection handle
   pub fn connection(&self) -> &Connection<ClientProtocol> {
     &self.conn
   }
 
-  /// build a per-message handle for an inbound message.
   pub fn handle(&self, msg: &BridgeToClientMsg) -> MsgHandle<ClientProtocol> {
     self.conn.handle(msg)
   }
 
-  /// fire-and-forget event (`meta = event`).
   pub async fn event<E>(&self, event: E) -> Result<(), SdkError>
   where
     E: WireEvent<ClientToBridgeMsgData>,
@@ -98,7 +81,6 @@ impl Client {
     self.conn.event(event).await
   }
 
-  /// fire-and-forget command (`meta = command`).
   pub async fn command<C>(&self, command: C) -> Result<(), SdkError>
   where
     C: WireCommand<ClientToBridgeMsgData>,
@@ -106,7 +88,6 @@ impl Client {
     self.conn.command(command).await
   }
 
-  /// typed request - await the returned response.
   pub async fn request<R>(&self, request: R) -> Result<R::Response, RequestFailure<R::DomainError>>
   where
     R: WireRequest<Outbound = ClientToBridgeMsgData, Inbound = BridgeToClientMsgData>,
@@ -114,7 +95,6 @@ impl Client {
     self.conn.request(request).await
   }
 
-  /// send arbitrary out-data with a chosen meta + priority.
   pub async fn send_data(
     &self,
     meta: MsgMeta,

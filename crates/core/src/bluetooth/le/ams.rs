@@ -1,19 +1,3 @@
-//! Apple Media Service (AMS) GATT client, as a consumer of the shared
-//! LE session. Reads the iPhone's media-player volume over the same
-//! LE bond ANCS uses. Read-only: AMS feeds the volume level into
-//! `AudioManager`; it is not a second now-playing source (iAP2
-//! NowPlaying owns playback state).
-//!
-//! Volume actuation is HID over iAP2; AMS is purely how the accessory
-//! learns the current level. iOS has no separate mute state, so a level
-//! of 0/16 is mute; `muted` is always reported false and the level
-//! carries the signal.
-//!
-//! Subscribing the Entity Update characteristic and registering the
-//! Player/Volume attribute makes iOS push the current value immediately
-//! as the first notification, then stream every change after. No
-//! separate one-shot read is needed.
-
 use std::pin::Pin;
 
 use bluer::gatt::{
@@ -48,7 +32,6 @@ pub async fn subscribe(service: &Service) -> AmsResult<EntityUpdateStream> {
   Ok(Box::pin(stream))
 }
 
-/// frame: `[entity, attr, flags, value-bytes...]`. player volume is an ascii `0.0`-`1.0` string
 pub fn parse_volume(frame: &[u8]) -> Option<f32> {
   if frame.len() < 4 {
     return None;

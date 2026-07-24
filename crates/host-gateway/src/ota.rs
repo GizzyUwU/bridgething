@@ -81,6 +81,7 @@ pub async fn run_push_update(
       total_size: size,
       sha256: Some(sha256.clone()),
     },
+    patch: None,
   };
   let resume_from_offset = match send_begin(&mut conn, begin).await? {
     Ok(ack) => ack.resume_from_offset,

@@ -16,6 +16,8 @@ import com.bridgething.schema.OtaAssetRangeReply
 import com.bridgething.schema.OtaActivate
 import com.bridgething.schema.OtaBegin
 import com.bridgething.schema.OtaKind
+import com.bridgething.schema.OtaPatch
+import com.bridgething.schema.OtaPatchAlgorithm
 import com.bridgething.schema.OtaPhase
 import com.bridgething.schema.OtaProgress
 import com.bridgething.schema.Priority
@@ -109,7 +111,6 @@ internal class RateTracker(private val windowMs: Long = 4_000L) {
         }
     }
 
-    /** bytes/sec over the trailing window, or null until there is a spread to measure. */
     fun ratePerSec(): Double? = synchronized(lock) {
         val first = samples.firstOrNull() ?: return@synchronized null
         val last = samples.lastOrNull() ?: return@synchronized null
@@ -303,7 +304,10 @@ public class OtaService(
         binaryPath: File,
     ): Flow<OtaPhaseSnapshot> {
         return runOtaFlow { collector ->
-            val terminal = applyBandaidBatch(gateway, deviceId, listOf(Triple(OtaKind.Daemon, binaryPath, "daemon")), collector)
+            val terminal = applyBandaidBatch(
+                gateway, deviceId,
+                listOf(BandaidArtifact(OtaKind.Daemon, binaryPath, "daemon", patch = null)), collector,
+            )
             collector(terminal)
         }
     }
@@ -314,7 +318,10 @@ public class OtaService(
         bundlePath: File,
     ): Flow<OtaPhaseSnapshot> {
         return runOtaFlow { collector ->
-            val terminal = applyBandaidBatch(gateway, deviceId, listOf(Triple(OtaKind.BuiltinWebapp, bundlePath, "webapp")), collector)
+            val terminal = applyBandaidBatch(
+                gateway, deviceId,
+                listOf(BandaidArtifact(OtaKind.BuiltinWebapp, bundlePath, "webapp", patch = null)), collector,
+            )
             collector(terminal)
         }
     }
@@ -325,7 +332,10 @@ public class OtaService(
         artifacts: List<Triple<OtaKind, File, String>>,
     ): Flow<OtaPhaseSnapshot> {
         return runOtaFlow { collector ->
-            val terminal = applyBandaidBatch(gateway, deviceId, artifacts, collector)
+            val terminal = applyBandaidBatch(
+                gateway, deviceId,
+                artifacts.map { BandaidArtifact(it.first, it.second, it.third, patch = null) }, collector,
+            )
             collector(terminal)
         }
     }
@@ -373,6 +383,7 @@ public class OtaService(
             updateId = sha,
             updateUrlBase = null,
             transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
+            patch = null,
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
@@ -478,13 +489,9 @@ public class OtaService(
             runBandaidBatchAuto(
                 deviceId,
                 listOf(
-                    BandaidPiece(
-                        kind = OtaKind.Daemon,
-                        url = urls.daemonBinary,
-                        filename = "daemon-$channel-${composite.daemon}",
-                        version = composite.daemon,
-                        assetLabel = "daemon",
-                        expected = artifacts?.daemon,
+                    daemonPiece(
+                        urls = urls, rootUrl = rootUrl, channel = channel,
+                        toVersion = composite.daemon, fromVersion = meta.appVersion, artifacts = artifacts,
                     ),
                 ),
                 version,
@@ -629,13 +636,9 @@ public class OtaService(
         val batch = mutableListOf<BandaidPiece>()
         if (daemonDrift) {
             batch.add(
-                BandaidPiece(
-                    kind = OtaKind.Daemon,
-                    url = urls.daemonBinary,
-                    filename = "daemon-$channel-${latest.daemon}",
-                    version = latest.daemon,
-                    assetLabel = "daemon",
-                    expected = release?.artifacts?.daemon,
+                daemonPiece(
+                    urls = urls, rootUrl = config.rootUrl, channel = channel,
+                    toVersion = latest.daemon, fromVersion = meta.appVersion, artifacts = release?.artifacts,
                 ),
             )
         }
@@ -648,6 +651,13 @@ public class OtaService(
         }
     }
 
+    private data class DaemonPatchPlan(
+        val url: String,
+        val digest: OtaArtifactDigest,
+        val resultSha256: String,
+        val resultSize: Long,
+    )
+
     private data class BandaidPiece(
         val kind: OtaKind,
         val url: String,
@@ -655,7 +665,47 @@ public class OtaService(
         val version: String,
         val assetLabel: String,
         val expected: OtaArtifactDigest?,
+        val patch: DaemonPatchPlan? = null,
     )
+
+    private data class BandaidArtifact(
+        val kind: OtaKind,
+        val path: File,
+        val label: String,
+        val patch: OtaPatch?,
+    )
+
+    private fun daemonPiece(
+        urls: OtaArtifactUrls,
+        rootUrl: String,
+        channel: String,
+        toVersion: String,
+        fromVersion: String,
+        artifacts: OtaReleaseArtifacts?,
+    ): BandaidPiece {
+        val daemon = artifacts?.daemon
+        val patchDigest = artifacts?.daemonPatches?.get(fromVersion)
+        val plan =
+            if (daemon != null && patchDigest != null) {
+                DaemonPatchPlan(
+                    url = OtaArtifactUrls.daemonPatch(rootUrl, channel, toVersion, fromVersion),
+                    digest = patchDigest,
+                    resultSha256 = daemon.sha256,
+                    resultSize = daemon.size,
+                )
+            } else {
+                null
+            }
+        return BandaidPiece(
+            kind = OtaKind.Daemon,
+            url = urls.daemonBinary,
+            filename = "daemon-$channel-$toVersion",
+            version = toVersion,
+            assetLabel = "daemon",
+            expected = daemon,
+            patch = plan,
+        )
+    }
 
     private data class WebappDrift(val piece: BandaidPiece, val fromVersion: String)
 
@@ -779,28 +829,48 @@ public class OtaService(
             val labelKind = if (pieces.any { it.kind == OtaKind.Daemon }) OtaKind.Daemon else OtaKind.BuiltinWebapp
             val plan = bandaidPlan(pieces)
             eventsFlow.emit(OtaPollEvent.Planned(deviceId, labelKind, release, daemonVersion, imageVersion, plan))
-            var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
-            var cursor = 0
-            val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
-                last = snapshot
-                cursor = routeStep(plan, cursor, snapshot)
-                eventsFlow.emit(OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, stepId = plan[cursor].id, snapshot = snapshot))
-            }
-            val artifacts = mutableListOf<Triple<OtaKind, File, String>>()
-            for (piece in pieces) {
-                val cached = try {
-                    downloadIfNeeded(piece.url, cacheDir, piece.filename, piece.assetLabel, piece.expected, emit)
-                } catch (e: Throwable) {
-                    val reason = "bandaid download failed: ${e.message ?: e.toString()}"
-                    emit(OtaPhaseSnapshot.Failed(reason = reason))
-                    eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = piece.kind, reason = reason))
-                    noteAutoPushResult(deviceId, failed = true)
-                    return
+
+            suspend fun attempt(usePatch: Boolean): OtaPhaseSnapshot {
+                var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
+                var cursor = 0
+                val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
+                    last = snapshot
+                    cursor = routeStep(plan, cursor, snapshot)
+                    eventsFlow.emit(OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, stepId = plan[cursor].id, snapshot = snapshot))
                 }
-                artifacts.add(Triple(piece.kind, cached, piece.assetLabel))
+                val artifacts = mutableListOf<BandaidArtifact>()
+                for (piece in pieces) {
+                    val artifact = try {
+                        val pplan = piece.patch
+                        if (usePatch && pplan != null) {
+                            val cached = downloadIfNeeded(pplan.url, cacheDir, "${piece.filename}.patch", piece.assetLabel, pplan.digest, emit)
+                            BandaidArtifact(
+                                piece.kind, cached, piece.assetLabel,
+                                patch = OtaPatch(
+                                    algorithm = OtaPatchAlgorithm.ZstdPatchFrom,
+                                    resultSha256 = pplan.resultSha256,
+                                    resultSize = pplan.resultSize.toUInt(),
+                                ),
+                            )
+                        } else {
+                            val cached = downloadIfNeeded(piece.url, cacheDir, piece.filename, piece.assetLabel, piece.expected, emit)
+                            BandaidArtifact(piece.kind, cached, piece.assetLabel, patch = null)
+                        }
+                    } catch (e: Throwable) {
+                        val reason = "bandaid download failed: ${e.message ?: e.toString()}"
+                        emit(OtaPhaseSnapshot.Failed(reason = reason))
+                        return OtaPhaseSnapshot.Failed(reason = reason)
+                    }
+                    artifacts.add(artifact)
+                }
+                val terminal = applyBandaidBatch(gateway = gateway, deviceId = deviceId, artifacts = artifacts, emit = emit)
+                return terminal.takeUnless { it is OtaPhaseSnapshot.Idle } ?: last
             }
-            val terminal = applyBandaidBatch(gateway = gateway, deviceId = deviceId, artifacts = artifacts, emit = emit)
-            val finalSnap = terminal.takeUnless { it is OtaPhaseSnapshot.Idle } ?: last
+
+            var finalSnap = attempt(usePatch = true)
+            if (finalSnap is OtaPhaseSnapshot.Failed && pieces.any { it.patch != null }) {
+                finalSnap = attempt(usePatch = false)
+            }
             if (finalSnap is OtaPhaseSnapshot.Failed) {
                 eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = labelKind, reason = finalSnap.reason))
                 noteAutoPushResult(deviceId, failed = true)
@@ -890,8 +960,6 @@ public class OtaService(
         terminal: OtaPhaseSnapshot,
     ) {
         if (kind == OtaKind.Image) {
-            // meta-derived completion already concluded this install; the local
-            // terminal (often a stale watchdog verdict after app suspension) loses
             val claimed = mutex.withLock { imageInstallTargets.remove(deviceId) != null }
             if (!claimed) return
         }
@@ -1104,6 +1172,7 @@ public class OtaService(
         label: String,
         updateUrlBase: String?,
         mode: DriveMode,
+        patch: OtaPatch? = null,
         emit: suspend (OtaPhaseSnapshot) -> Unit,
     ): Pair<OtaPhaseSnapshot, String> {
         val totalSize = try { artifactPath.length() } catch (e: Throwable) {
@@ -1126,6 +1195,7 @@ public class OtaService(
             updateId = sha,
             updateUrlBase = updateUrlBase,
             transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
+            patch = patch,
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
@@ -1207,19 +1277,20 @@ public class OtaService(
     private suspend fun applyBandaidBatch(
         gateway: BridgethingGateway,
         deviceId: String,
-        artifacts: List<Triple<OtaKind, File, String>>,
+        artifacts: List<BandaidArtifact>,
         emit: suspend (OtaPhaseSnapshot) -> Unit,
     ): OtaPhaseSnapshot {
         val stagedIds = mutableListOf<String>()
-        for ((kind, path, label) in artifacts) {
+        for (artifact in artifacts) {
             val (snapshot, updateId) = driveOta(
                 gateway = gateway,
                 deviceId = deviceId,
-                kind = kind,
-                artifactPath = path,
-                label = label,
+                kind = artifact.kind,
+                artifactPath = artifact.path,
+                label = artifact.label,
                 updateUrlBase = null,
                 mode = DriveMode.Stage,
+                patch = artifact.patch,
                 emit = emit,
             )
             if (snapshot !is OtaPhaseSnapshot.Staged) return snapshot

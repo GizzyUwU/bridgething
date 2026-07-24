@@ -7,9 +7,6 @@ use uuid::Uuid;
 
 use crate::{VoiceDispatchErrorCode, VoiceDispatchTarget};
 
-/// PCM frame format the daemon ships in `Frame` payloads. Voice capture
-/// runs at a fixed format per session; format is announced once on
-/// `StreamOpen` and held constant through `StreamClose`.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -20,9 +17,6 @@ pub struct VoiceFormat {
   pub bits_per_sample: u16,
 }
 
-/// Daemon opens a capture session. The companion is expected to begin
-/// consuming `Frame`s with the same `stream_id` until a `StreamClose`
-/// for that id arrives.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -34,10 +28,6 @@ pub struct VoiceStreamOpen {
   pub format: VoiceFormat,
 }
 
-/// One PCM frame in an active capture session. Sent on the Bulk lane so
-/// it interleaves between Normal-priority traffic. `seq` increments
-/// from 0; gaps mean the daemon dropped frames under backpressure and
-/// the companion should treat them as silence rather than retransmit.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -76,11 +66,6 @@ pub struct VoiceStreamClose {
   pub reason: VoiceCloseReason,
 }
 
-/// Notification that an inbound `VoiceDispatch` was routed. `target`
-/// describes where the daemon sent it; the daemon's own action surfaces
-/// (Player events, WebappActive changes) are the source of truth for the
-/// effect - this event is purely so the companion can render confirmation
-/// UI without polling state.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -92,8 +77,6 @@ pub struct VoiceDispatched {
   pub webapp_id: Option<String>,
 }
 
-/// Terminal failure for an inbound `VoiceDispatch`. Daemon could not
-/// route the resolved intent; companion presents the appropriate UX.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

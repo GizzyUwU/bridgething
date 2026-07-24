@@ -1,24 +1,3 @@
-//! Apple Notification Center Service (ANCS) GATT client, as a consumer
-//! of the shared LE session. Subscribes the Notification Source + Data
-//! Source over the iPhone's LE-bonded GATT db, surfaces iOS
-//! notifications to webapps, and forwards `notifications.invokePositive`
-//! / `invokeNegative` back as PerformNotificationAction writes on the
-//! Control Point.
-//!
-//! ## How iOS gates ANCS
-//!
-//! iOS exposes ANCS over an LE-bonded link only, and content access is
-//! further gated on a per-bond authorization decision. The first ANCS
-//! access that requires it pops the "Allow X to access notifications"
-//! prompt; after accept, a "Share System Notifications" toggle appears
-//! in the iPhone's Bluetooth Settings entry for the peer.
-//!
-//! Without authorization, the Notification Source CCCD subscribe still
-//! works (it is a descriptor write, not gated on the decision), but
-//! Control Point reads either error 0xA2 or never deliver on the Data
-//! Source. The session surfaces that as consecutive attribute-fetch
-//! timeouts and reports `Unauthorized`.
-
 use std::{collections::VecDeque, pin::Pin, time::Duration};
 
 use bluer::gatt::{
@@ -383,7 +362,6 @@ fn parse_gna_response(buf: &[u8]) -> Option<(NotificationFields, usize)> {
   None
 }
 
-/// ANCS dates arrive as `yyyyMMdd'T'HHmmss` UTC.
 fn parse_ancs_date(s: &str) -> Option<u32> {
   if s.len() != 15 || &s[8..9] != "T" {
     return None;
@@ -493,9 +471,6 @@ mod tests {
     v
   }
 
-  // a GNA response carries the requested attributes in request order; iOS zero-fills
-  // missing ones (length 0) and build_get_attributes requests Date last, so a real
-  // response ends with the Date attribute.
   fn gna_response(uid: u32, with_labels: bool) -> Vec<u8> {
     let mut r = vec![COMMAND_GET_NOTIFICATION_ATTRIBUTES];
     r.extend_from_slice(&uid.to_le_bytes());
@@ -513,7 +488,6 @@ mod tests {
 
   #[test]
   fn date_is_requested_last() {
-    // date terminates the response parse, so it must be the final requested attribute.
     let cmd = build_get_attributes(0x2a);
     assert_eq!(cmd.last().copied(), Some(ATTR_DATE));
   }
@@ -534,9 +508,6 @@ mod tests {
 
   #[test]
   fn back_to_back_responses_do_not_corrupt() {
-    // the original bug terminated before the trailing labels, leaving their bytes to
-    // poison the next response. a complete response must be consumed exactly so the
-    // following one still starts at its command byte.
     let mut buf = gna_response(1, true);
     let first_len = buf.len();
     buf.extend(gna_response(2, true));
@@ -562,7 +533,6 @@ mod tests {
 
   #[test]
   fn fragmented_response_without_date_yields_none() {
-    // a response still missing its Date terminator must wait for more, not parse as complete.
     let full = gna_response(3, true);
     let date_attr_len = 3 + "20260526T134500".len();
     let partial = &full[..full.len() - date_attr_len];

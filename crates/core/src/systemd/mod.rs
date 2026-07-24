@@ -64,7 +64,6 @@ impl<'a> Notify<'a> for SystemdNotify {
   }
 }
 
-// explicitly allowed dead_code so production builds don't warn
 #[allow(dead_code)]
 pub struct DummyNotify;
 

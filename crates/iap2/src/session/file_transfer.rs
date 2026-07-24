@@ -1,30 +1,3 @@
-//! iAP2 File Transfer session - the iOS-proactive accessory bound stream
-//! that delivers album-art bytes whenever a track changes. Sits on link
-//! session id 2 (per `Lsp::accessory_default()`); not a CSM session, the
-//! per-packet payload is `[u8 id][u8 op][...]`.
-//!
-//! State machine per `id`:
-//!
-//! ```text
-//!   (idle)
-//!     │  Setup(0x04) total=N type=2
-//!     ▼                          ──── reply: SetupAck(0x01)
-//!   Buffering ── FirstAndOnly(0xC0) ─── reply: CompleteAck(0x05) ──> emit
-//!         │
-//!         │  FirstData(0x80) | Data(0x00) ... LastData(0x40)
-//!         ▼                          ──── reply: CompleteAck(0x05) ──> emit
-//!   Cancel(0x02)  ──> drop buffer (no ack)
-//!   Pause(0x03)   ──> log only, partial buffer retained
-//! ```
-//!
-//! Reassembly accepts every Setup-declared file type and emits the
-//! result as a generic event the daemon's observer routes by transfer
-//! id (artwork vs queue-snapshot vs anything else iOS may push).
-//! The reassembly buffer is pre-allocated with the Setup-declared size
-//! so we don't grow as bytes arrive. Bytes that exceed the declared
-//! size hard-stop the transfer (drops the buffer, drops the future
-//! SetupAck).
-
 use std::collections::HashMap;
 
 use bytes::{Buf, Bytes, BytesMut};

@@ -1,11 +1,3 @@
-//! Sender-side windowing for daemon -> companion fragment streams (the
-//! mirror of `sinks`). A stream registers before its carrying reply is
-//! sent, fragments ride the Bulk lane addressed to one peer, and the
-//! window advances on the receiver's `transfer.ack` events. A receiver
-//! that stops acking stalls the window and the stream abandons, so a
-//! dead peer never leaves more than one window of frames queued behind
-//! the link.
-
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},

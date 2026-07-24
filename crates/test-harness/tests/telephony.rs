@@ -1,8 +1,3 @@
-//! iAP2 telephony scenarios: CallStateUpdate deltas injected into the real
-//! router must surface as stock `phone_call_info` frames the stock webapp's
-//! string-matching actually accepts, and as modern callStarted/callUpdated/
-//! callEnded events with the call evicted from the merged state on disconnect.
-
 use std::time::Duration;
 
 use bluer::Address;

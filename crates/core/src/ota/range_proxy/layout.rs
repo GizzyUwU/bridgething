@@ -1,14 +1,3 @@
-//! pure byte-layout of a range-proxy HTTP response body.
-//!
-//! swupdate's delta channel resumes an interrupted download with
-//! `Range: bytes=N-` (libcurl `CURLOPT_RESUME_FROM_LARGE`), expecting the
-//! server to continue the exact same response body from byte N. the proxy
-//! never buffers, so it reconstructs the body layout from the last
-//! requested ranges and replays it from N, re-fetching only the companion
-//! data still needed. a single-range request yields a raw body; a
-//! multi-range request yields `multipart/byteranges` framing whose header
-//! and boundary bytes are generated deterministically here.
-
 use libbridgething::{RangePart, RangeSpec};
 use tokio_util::bytes::{Bytes, BytesMut};
 

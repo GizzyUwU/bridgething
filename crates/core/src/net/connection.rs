@@ -150,9 +150,6 @@ impl Connection {
       self.forward(ForwardMsg::ChangeMode(ClientMode::Stock)).await;
     };
 
-    // any modern inbound message tagged `MsgMeta::Response` is routed to
-    // `ClientManager::complete_pending` by the listener instead of the
-    // normal handler dispatch path.
     if let PossibleRecvMsg::Modern(ClientToBridgeMsg {
       meta: MsgMeta::Response(meta_resp),
       data,

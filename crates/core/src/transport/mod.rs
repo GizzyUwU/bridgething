@@ -1,25 +1,3 @@
-//! Outbound media-control multiplexer.
-//!
-//! Webapp tap on a transport verb (play, pause, next, prev, shuffle,
-//! repeat, volume up/down, mute, seek, skip-to-index) arrives at the
-//! daemon's local websocket, dispatches through
-//! [`crate::handler::client::interaction::InteractionHandler`], and
-//! lands here. The controller decides where the command goes based on
-//! `AuthorityRegistry`:
-//!
-//! - companion authoritative for `NowPlayingPlayback` -> typed
-//!   `BridgeToGatewayTransportMsg` over the gateway link
-//! - else iAP2 control session (when an iPhone is identified) ->
-//!   `AccessoryHIDReport` on Consumer Control page 0x0C
-//! - else no target; warn-log and ack
-//!
-//! Shuffle and repeat over HID are toggle-only on the iAP2 wire. To
-//! honour state-set semantics the controller reads the latest
-//! `iap2_playback` snapshot from `Player` and computes how many toggles
-//! to fire (0/1 for shuffle, 0/1/2 for repeat). When the snapshot lacks
-//! the field the controller refuses with a warn log and returns `Ok(())`
-//! so the webapp's UI doesn't error-spinner.
-
 use bridgething_iap2::{HidCommand, NowPlayingCommand};
 use libbridgething::{
   CompanionAuthorityScope, RepeatMode,

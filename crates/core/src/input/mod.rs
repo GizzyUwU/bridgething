@@ -1,8 +1,3 @@
-//! Hub-launch gesture: count five `KEY_M` presses within 1.5s on the
-//! gpio-keys-polled evdev node and switch the active webapp to the
-//! built-in launcher. Listens passively (no `EVIOCGRAB`) so single
-//! presses still reach chromium and the active webapp normally.
-
 #[cfg(feature = "input")]
 mod evdev_listener;
 

@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::{
   collections::HashMap,
   time::{SystemTime, UNIX_EPOCH},

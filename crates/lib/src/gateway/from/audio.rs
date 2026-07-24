@@ -5,9 +5,6 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-/// Fired when the companion has begun speaking the TTS request with this
-/// id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
-/// before speech started); webapps should treat both as best-effort.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -18,9 +15,6 @@ pub struct TtsStarted {
   pub id: Uuid,
 }
 
-/// Fired when the TTS request finished. `completed` is true when the
-/// full text was spoken; false when preempted, cancelled, or the
-/// companion dropped it.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -32,8 +26,6 @@ pub struct TtsEnded {
   pub completed: bool,
 }
 
-/// Volume / mute snapshot. Fired on any change to either; webapps treat
-/// `level` as the canonical value.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]

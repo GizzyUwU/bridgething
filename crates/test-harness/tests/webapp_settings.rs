@@ -1,9 +1,3 @@
-//! Webapp resource fetch (icon / companion settings page) + the shared doc
-//! namespace, at the wire tier: gateway list carries content hashes instead
-//! of inline icon bytes, `webapp.resource` serves inline or as the first
-//! daemon->companion fragment stream (ack-windowed), and doc writes fan
-//! change events to the opposite side only.
-
 use std::time::Duration;
 
 use bridgething_test_harness::Harness;
@@ -28,8 +22,6 @@ fn sha_hex(bytes: &[u8]) -> String {
   hex::encode(h.finalize())
 }
 
-/// Plant an installed bundle on disk and rescan. `settings_len` of zero skips
-/// the settings page entirely.
 async fn plant_bundle(harness: &Harness, id: Uuid, settings_len: usize) -> (Vec<u8>, Vec<u8>) {
   let dir = harness.state_dir().join("webapps").join(id.simple().to_string());
   std::fs::create_dir_all(&dir).expect("bundle dir");
@@ -95,7 +87,6 @@ async fn small_resource_rides_inline_and_have_match_elides_the_body() {
     .expect("resource with have");
   assert!(cached.body.is_none(), "matching have must elide the body");
   assert_eq!(cached.sha256, sha_hex(&icon));
-  // mime must survive the bodyless reply so the companion can render its cached copy
   assert_eq!(cached.mime.as_deref(), Some("image/svg+xml"));
 }
 
@@ -121,11 +112,6 @@ async fn missing_resource_is_a_domain_error() {
   );
 }
 
-/// A settings page above the inline cap arrives as the daemon's first-ever
-/// outbound fragment stream: reply-first with a `TransferRef`, offset-ordered
-/// fragments capped at the preemption budget, and a sender window that only
-/// advances on receiver acks (the payload is chosen to be several windows
-/// long, so completion without acks would mean the window is not enforced).
 #[tokio::test]
 async fn large_settings_page_streams_under_ack_window() {
   let harness = Harness::start().await.expect("harness start");

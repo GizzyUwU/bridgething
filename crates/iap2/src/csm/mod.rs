@@ -1,25 +1,3 @@
-//! Control Session Message (CSM) codec.
-//!
-//! A CSM is the unit of conversation on the iAP2 control session
-//! (session id 0). The wire format is a 6-byte outer header (start
-//! marker `0x4040`, big-endian u16 length covering the whole CSM, and
-//! a u16 message id) followed by zero or more parameter TLVs. Each
-//! parameter is its own length-prefixed block keyed by a u16 param id;
-//! repeated ids encode lists, empty payloads encode "presence" markers.
-//!
-//! [`CsmCodec`] implements `tokio_util::codec::{Decoder, Encoder}`. A
-//! session task drives a `BytesMut` from inbound link DATA chunks and
-//! drains complete CSMs out of it.
-//!
-//! Typed CSMs are flat structs annotated with `#[derive(Csm)]` (from
-//! `bridgething-macros`). The macro generates `From<X> for
-//! CsmFrame` and `TryFrom<CsmFrame> for X`, dispatching field encoding
-//! through the [`CsmParamFieldEncode`] / [`CsmParamFieldDecode`] traits
-//! defined here. Field encoding is type-driven: `Bytes` rides as raw,
-//! `u16` rides BE, `String` rides UTF-8 + NUL, `()` rides as a
-//! presence marker, `Option<T>` is skipped when `None`, `Vec<T>`
-//! repeats the same param id.
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
@@ -38,16 +16,12 @@ pub const CSM_START_MARKER: u16 = 0x4040;
 pub const CSM_OUTER_HEADER_LEN: usize = 6;
 pub const CSM_PARAM_HEADER_LEN: usize = 4;
 
-/// A decoded CSM: the message id plus its parameter TLVs in wire order.
-/// Receivers index by [`CsmParam::id`]; sender ordering is free.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsmFrame {
   pub msg_id: u16,
   pub params: Vec<CsmParam>,
 }
 
-/// One parameter inside a CSM. Payload is the raw bytes after the
-/// 4-byte parameter header; per-type interpretation is the consumer's job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsmParam {
   pub id: u16,
@@ -80,7 +54,6 @@ impl CsmFrame {
   }
 }
 
-/// Errors from decoding a CSM frame or converting one into a typed struct.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CsmDecodeError {
   #[error("CSM start marker mismatch: got {got:#06x}, expected {:#06x}", CSM_START_MARKER)]
@@ -123,10 +96,6 @@ impl From<CsmDecodeError> for std::io::Error {
   }
 }
 
-/// Streaming codec for a CSM byte stream. `decode` returns `Ok(None)`
-/// until a complete frame is buffered; a malformed frame returns `Err`
-/// rather than resyncing, since a corrupted CSM above the link layer is
-/// a protocol violation, not noise.
 pub struct CsmCodec;
 
 impl Decoder for CsmCodec {
@@ -188,8 +157,6 @@ fn encode_params_into(params: Vec<CsmParam>, dst: &mut BytesMut) {
   }
 }
 
-/// Encode a list of parameters as a group payload: the same TLV shape
-/// as the outer CSM body, minus the 6-byte outer header.
 pub fn encode_param_block(params: Vec<CsmParam>) -> Bytes {
   let body_len: usize = params.iter().map(|p| CSM_PARAM_HEADER_LEN + p.payload.len()).sum();
   let mut out = BytesMut::with_capacity(body_len);
@@ -197,8 +164,6 @@ pub fn encode_param_block(params: Vec<CsmParam>) -> Bytes {
   out.freeze()
 }
 
-/// Decode a group-typed param payload (CSM-format params, no outer
-/// 6-byte header) back into a `Vec<CsmParam>`. Inverse of [`encode_param_block`].
 pub fn decode_param_block(body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {
   decode_params(body)
 }
@@ -235,15 +200,10 @@ fn decode_params(mut body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {
   Ok(params)
 }
 
-/// Type-driven encode hook for the `Csm` derive: push 0..N param TLVs
-/// for the given param id. `Bytes` pushes one, `Option<T>` 0 or 1,
-/// `Vec<T>` 0..N, `()` one with empty payload (presence marker).
 pub trait CsmParamFieldEncode: Sized {
   fn encode_field(self, param_id: u16, out: &mut Vec<CsmParam>);
 }
 
-/// Type-driven decode hook for the `Csm` derive: remove 0..N params
-/// matching the param id and assemble the field value.
 pub trait CsmParamFieldDecode: Sized {
   fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError>;
 }
@@ -446,7 +406,6 @@ impl CsmParamFieldDecode for Option<bool> {
     let Some(payload) = take_optional(param_id, params)? else {
       return Ok(None);
     };
-    // empty payload (presence-only) decodes true.
     if payload.is_empty() {
       Ok(Some(true))
     } else if payload.len() == 1 {

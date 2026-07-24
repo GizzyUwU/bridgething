@@ -21,22 +21,15 @@ use crate::{ItemKind, ItemRef};
   error_variant = LibraryErrorReply,
 )]
 pub struct LibraryBrowseRequest {
-  /// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
   pub node_id: Option<String>,
   pub limit: u32,
   pub offset: u32,
-  /// Root only: cap on the number of folders returned. `None` returns every folder.
   #[serde(default)]
   pub sections: Option<u32>,
-  /// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
-  /// hydration entirely and returns a cheap index of node ids, titles, and totals.
   #[serde(default)]
   pub preview: Option<u32>,
 }
 
-/// Resolve a single context uri (playlist / album / show / artist) to its
-/// name + cover art. Used to populate a stock preset slot the device only
-/// knows by `context_uri`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -76,10 +69,6 @@ pub struct LibrarySearchRequest {
   pub offset: u32,
 }
 
-/// Recommendations seeded by up to 5 items. The daemon caps the seed
-/// list at the platform-permissive limit (Spotify hard-caps at 5
-/// combined seeds across tracks/artists/genres). Gateway decides how to
-/// distribute seeds across its native API surfaces.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -120,9 +109,6 @@ pub struct LibraryFavoritesListRequest {
   pub offset: u32,
 }
 
-/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
-/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
-/// the request `uris`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -160,11 +146,6 @@ pub struct FavoritesSet {
   pub liked: bool,
 }
 
-/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
-/// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced - companion logs
-/// and best-efforts the rest. Webapps observing partial success listen
-/// for `FavoriteChanged` events.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

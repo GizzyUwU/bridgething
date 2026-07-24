@@ -1,28 +1,3 @@
-//! Reference merge model: a deliberately-simple, time-frozen re-implementation
-//! of the iAP2 event router (the pid-hex pairing + pending-art bookkeeping in
-//! `handler/iap2.rs`) plus the player merge (`player/state.rs`), used as the
-//! oracle for the property engine.
-//!
-//! The model is the spec written twice: if it and the daemon disagree after the
-//! same event sequence, one of them has a bug. To stay an honest oracle it is
-//! deliberately naive (no actors, no async, obviously-correct by inspection) and
-//! it freezes time out of scope:
-//!
-//! - authority claims never go stale (the daemon expires them after 5s; the
-//!   property engine runs sub-second, so a live claim stays live),
-//! - no transport/seek intent windows are ever armed (the vocabulary is
-//!   inbound-only; those are set by outbound control commands),
-//! - the extrapolated `position_ms` is not modeled and is excluded from the
-//!   compared projection.
-//!
-//! Comparison is at a curated semantic [`Projection`], not a full
-//! `PlayerStateReply`: every distinct merge rule (Some-overwrite accumulation,
-//! track-change reset of the metadata accumulator, per-scope authority
-//! fallthrough with the artwork-no-fallthrough exception, idle-sentinel
-//! suppression, and transfer-id art pairing) drives at least one projected
-//! field. Fields that are merely carried through by the same rule as a projected
-//! field add maintenance cost without coverage.
-
 use std::collections::HashSet;
 
 use bridgething_iap2::csm::now_playing::{
@@ -37,12 +12,6 @@ use libbridgething::{
 const IDLE_PID_HEX: &str = "0000000000000000";
 const NONMUSIC_PREFIX: &str = "nonmusic-";
 
-/// One atomic inbound event, applied identically to the model and (via the
-/// harness drivers) to the daemon.
-///
-/// `AuthorityClaim`/`AuthorityRelease` flip the registry AND refresh the player
-/// projection, like the daemon's authority handler kicking the player actor: a
-/// late claim surfaces already-staged companion state immediately.
 #[derive(Debug, Clone)]
 pub enum ModelEvent {
   Iap2NowPlaying(Iap2NowPlaying),
@@ -52,8 +21,6 @@ pub enum ModelEvent {
   AuthorityRelease(CompanionAuthorityScope),
 }
 
-/// The curated semantic projection compared between model and daemon. Excludes
-/// the wall-clock-extrapolated `position_ms` by construction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Projection {
   pub track_id: Option<String>,
@@ -77,7 +44,6 @@ pub struct Projection {
 }
 
 impl Projection {
-  /// Build the projection from what the daemon actually exposes for assertions.
   pub fn from_daemon(state: &PlayerStateReply, queue: &PlayerQueueReply, current_artwork_id: Option<String>) -> Self {
     let track = state.state.track.as_ref();
     Self {
@@ -103,17 +69,12 @@ impl Projection {
   }
 }
 
-/// The reference merge state. Mirrors the daemon's per-source accumulators, the
-/// router's iAP2 pairing bookkeeping, and the authority registry (as a plain set
-/// since claims never go stale in the engine's time window).
 #[derive(Debug, Clone, Default)]
 pub struct Model {
-  // router (handler/iap2.rs) bookkeeping, single peer
   last_pid_hex: Option<String>,
   pending_art: Option<(u8, String)>,
   assets: HashSet<String>,
 
-  // player accumulators (player/state.rs)
   iap2_metadata: MediaItemUpdate,
   iap2_playback: PlaybackUpdate,
   companion_metadata: MediaItemUpdate,
@@ -122,15 +83,11 @@ pub struct Model {
 
   authority: HashSet<CompanionAuthorityScope>,
 
-  // merged track (only the fields the projection reads)
   track: Option<TrackModel>,
   playing: bool,
   shuffle: bool,
   repeat: RepeatMode,
 
-  // the daemon's player snapshot is recomputed on every player-actor command,
-  // including the authority-change kick, so the observable projection is cached
-  // and refreshed on each applied event. mirror that exactly.
   cached: Projection,
 }
 
@@ -152,9 +109,6 @@ struct TrackModel {
 
 impl Model {
   pub fn new() -> Self {
-    // the daemon's initial PlayerState has no track and does not run the merge
-    // until the first player command, so seed the cache from the empty state
-    // (track None) WITHOUT synthesizing the default track recompute would build.
     let mut model = Self::default();
     model.cached = model.build_projection();
     model
@@ -176,9 +130,6 @@ impl Model {
     }
   }
 
-  // mirror of the daemon's player/state.rs::apply_companion_snapshot: a snapshot is a full replace
-  // of the companion accumulators (never an accumulate), and never touches the companion queue
-  // (that rides QueueChanged).
   fn apply_companion_snapshot(&mut self, snapshot: &PlayerState) {
     let PlayerState {
       track,
@@ -232,8 +183,6 @@ impl Model {
     self.recompute();
   }
 
-  // --- router half (handler/iap2.rs) ---
-
   fn apply_iap2_now_playing(&mut self, update: &Iap2NowPlaying) {
     let pid_hex = match delta_track_key(update.media_item.as_ref(), self.last_pid_hex.as_deref()) {
       Some(key) => {
@@ -270,16 +219,9 @@ impl Model {
     self.player_apply_artwork_id(asset_id);
   }
 
-  // --- player half (player/state.rs) ---
-
-  // iap2 is the only producer of now-playing deltas; the companion drives now-playing through
-  // apply_companion_snapshot, so this always targets the iap2 accumulators.
   fn player_apply_now_playing(&mut self, update: (MediaItemUpdate, PlaybackUpdate, bool, bool)) {
     let (mut media, playback, has_media, mut has_playback) = update;
 
-    // mirrors the daemon's idle-sentinel ingest drop: a zero-pid empty-title delta is an iOS
-    // transition blip; only a real duration riding on it survives, everything else is dropped
-    // without touching the accumulators.
     let is_idle_sentinel = has_media
       && media
         .persistent_id
@@ -296,10 +238,6 @@ impl Model {
           };
         }
         None => {
-          // the daemon drops the pure sentinel without touching state, but the player actor
-          // still rebuilds its watch snapshot on every command, so live-merged fields (e.g. an
-          // out-of-band claim flipping the merge) surface. the daemon's wire art is derived
-          // from the live merge at snapshot build, so the mirrored track image resyncs too.
           let merged_art = self.merged_metadata().artwork_id.unwrap_or_default();
           if let Some(track) = self.track.as_mut() {
             track.image_id = merged_art;
@@ -404,7 +342,6 @@ impl Model {
     let media = self.merged_metadata();
     let playback = self.merged_playback();
 
-    // mirrors the daemon: an identity-free merge on an empty state does not fabricate a track
     let has_identity = media.persistent_id.is_some() || media.title.is_some();
     if self.track.is_some() || has_identity {
       let same_track = match (
@@ -502,21 +439,14 @@ impl Model {
     }
   }
 
-  /// The cached projection, refreshed only by player-actor commands (mirroring
-  /// the daemon's watch snapshot). A bare authority change does not refresh it.
   pub fn project(&self) -> Projection {
     self.cached.clone()
   }
 
-  /// The scopes the model currently considers authoritative. The barrier waits
-  /// for the daemon's live scopes to match this, since a bare authority claim
-  /// has no player-observable effect to converge on.
   pub fn authority_scopes(&self) -> HashSet<CompanionAuthorityScope> {
     self.authority.clone()
   }
 
-  /// Asset ids the model believes are inserted or pending. Used by the
-  /// dangling-artwork invariant: any projected art id must be in this set.
   pub fn known_asset_ids(&self) -> HashSet<String> {
     let mut ids = self.assets.clone();
     if let Some((_, asset_id)) = &self.pending_art {
@@ -530,9 +460,6 @@ fn default_track() -> TrackModel {
   TrackModel::default()
 }
 
-/// Translate one raw iAP2 NowPlaying delta the way `handler/iap2.rs` does,
-/// returning the per-section lib updates plus presence flags (so the player
-/// half can distinguish "no media group" from "media group with all-None").
 fn translate_now_playing(
   update: &Iap2NowPlaying,
   persistent_hex: Option<&str>,
@@ -550,7 +477,6 @@ fn translate_now_playing(
   )
 }
 
-// mirror of the daemon's `handler/iap2.rs::delta_track_key` - the spec written twice.
 fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
   let media = media?;
   let title = media.title.as_deref().filter(|t| !t.is_empty());

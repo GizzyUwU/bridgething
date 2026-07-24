@@ -1,16 +1,3 @@
-//! WebSocket-based gateway transport. Accepts WS connections on a
-//! caller-supplied bind address and carries the bridgething gateway
-//! protocol over `BridgeEndec`-framed binary messages. Per-connection
-//! reader/writer pair, a shared `OutboundPacker` for the priority lanes,
-//! and a single `recv()` loop owning the connection map and driving both
-//! inbound dispatch and outbound fan-out.
-//!
-//! Synthetic addresses: bluetooth peers carry a real MAC; network peers
-//! don't, so connection bookkeeping uses a fake address under reserved
-//! prefix `0xfe:0xfe:...` with a per-connection counter. PeerTracker and
-//! authority routing key by address either way; the prefix keeps these
-//! distinguishable from real BlueZ peers without changing any consumer.
-
 use std::{
   collections::HashMap,
   net::SocketAddr,

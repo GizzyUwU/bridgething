@@ -1071,7 +1071,6 @@ mod tests {
     }
   }
 
-  // an iap2 now-playing delta carrying the foreground app bundle, the signal the daemon gate reads.
   fn iap2_app(pid: &str, title: &str, app_bundle: &str, playing: bool) -> NowPlayingUpdate {
     NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
@@ -1186,15 +1185,12 @@ mod tests {
       "companion owns playback with no other foreground"
     );
 
-    // a different iAP2 foreground app (the YouTube case) hands control to iAP2, not the companion.
     state.apply_now_playing(iap2_app("vid", "Clip", "com.google.ios.youtube", true));
     assert!(!state.companion_playback_authoritative());
 
-    // the iOS empty-bundle idle sentinel must not flap control away from the companion.
     state.apply_now_playing(iap2_app("vid", "", "", true));
     assert!(state.companion_playback_authoritative());
 
-    // Spotify foreground again restores companion control.
     state.apply_now_playing(iap2_app("track:a", "A", "com.spotify.client", true));
     assert!(state.companion_playback_authoritative());
   }
@@ -1206,9 +1202,6 @@ mod tests {
     state.apply_artwork_id("iap2/art/a/5".to_string());
     assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
 
-    // the transient iOS idle sentinel (pid 0 + empty title) must not wipe the held track or art.
-    // iAP2 re-sends play-state only on a song change, so a clobber would not recover until the next
-    // track; ignoring the sentinel at ingest keeps the real now-playing stable across the blip.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("iap2:track:0000000000000000".to_string()),
@@ -1265,17 +1258,12 @@ mod tests {
   fn idle_sentinel_real_duration_is_absorbed_into_held_track() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
 
-    // a youtube-style source has no persistent id: iOS keys the title under a synthesized nonmusic id
-    // and that delta carries no duration.
     state.apply_now_playing(iap2_track(
       "iap2:track:nonmusic-57052159de5875d2",
       "What Happened To All The Ads?",
     ));
     assert_eq!(media(&state).duration_ms, None, "title delta carries no duration");
 
-    // iOS rides the real duration on a zero-pid, empty-title sentinel-shaped delta. it must reach the
-    // held track (the stock webapp freezes its progress bar on a 0 duration) without resetting the
-    // track or clobbering the held title.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("iap2:track:0000000000000000".to_string()),
@@ -1309,8 +1297,6 @@ mod tests {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_now_playing(iap2_track("iap2:track:nonmusic-abc", "A Video"));
 
-    // a pure idle blip (zero pid, empty title, zero duration) carries nothing useful and must not
-    // disturb the held track.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("iap2:track:0000000000000000".to_string()),
@@ -1394,7 +1380,6 @@ mod tests {
       true,
     ));
 
-    // iap2 reports spotify as the foreground app: the companion stays authoritative.
     state.apply_now_playing(iap2_app("iap2:track:s", "Spotify Song", "com.spotify.client", true));
     assert_eq!(
       media(&state).uri.as_deref(),
@@ -1402,7 +1387,6 @@ mod tests {
       "same-app iap2 does not override"
     );
 
-    // iap2 reports youtube as the foreground app: the still-claimed companion is overridden.
     state.apply_now_playing(iap2_app(
       "iap2:track:y",
       "YouTube Video",
@@ -1418,7 +1402,6 @@ mod tests {
     assert_eq!(m.persistent_id.as_deref(), Some("iap2:track:y"));
     assert_eq!(m.uri, None, "the iap2 identity is synthetic");
 
-    // the user returns to spotify: the companion re-takes without a fresh snapshot.
     state.apply_now_playing(iap2_app("iap2:track:s2", "Spotify Song", "com.spotify.client", true));
     assert_eq!(
       media(&state).uri.as_deref(),
@@ -1514,7 +1497,6 @@ mod tests {
     let extrapolated = state.replies().0.state.playback.position_ms;
     assert!(extrapolated >= 40_000, "playhead extrapolated while playing");
 
-    // the phone re-sends the exact stale base position (wake/resume, duplicate cluster emit)
     state.apply_now_playing(position_tick(277));
     assert!(
       !state.take_position_resync(),
@@ -1541,7 +1523,6 @@ mod tests {
     let live = state.replies().0.state.playback.position_ms;
     assert!(live >= 80_000, "playhead extrapolated while playing: {live}");
 
-    // wake resend: the phone re-sends its cached 40s-old position but stamps how old it is
     let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 40_000);
     stale.playback.position_age_ms = Some(40_000);
     state.apply_companion_snapshot(stale);
@@ -1564,7 +1545,6 @@ mod tests {
     auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
     auth.set_companion_app_bundle(Some("com.spotify.client".into()));
 
-    // helper tracks carry duration_ms = 200_000; an absurd age must not run past the end
     let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 190_000);
     stale.playback.position_age_ms = Some(600_000);
     state.apply_companion_snapshot(stale);
@@ -1581,7 +1561,6 @@ mod tests {
     state.apply_now_playing(position_tick(1_500));
     let forward = state.replies().0.state.playback.position_ms;
 
-    // a stale out-of-order backward tick within tolerance must not snap the playhead back.
     state.apply_now_playing(position_tick(900));
     assert!(!state.take_position_resync(), "backward jitter does not force a resync");
     let after = state.replies().0.state.playback.position_ms;
@@ -1605,7 +1584,6 @@ mod tests {
     });
     state.take_position_resync();
 
-    // scrub while paused: no clock to ride, so the change must be pushed.
     state.apply_now_playing(position_tick(5_000));
     assert!(state.take_position_resync(), "paused scrub resyncs");
   }
@@ -1620,8 +1598,6 @@ mod tests {
     state.apply_companion_queue(qsnap(vec![a.clone(), b.clone(), c.clone()]));
     assert_eq!(state.companion_queue, vec![a, b.clone(), c.clone()]);
 
-    // each snapshot fully replaces: items carries every uri in order, so the queue is rebuilt from
-    // the snapshot alone with no carry-over from the prior one.
     let d = qitem("spotify:track:d", "D", "X", Some("img/d"), Some(4000));
     state.apply_companion_queue(qsnap(vec![b.clone(), c.clone(), d.clone()]));
     assert_eq!(state.companion_queue, vec![b, c, d]);
@@ -1632,8 +1608,6 @@ mod tests {
     let b = qitem("spotify:track:b", "B", "X", None, None);
     let c = qitem("spotify:track:c", "C", "X", None, None);
     let d = qitem("spotify:track:d", "D", "X", None, None);
-    // after a plain advance the companion sends nothing, so the now-current track is still the head
-    // of the held upcoming; next is the suffix after it.
     let next = derive_next(vec![b.clone(), c.clone(), d.clone()], Some(&b));
     assert_eq!(next, vec![c, d]);
   }
@@ -1643,7 +1617,6 @@ mod tests {
     let b = qitem("spotify:track:b", "B", "X", None, None);
     let c = qitem("spotify:track:c", "C", "X", None, None);
     let current = qitem("spotify:track:a", "A", "X", None, None);
-    // a fresh snapshot excludes the current track, so it is not found and the whole list is next.
     let next = derive_next(vec![b.clone(), c.clone()], Some(&current));
     assert_eq!(next, vec![b, c]);
   }
@@ -1655,7 +1628,6 @@ mod tests {
     let b = qitem("spotify:track:b", "B", "X", None, None);
 
     state.note_rolled_off(a.clone());
-    // queue "previous" keeps every roll-off (navigation history).
     assert_eq!(state.recently_played, vec![a.clone()]);
     assert_eq!(state.root_browse_gen(), 0, "a roll-off never bumps the home cache gen");
 
@@ -1694,7 +1666,6 @@ mod tests {
     ]));
     assert_eq!(state.replies().1.items.len(), 2);
 
-    // companion lost: authority drops and the peer hook resets, mirroring peer.rs companion_lost
     auth.drop_all();
     state.reset_companion();
     assert!(
@@ -1702,7 +1673,6 @@ mod tests {
       "no companion authority means no companion queue view"
     );
 
-    // reconnect: the phone advanced one track before its queue re-send lands
     auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
     auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
     auth.set_companion_app_bundle(Some("com.spotify.client".into()));
@@ -1754,10 +1724,8 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
 
-    // an iap2-only track is the live fallback view.
     state.apply_now_playing(iap2_track("iap2:track:fallback", "iAP2 Song"));
 
-    // the companion takes over and a different track is on-screen.
     auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
     auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
     auth.set_companion_app_bundle(Some("com.spotify.client".into()));
@@ -1770,7 +1738,6 @@ mod tests {
     state.apply_companion_queue(qsnap(vec![qitem("spotify:track:y", "Y", "Z", None, None)]));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:x"));
 
-    // companion lost: authority dropped and reset_companion called, mirroring peer.rs companion_lost.
     auth.drop_all();
     state.reset_companion();
 
@@ -1842,8 +1809,6 @@ mod tests {
     let before = view_position(&state);
     assert!(before >= 19_000, "aged playhead extrapolates: {before}");
 
-    // spotify-foreground iap2 chatter arrives while the companion owns playback: it must stage
-    // into the iap2 buffers without re-applying the companion's stale stored position.
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
     assert!(
       !state.take_position_resync(),
@@ -1863,8 +1828,6 @@ mod tests {
     state.age_clocks(Duration::from_secs(10));
     let before = view_position(&state);
 
-    // iap2 reports a song change as several fragments (pid, then title, then artist); the
-    // companion-owned view must hold steady through the whole burst.
     let burst = [
       NowPlayingUpdate {
         media_item: Some(MediaItemUpdate {
@@ -1915,11 +1878,9 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = spotify_owned_state(&auth);
 
-    // user taps pause: optimistic paused view while the command rides to the companion.
     state.set_transport_intent(false);
     assert!(!state.playing);
 
-    // stale iap2 play-state chatter must not count against the intent's mismatch allowance.
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
     assert!(
@@ -1927,7 +1888,6 @@ mod tests {
       "staged iap2 play-state burned the optimistic transport intent"
     );
 
-    // the owner confirms: the intent resolves and the view stays paused.
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Spotify Song", false, 12_000));
     assert!(!state.playing);
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
@@ -2007,8 +1967,6 @@ mod tests {
     let before = view_position(&state);
     assert!(before >= 7_500, "aged iap2 playhead extrapolates: {before}");
 
-    // spotify changes tracks in the background: the snapshot stages for the eventual cut-back
-    // but must not disturb the live iap2 view.
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
     assert!(
       !state.take_position_resync(),
@@ -2033,8 +1991,6 @@ mod tests {
     let mut state = PlayerState::new(auth.clone());
     auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
 
-    // a claim is preferred data, not exclusive: with no companion snapshot ever sent, the
-    // time-sensitive fields keep tracking iap2 live instead of freezing at the claim edge.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: None,
       playback: Some(PlaybackUpdate {
@@ -2063,15 +2019,12 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
 
-    // a snapshot staged while unclaimed stays invisible and fabricates no track.
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Song", true, 3_000));
     assert!(
       state.replies().0.state.track.is_none(),
       "an unclaimed companion snapshot must not surface"
     );
 
-    // the claim lands out-of-band in the registry with no player event of its own; the next
-    // player event crosses the ownership edge and hard cuts to the staged companion view.
     auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
     auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
     auth.set_companion_app_bundle(Some("com.spotify.client".into()));
@@ -2104,8 +2057,6 @@ mod tests {
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
     state.take_position_resync();
 
-    // spotify played on in the background for 5s after the staged snapshot; the cut-back must
-    // land on the extrapolated live position, not the stale staged one.
     state.age_clocks(Duration::from_secs(5));
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
 
@@ -2132,11 +2083,9 @@ mod tests {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_now_playing(playing_track("iap2:track:a", 1_000));
 
-    // user taps pause: optimistic paused state in flight.
     state.set_transport_intent(false);
     assert!(!state.playing);
 
-    // first delta still reports playing (stale, command not yet reflected): ride over the optimism.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: None,
       playback: Some(PlaybackUpdate {
@@ -2149,7 +2098,6 @@ mod tests {
       "a single stale mismatch rides over the optimistic state"
     );
 
-    // second delta still reports playing: the command failed phone-side, accept the source.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: None,
       playback: Some(PlaybackUpdate {
@@ -2202,7 +2150,6 @@ mod tests {
     state.age_clocks(Duration::from_secs(5));
     state.take_position_resync();
 
-    // ios reports a track change in fragments: pid first, no title yet, nothing to match against
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("iap2:track:b".into()),
@@ -2220,7 +2167,6 @@ mod tests {
       "no promotion before the title lands"
     );
 
-    // the title fragment confirms the queue head is what is now audible
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         title: Some("Track B".into()),
@@ -2265,7 +2211,6 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = queued_state(&auth);
 
-    // the dealer wins the race: its snapshot advances to the queue head first
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:b", "Track B", true, 4_000));
     state.take_position_resync();
 
@@ -2280,7 +2225,6 @@ mod tests {
     );
     let pos = view_position(&state);
     assert!(pos >= 4_000, "the playhead must not reset to track start: {pos}");
-    // matching against the head now would look one song into the future
     assert_eq!(
       upcoming_uris(&state),
       vec!["spotify:track:c", "spotify:track:d"],
@@ -2380,7 +2324,6 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = queued_state(&auth);
 
-    // a track change with no foreground-bundle attribution stages; the prediction alone is not enough
     state.apply_now_playing(iap2_track("iap2:track:b", "Track B"));
     assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:x"));
   }
@@ -2402,7 +2345,6 @@ mod tests {
       "the first duplicate promotes"
     );
 
-    // iap2 chatter re-carrying the same title hits the already-current check, never a second promotion
     state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
     assert_eq!(upcoming_uris(&state), vec!["spotify:track:b2", "spotify:track:c"]);
@@ -2416,7 +2358,6 @@ mod tests {
     state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
 
-    // the phone was actually elsewhere: the authoritative snapshot replaces the promoted card wholesale
     state.apply_companion_snapshot(companion_snapshot_pos(
       "spotify:track:elsewhere",
       "Elsewhere",
@@ -2434,21 +2375,16 @@ mod tests {
   fn stale_iap2_echo_after_a_context_switch_never_reverts_the_card() {
     let auth = AuthorityRegistry::new();
     let mut state = spotify_owned_state(&auth);
-    // steady state mid-playlist: runway dedup means the held queue still leads with the current track
     state.apply_companion_queue(qsnap(vec![
       qitem("spotify:track:x", "Spotify Song", "Artist", None, Some(200_000)),
       qitem("spotify:track:y", "Track Y", "Artist Y", None, None),
     ]));
-    // iap2 has tracked the same song all along; already-current, nothing promotes
     state.apply_now_playing(iap2_app("iap2:track:x", "Spotify Song", "com.spotify.client", true));
     assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:x"));
 
-    // the user picks a track from another playlist; the dealer confirms it first
     state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:t", "Fresh Pick", true, 0));
     assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:t"));
 
-    // a stale iap2 delta lands before the new context queue arrives: the held iap2 title still
-    // names the old song, which also sits at the head of the stale held queue
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
     assert_eq!(
       media(&state).persistent_id.as_deref(),

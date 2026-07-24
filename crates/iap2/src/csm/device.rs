@@ -1,29 +1,6 @@
-//! Typed CSMs for the iAP2 device-metadata surface.
-//!
-//! Four inbound CSMs the iPhone pushes after subscription. The accessory
-//! subscribes by listing each ID in `IdentificationInformation.MessagesReceivedFromDevice`
-//! (param 7) - there is no `Start*` / `Stop*` pair for these. iOS sends
-//! one initial push after `IdentificationAccepted` and again on change.
-//!
-//! - [`DeviceInformationUpdate`] (`0x4E09`) - the user-set device name
-//!   shown in iOS Settings (e.g. `"Joey's iPhone"`).
-//! - [`DeviceLanguageUpdate`] (`0x4E0A`) - ISO 639 language code (e.g.
-//!   `"en"`).
-//! - [`DeviceTimeUpdate`] (`0x4E0B`) - wall clock as epoch seconds plus
-//!   timezone offset minutes plus DST offset minutes. There is no IANA
-//!   zone identifier on this path; build a clock display from the
-//!   numeric offsets.
-//! - [`DeviceUUIDUpdate`] (`0x4E0C`) - a stable per-device UUID iOS
-//!   keeps consistent across BR/EDR and BLE addresses for the same
-//!   physical device.
-
 use super::Csm;
 
-/// The accessory does not send any CSMs in this layer; everything is
-/// inbound subscribe-by-listing on param 7.
 pub const SENT_BY_ACCESSORY: &[u16] = &[];
-
-/// CSMs the accessory accepts in this layer.
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
   DeviceInformationUpdate::CSM_MSG_ID,
   DeviceLanguageUpdate::CSM_MSG_ID,
@@ -31,8 +8,6 @@ pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
   DeviceUUIDUpdate::CSM_MSG_ID,
 ];
 
-/// `0x4E09` device -> accessory. Carries the user-set device name as a
-/// NUL-terminated UTF-8 string.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4E09)]
 pub struct DeviceInformationUpdate {
@@ -40,7 +15,6 @@ pub struct DeviceInformationUpdate {
   pub device_name: String,
 }
 
-/// `0x4E0A` device -> accessory. ISO 639 language code (e.g. `"en"`).
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4E0A)]
 pub struct DeviceLanguageUpdate {
@@ -48,10 +22,6 @@ pub struct DeviceLanguageUpdate {
   pub language: String,
 }
 
-/// `0x4E0B` device -> accessory. Wall clock plus zone offsets.
-/// `seconds_since_reference_date` is unix-epoch seconds (1970-01-01 GMT
-/// on the wire, despite the name). `tz_offset_minutes` is signed minutes
-/// from GMT; `dst_offset_minutes` is the DST adjustment in minutes.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4E0B)]
 pub struct DeviceTimeUpdate {
@@ -63,8 +33,6 @@ pub struct DeviceTimeUpdate {
   pub dst_offset_minutes: i8,
 }
 
-/// `0x4E0C` device -> accessory. Stable per-device UUID consistent
-/// across BR/EDR and BLE addresses for the same physical device.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4E0C)]
 pub struct DeviceUUIDUpdate {

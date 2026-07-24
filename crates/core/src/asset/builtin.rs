@@ -1,9 +1,3 @@
-//! Assets baked into the daemon binary, served without a companion round trip.
-//!
-//! Some cover art has no source url: Spotify renders the Liked Songs gradient
-//! client-side, so its metadata carries no image. These ids resolve to embedded
-//! bytes so the tile is never blank, regardless of whether a phone is attached.
-
 use tokio_util::bytes::Bytes;
 
 use super::CachedAsset;

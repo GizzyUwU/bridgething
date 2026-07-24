@@ -78,6 +78,8 @@ evdev = { version = "0.13.2", features = ["tokio"], optional = true }
 libc = "0.2.186"
 async-stream = "0.3"
 tracing-appender = "0.2.5"
+zstd = "0.13.3"
+memmap2 = "0.9.11"
 
 [features]
 default = ["dev-linux-host"]
@@ -89,7 +91,7 @@ systemd = ["dep:sd-notify", "dep:zbus"]
 swupdate = ["dep:bridgething-swupdate-sys"]
 superbird = ["als", "mic", "systemd", "chrome", "swupdate", "input"]
 # dev features
-dev-linux-host = ["als", "mic", "systemd", "chrome"]
+dev-linux-host = ["als", "systemd", "chrome"]
 no-persist = []
 # test features
 test-tap = []

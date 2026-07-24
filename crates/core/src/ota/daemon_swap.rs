@@ -1,11 +1,3 @@
-//! Daemon-binary backend for the OTA orchestrator. The streamed binary
-//! already landed on bandaid via the orchestrator's per-kind target_dir
-//! routing, so staging is a same-fs rename to `bridgething.incoming` plus
-//! an fsync. The live rotate (`current -> previous`, `incoming -> current`)
-//! and the single service restart happen later, on `OtaActivate`, via
-//! `staging::commit`. Off-device the call short-circuits behind the
-//! `/etc/superbird` sentinel and returns a no-op staged piece.
-
 use std::{
   io,
   os::unix::fs::PermissionsExt,
@@ -35,6 +27,10 @@ pub enum SwapError {
 
 fn io_err(step: &'static str) -> impl Fn(io::Error) -> SwapError {
   move |source| SwapError::Io { step, source }
+}
+
+pub fn current_binary_path() -> PathBuf {
+  PathBuf::from(DAEMON_DIR).join(CURRENT_NAME)
 }
 
 pub async fn stage(staged_binary: &Path, update_id: String) -> Result<StagedPiece, SwapError> {

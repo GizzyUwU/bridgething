@@ -1,18 +1,3 @@
-//! Bridge between iAP2 EA streams (per-peer, opened by iOS via
-//! `StartExternalAccessoryProtocolSession`) and the modern bridgething
-//! gateway protocol surface. From the gateway handler's perspective an
-//! EA stream looks identical to a `RfcommGateway` connection: a
-//! peer-addressed byte pipe carrying `BridgeEndec`-framed messages,
-//! announced with a `Version` event on open and torn down on close.
-//!
-//! The iAP2 manager calls [`Iap2EaGatewayHandle::notify_open`] on
-//! every `SessionEvent::EaStreamOpened`; the gateway task then spawns
-//! a per-stream reader/writer pair that wraps the iap2 byte channels
-//! with `BridgeEndec`. Outbound `OutboundGatewayMessage`s coming from
-//! the handler ride the existing priority byte through the iap2
-//! chunker - Bulk frames yield to Normal at chunk boundaries inside
-//! the iap2 crate.
-
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
@@ -45,10 +30,6 @@ use crate::{
 
 const STREAM_INPUT_CAPACITY: usize = 16;
 
-/// Notification posted by the iap2 manager when iOS opens a fresh EA
-/// stream on a connected peer. Carries the byte channels the iap2
-/// crate exposes; the gateway task wraps them in `BridgeEndec` and
-/// drives the modern wire protocol on top.
 pub struct StreamOpened {
   pub address: Address,
   pub stream_id: u16,
@@ -73,7 +54,6 @@ pub struct StreamClosed {
   pub stream_id: u16,
 }
 
-/// Per-peer wall of last inbound EA bytes. Congestion discriminator for the application keepalive
 #[derive(Clone, Debug, Default)]
 pub struct EaActivity {
   inner: Arc<Mutex<HashMap<Address, Instant>>>,
@@ -93,7 +73,6 @@ impl EaActivity {
   }
 }
 
-/// Public-facing handle the iap2 manager hands its observe loop
 #[derive(Clone, Debug)]
 pub struct Iap2EaGatewayHandle {
   open_tx: mpsc::Sender<StreamOpened>,

@@ -1,8 +1,3 @@
-//! WebSocket + JSON transport for the client (webapp) protocol. The
-//! daemon's local client server speaks JSON over text frames; each frame
-//! is one complete `{ id, meta, data }` envelope, so no cross-frame
-//! buffering is needed and `recv` is trivially cancel-safe.
-
 use bridgething_sdk_runtime::{Connector, InboundHalf, OutboundHalf, TransportError};
 use futures::{
   SinkExt, StreamExt,

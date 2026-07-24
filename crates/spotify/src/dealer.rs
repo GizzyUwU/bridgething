@@ -1,5 +1,3 @@
-//! credit to the librespot project
-
 use std::{
   io::Read,
   sync::{Arc, Mutex},
@@ -504,8 +502,6 @@ mod tests {
     c
   }
 
-  // pins for the user-initiated targeting path: these document as-built behavior on purpose.
-  // the on-connect auto-resume policy lives in resume_on_connect, not here.
   #[test]
   fn active_device_honors_the_cluster_active_id_unconditionally() {
     let c = cluster(

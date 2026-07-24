@@ -273,7 +273,6 @@ impl ChromeWorker {
       let tab = match self.first_tab().await {
         Some(tab) => tab,
         None => {
-          // first_tab() already logged + slept on connect failure
           return;
         }
       };

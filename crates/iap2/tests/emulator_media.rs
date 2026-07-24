@@ -1,10 +1,3 @@
-//! Slice 4 proof: after identification the emulator pushes a NowPlaying
-//! delta and an artwork blob over File Transfer, and enables HID. The
-//! accessory's own `SessionEvent` stream must emit `NowPlayingUpdate`
-//! (carrying the paired artwork id) and `ArtworkBytes` with the exact
-//! blob - proving the device-side NowPlaying encoder and the File
-//! Transfer sender (including multi-packet chunking) are wire-correct.
-
 #![cfg(feature = "emulator")]
 
 mod emu;
@@ -17,8 +10,6 @@ use emu::recv_with_timeout;
 
 #[tokio::test]
 async fn emulator_pushes_now_playing_and_artwork() {
-  // Larger than one link packet (accessory max_len 2048) so the file
-  // transfer must chunk into FirstData/Data/LastData.
   let artwork = Bytes::from(vec![0x7Au8; 5000]);
   let (mut harness, _emu_events, _emu_handle) = emu::spawn(emu::identification_config(), None, {
     let artwork = artwork.clone();
