@@ -1,7 +1,6 @@
 import BridgethingSchema
 import Foundation
 
-/// One-shot outcome of `BridgethingCompanion.enableAncsNotifications()`.
 public enum AncsSetupKind: Sendable, Equatable {
     case paired
     case alreadyPaired
@@ -28,33 +27,14 @@ public struct AncsSetupResult: Sendable {
 
     private let askLog = Logger(label: "com.bridgething.companion.ancs")
 
-    /// Service UUIDs the daemon advertises and hosts for the ANCS LE-bond
-    /// bring-up. These match the daemon's pair-trigger service byte-for-byte;
-    /// do not change one without the other.
     public enum AncsBluetooth {
         nonisolated(unsafe) public static let pairTriggerService =
             CBUUID(string: "B12BE732-C1D0-4001-8001-BB1D6E7A1C01")
         nonisolated(unsafe) public static let pairTriggerChar =
             CBUUID(string: "B12BE732-C1D0-4001-8001-BB1D6E7A1C02")
-        public static let advertisedName = "Bridgething"
+        public static let advertisedNamePrefix = "Car Thing"
     }
 
-    /// AccessorySetupKit + CoreBluetooth coordinator for the LE link that
-    /// carries ANCS and AMS. iAP2 already paired BR/EDR; iOS won't initiate
-    /// SMP-over-BR/EDR cross-transport key derivation against an existing
-    /// SC bond, so the second LE pair has to be driven from the iPhone
-    /// side. ASK does it cleanly on iOS 18+: the picker tap performs
-    /// SMP, after which the app's CBCentralManager retrieves the
-    /// peripheral by `bluetoothIdentifier` and connects.
-    ///
-    /// The explicit pair flow connects with
-    /// `CBConnectPeripheralOptionRequiresANCS = true` so iOS surfaces the
-    /// ANCS authorization prompt while the app is foreground, with a
-    /// plain-connect fallback if the gated connect hangs. The persistent
-    /// link (peer reconnects, LE drops) always connects plain: RequiresANCS
-    /// gates the whole LE ACL on ANCS, and AMS must not ride that gate.
-    ///
-    /// Only the iOS 18+ path is implemented; the host app targets iOS 18.
     @available(iOS 18.0, *)
     @MainActor
     final class AncsPairCoordinator: NSObject {
@@ -120,7 +100,6 @@ public struct AncsSetupResult: Sendable {
                     guard let self else { return }
                     MainActor.assumeIsolated { self.handleSessionEvent(event) }
                 }
-                // don't spin forever if activation never reports back; surface a failure instead.
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 8_000_000_000)
                     guard let self, self.activationContinuation != nil else { return }
@@ -140,7 +119,6 @@ public struct AncsSetupResult: Sendable {
             askLog.info("session event: \(String(describing: event.eventType))")
             switch event.eventType {
             case .activated:
-                // showPicker and accessory enumeration are invalid before this fires.
                 sessionActivated = true
                 finishActivation()
             case .invalidated:
@@ -151,10 +129,8 @@ public struct AncsSetupResult: Sendable {
                     completePending(.paired)
                 }
             case .accessoryRemoved:
-                // User revoked from Settings or via removeAccessory.
                 lastAuthState = .unknown
             case .pickerDidDismiss:
-                // Resolves cancellations; no-op if accessoryAdded already resolved the continuation.
                 completePendingIfNeeded(.cancelled)
             default:
                 break
@@ -164,12 +140,10 @@ public struct AncsSetupResult: Sendable {
         private func showPicker() {
             let descriptor = ASDiscoveryDescriptor()
             descriptor.bluetoothServiceUUID = AncsBluetooth.pairTriggerService
-            descriptor.bluetoothNameSubstring = AncsBluetooth.advertisedName
+            descriptor.bluetoothNameSubstring = AncsBluetooth.advertisedNamePrefix
 
-            // ASK rejects a display item with an empty image ("ignoring invalid display items"),
-            // and silently never launches the picker, so the product image must be renderable.
             let item = ASPickerDisplayItem(
-                name: AncsBluetooth.advertisedName,
+                name: AncsBluetooth.advertisedNamePrefix,
                 productImage: Self.pickerImage(),
                 descriptor: descriptor
             )

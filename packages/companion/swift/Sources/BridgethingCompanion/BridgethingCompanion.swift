@@ -106,7 +106,6 @@ public actor BridgethingCompanion {
     #if os(iOS)
         private let audioKeepAlive = BackgroundAudioKeepAlive()
     #endif
-    // one ack ledger shared by the asset lane and ota, owned by ota; the collector below feeds it.
     private var transferAcks: TransferAckWindow { ota.transferAcks }
 
     public init(
@@ -145,8 +144,6 @@ public actor BridgethingCompanion {
         spawnDispatchers()
 
         #if canImport(Darwin)
-            // The device has no battery RTC; re-seed its clock when the phone's
-            // timezone or wall clock changes mid-session.
             for name in [Notification.Name.NSSystemTimeZoneDidChange, .NSSystemClockDidChange] {
                 let token = NotificationCenter.default.addObserver(
                     forName: name, object: nil, queue: nil
@@ -400,7 +397,7 @@ public actor BridgethingCompanion {
                     EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: nil) { error in
                         guard let error else {
                             osLog.info("EA picker completed")
-                            cont.resume(returning: AccessoryPickResult(id: "", name: "Bridgething"))
+                            cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.advertisedNamePrefix))
                             return
                         }
                         let ns = error as NSError
@@ -410,12 +407,11 @@ public actor BridgethingCompanion {
                             switch code {
                             case .alreadyConnected:
                                 osLog.info("EA picker: accessory already connected")
-                                cont.resume(returning: AccessoryPickResult(id: "", name: "Bridgething"))
+                                cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.advertisedNamePrefix))
                                 return
                             case .resultNotFound:
                                 osLog.warning("EA picker: no accessory found")
                             case .resultCancelled:
-                                // ios returns cancelled for both a user dismiss and a select-then-bond/auth failure
                                 osLog.warning("EA picker dismissed without pairing")
                             case .resultFailed:
                                 osLog.warning("EA picker: pairing failed")
