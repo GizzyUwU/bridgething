@@ -47,7 +47,7 @@
 	<true/>
 	<key>NSAccessorySetupBluetoothNames</key>
 	<array>
-		<string>Bridgething</string>
+		<string>Car Thing</string>
 	</array>
 	<key>NSAccessorySetupBluetoothServices</key>
 	<array>
