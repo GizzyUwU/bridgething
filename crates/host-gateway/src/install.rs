@@ -28,7 +28,13 @@ use crate::{
   transfer::{AckRegistry, stream_file_fragments},
 };
 
-pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundle: PathBuf) -> Result<()> {
+pub async fn run_install(
+  url: &str,
+  chaos: ChaosConfig,
+  chunk_size: usize,
+  bundle: PathBuf,
+  provenance: Option<String>,
+) -> Result<()> {
   let metadata = tokio::fs::metadata(&bundle)
     .await
     .with_context(|| format!("stat bundle {}", bundle.display()))?;
@@ -53,6 +59,7 @@ pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundl
       sha256: Some(sha256.clone()),
     },
     patch: None,
+    provenance,
   };
   let resume_from_offset = match send_begin(&mut conn, begin).await? {
     Ok(ack) => ack.resume_from_offset,

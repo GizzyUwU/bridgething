@@ -69,7 +69,11 @@ export class OtaDriver {
     return snapshot;
   }
 
-  async pushDaemon(source: ArtifactSource, onProgress?: ProgressListener, patch?: OtaPatch): Promise<OtaProgressSnapshot> {
+  async pushDaemon(
+    source: ArtifactSource,
+    onProgress?: ProgressListener,
+    patch?: OtaPatch,
+  ): Promise<OtaProgressSnapshot> {
     return this.applyBandaidBatch([{ kind: 'daemon', source, patch }], onProgress);
   }
 
@@ -81,7 +85,7 @@ export class OtaDriver {
     return this.applyBandaidBatch(artifacts, onProgress);
   }
 
-  async installWebapp(source: ArtifactSource): Promise<WebappInstallResult> {
+  async installWebapp(source: ArtifactSource, provenance?: string): Promise<WebappInstallResult> {
     const totalSize = source.size;
     const sha256 = await sha256Hex(source);
     const transferId = newUuid();
@@ -92,6 +96,7 @@ export class OtaDriver {
       updateUrlBase: null,
       transfer: { id: transferId, totalSize, sha256 },
       patch: null,
+      provenance: provenance ?? null,
     });
     if (!beginResult.ok) {
       return { ok: false, reason: describeBeginFailure(beginResult) };
@@ -184,6 +189,7 @@ export class OtaDriver {
       updateUrlBase: args.updateUrlBase ?? null,
       transfer: { id: transferId, totalSize, sha256 },
       patch: args.patch ?? null,
+      provenance: null,
     });
     if (!beginResult.ok) {
       return { snapshot: { phase: 'failed', reason: describeBeginFailure(beginResult) }, updateId: sha256 };

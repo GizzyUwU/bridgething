@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -42,7 +43,13 @@ private fun catalog(apps: List<CatalogApp>) =
         apps = apps,
     )
 
-private fun installed(id: String, version: String, source: WebappSource = WebappSource.Installed, role: WebappRole = WebappRole.Standard) =
+private fun installed(
+    id: String,
+    version: String,
+    source: WebappSource = WebappSource.Installed,
+    role: WebappRole = WebappRole.Standard,
+    provenance: String? = null,
+) =
     WebappInfo(
         id = UUID.fromString(id),
         name = "x",
@@ -51,6 +58,7 @@ private fun installed(id: String, version: String, source: WebappSource = Webapp
         version = version,
         config = emptyList(),
         permissions = emptyList(),
+        provenance = provenance,
     )
 
 class SemverCompatTest {
@@ -112,14 +120,12 @@ class CatalogAggregateTest {
     fun `pinned source is primary and compat filters`() {
         val listings = CatalogService.aggregate(
             orderedCatalogs(),
-            listOf(installed(CALENDAR_ID, "0.1.5")),
-            mapOf(CALENDAR_ID to SOURCE_B),
+            listOf(installed(CALENDAR_ID, "0.1.5", provenance = SOURCE_B)),
             "v12.0.1",
         )
         assertEquals(2, listings.size)
         val cal = listings.first { it.app.id == CALENDAR_ID }
         assertEquals(SOURCE_B, cal.sourceUrl)
-        // 0.3.0 needs lib 99.0.0; device is 12.0.1, so the newest compatible is 0.1.5.
         assertEquals("0.1.5", cal.newestCompatible?.version)
         assertEquals("0.1.5", cal.installedVersion)
         assertFalse(cal.updateAvailable)
@@ -133,7 +139,7 @@ class CatalogAggregateTest {
 
     @Test
     fun `defaults to first source when unpinned`() {
-        val listings = CatalogService.aggregate(orderedCatalogs(), emptyList(), emptyMap(), "v12.0.1")
+        val listings = CatalogService.aggregate(orderedCatalogs(), emptyList(), "v12.0.1")
         val cal = listings.first { it.app.id == CALENDAR_ID }
         assertEquals(SOURCE_A, cal.sourceUrl)
         assertEquals("0.2.0", cal.newestCompatible?.version)
@@ -143,15 +149,78 @@ class CatalogAggregateTest {
     @Test
     fun `no compatible version for old device`() {
         val a = catalog(listOf(app(CALENDAR_ID, "Calendar", listOf(ver("0.3.0", minLib = "99.0.0")))))
-        val listings = CatalogService.aggregate(listOf(SOURCE_A to a), emptyList(), emptyMap(), "v12.0.1")
+        val listings = CatalogService.aggregate(listOf(SOURCE_A to a), emptyList(), "v12.0.1")
         assertNull(listings[0].newestCompatible)
     }
 
     @Test
     fun `null device version lists newest`() {
         val a = catalog(listOf(app(CALENDAR_ID, "Calendar", listOf(ver("0.3.0", minLib = "99.0.0")))))
-        val listings = CatalogService.aggregate(listOf(SOURCE_A to a), emptyList(), emptyMap(), null)
+        val listings = CatalogService.aggregate(listOf(SOURCE_A to a), emptyList(), null)
         assertEquals("0.3.0", listings[0].newestCompatible?.version)
+    }
+}
+
+class CatalogProvenanceTest {
+    @Test
+    fun `pins come from device reported provenance`() {
+        val pins = CatalogService.pins(
+            listOf(
+                installed(CALENDAR_ID, "0.1.0", provenance = SOURCE_B),
+                installed(WEATHER_ID, "0.1.0"),
+            )
+        )
+        assertEquals(SOURCE_B, pins[CALENDAR_ID])
+        assertNull(pins[WEATHER_ID])
+    }
+
+    @Test
+    fun `unrecognized provenance never resolves to a subscribed source`() {
+        val pins = CatalogService.pins(listOf(installed(CALENDAR_ID, "0.1.0", provenance = "not a url at all")))
+        assertNotEquals(SOURCE_A, pins[CALENDAR_ID])
+        assertNotEquals(SOURCE_B, pins[CALENDAR_ID])
+    }
+}
+
+class CatalogVersionOrderingTest {
+    @Test
+    fun `newest is by released at not array order`() {
+        val a = app(
+            CALENDAR_ID, "Calendar",
+            listOf(ver("0.1.0", released = "2026-01-01T00:00:00Z"), ver("0.9.0", released = "2026-06-01T00:00:00Z")),
+        )
+        assertEquals("0.9.0", CatalogService.newestCompatible(a, "v12.0.1")?.version)
+    }
+
+    @Test
+    fun `non utc offsets compare as instants`() {
+        val a = app(
+            CALENDAR_ID, "Calendar",
+            listOf(ver("0.2.0", released = "2026-06-01T00:00:00+02:00"), ver("0.1.0", released = "2026-06-01T00:00:00Z")),
+        )
+        assertEquals("0.1.0", CatalogService.newestCompatible(a, "v12.0.1")?.version)
+    }
+
+    @Test
+    fun `unparseable timestamps sort last`() {
+        val a = app(
+            CALENDAR_ID, "Calendar",
+            listOf(ver("0.1.0", released = "whenever"), ver("0.3.0", released = "2026-02-01T00:00:00Z")),
+        )
+        assertEquals("0.3.0", CatalogService.newestCompatible(a, "v12.0.1")?.version)
+    }
+
+    @Test
+    fun `compat filter applies after sorting`() {
+        val a = app(
+            CALENDAR_ID, "Calendar",
+            listOf(
+                ver("0.1.0", released = "2026-01-01T00:00:00Z"),
+                ver("0.9.0", minLib = "99.0.0", released = "2026-06-01T00:00:00Z"),
+                ver("0.5.0", released = "2026-03-01T00:00:00Z"),
+            ),
+        )
+        assertEquals("0.5.0", CatalogService.newestCompatible(a, "v12.0.1")?.version)
     }
 }
 
@@ -162,10 +231,9 @@ class CatalogUpdatesTest {
         val b = catalog(listOf(app(CALENDAR_ID, "Calendar", listOf(ver("0.3.0"), ver("0.1.0", released = "2026-04-01T00:00:00Z")))))
         val catalogs = mapOf(SOURCE_A to a, SOURCE_B to b)
 
-        // pinned to A: target is A's newest (0.2.0), not B's 0.3.0.
         val updates = CatalogService.updates(
-            catalogs, mapOf(CALENDAR_ID to SOURCE_A),
-            listOf(installed(CALENDAR_ID, "0.1.0")), "v12.0.1",
+            catalogs,
+            listOf(installed(CALENDAR_ID, "0.1.0", provenance = SOURCE_A)), "v12.0.1",
         )
         assertEquals(1, updates.size)
         assertEquals("0.2.0", updates[0].target.version)
@@ -178,20 +246,17 @@ class CatalogUpdatesTest {
         val a = catalog(listOf(app(CALENDAR_ID, "Calendar", listOf(ver("0.2.0")))))
         val catalogs = mapOf(SOURCE_A to a)
 
-        // unpinned installed app: no update offered (provenance unknown).
-        assertTrue(CatalogService.updates(catalogs, emptyMap(), listOf(installed(CALENDAR_ID, "0.1.0")), "v12.0.1").isEmpty())
-        // builtin: never a catalog app.
+        assertTrue(CatalogService.updates(catalogs, listOf(installed(CALENDAR_ID, "0.1.0")), "v12.0.1").isEmpty())
         assertTrue(
             CatalogService.updates(
-                catalogs, mapOf(CALENDAR_ID to SOURCE_A),
-                listOf(installed(CALENDAR_ID, "0.1.0", source = WebappSource.Builtin)), "v12.0.1",
+                catalogs,
+                listOf(installed(CALENDAR_ID, "0.1.0", source = WebappSource.Builtin, provenance = SOURCE_A)), "v12.0.1",
             ).isEmpty()
         )
-        // already newest: no update.
         assertTrue(
             CatalogService.updates(
-                catalogs, mapOf(CALENDAR_ID to SOURCE_A),
-                listOf(installed(CALENDAR_ID, "0.2.0")), "v12.0.1",
+                catalogs,
+                listOf(installed(CALENDAR_ID, "0.2.0", provenance = SOURCE_A)), "v12.0.1",
             ).isEmpty()
         )
     }
@@ -202,9 +267,7 @@ class CatalogStoreTest {
     fun `in memory round trips`() = runBlocking {
         val store = InMemoryCatalogStore()
         store.saveSources(listOf(SOURCE_A, SOURCE_B))
-        store.savePins(mapOf(CALENDAR_ID to SOURCE_B))
         assertEquals(listOf(SOURCE_A, SOURCE_B), store.loadSources())
-        assertEquals(mapOf(CALENDAR_ID to SOURCE_B), store.loadPins())
     }
 
     @Test
@@ -212,17 +275,19 @@ class CatalogStoreTest {
         val dir = File(System.getProperty("java.io.tmpdir"), "btcat-${UUID.randomUUID()}")
         val store = FileCatalogStore(dir)
         store.saveSources(listOf(SOURCE_A))
-        store.savePins(mapOf(WEATHER_ID to SOURCE_A))
         val reopened = FileCatalogStore(dir)
         assertEquals(listOf(SOURCE_A), reopened.loadSources())
-        assertEquals(mapOf(WEATHER_ID to SOURCE_A), reopened.loadPins())
         dir.deleteRecursively()
     }
 }
 
 private object UnusedInstaller : WebappInstaller {
-    override suspend fun installWebapp(gateway: BridgethingGateway, deviceId: String, bundlePath: File) =
-        WebappInstallResult.Failed("unused")
+    override suspend fun installWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: File,
+        provenance: String?,
+    ) = WebappInstallResult.Failed("unused")
 }
 
 private object UnusedFetcher : CatalogFetcher {

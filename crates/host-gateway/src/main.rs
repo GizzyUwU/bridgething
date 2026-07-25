@@ -116,6 +116,11 @@ enum Command {
     /// Path to the bundle `.zip`. Relative paths resolve against
     /// `--fixture` when set, otherwise CWD.
     bundle: PathBuf,
+    /// Provenance to record against the install, conventionally the
+    /// catalog source URL. Omitted records unknown provenance, which
+    /// also clears any provenance a prior install recorded.
+    #[arg(long)]
+    provenance: Option<String>,
   },
 }
 
@@ -184,9 +189,9 @@ async fn main() -> anyhow::Result<()> {
       .await
     }
     Command::SwitchWebapp { id } => webapp::run_switch(&cli.url, chaos, id).await,
-    Command::Install { bundle } => {
+    Command::Install { bundle, provenance } => {
       let bundle_path = resolve_path(cli.fixture.as_deref(), &bundle);
-      install::run_install(&cli.url, chaos, cli.chunk_size, bundle_path).await
+      install::run_install(&cli.url, chaos, cli.chunk_size, bundle_path, provenance).await
     }
   }
 }

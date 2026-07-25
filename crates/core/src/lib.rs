@@ -133,9 +133,13 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     .parent()
     .map(|p| p.join(".seeded"))
     .unwrap_or_else(|| installed_webapps_root.join(".seeded"));
-  let webapps = WebappRegistry::init(installed_webapps_root, builtin_webapps_root)
-    .await
-    .expect("failed to initialize webapp registry");
+  let webapps = WebappRegistry::init(
+    installed_webapps_root,
+    builtin_webapps_root,
+    state::storage::WebappProvenanceStore::new(db.clone()),
+  )
+  .await
+  .expect("failed to initialize webapp registry");
   if let Some(examples_dir) = config.examples_dir.clone() {
     install::seed_examples(&webapps, &examples_dir, &seed_marker).await;
   }
@@ -224,12 +228,12 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     let kv = kv.clone();
     let bus = bus.clone();
     let bluetooth = bluetooth.clone();
-    std::sync::Arc::new(move |path| {
+    std::sync::Arc::new(move |path, provenance| {
       let webapps = webapps.clone();
       let kv = kv.clone();
       let bus = bus.clone();
       let bluetooth = bluetooth.clone();
-      Box::pin(async move { install::apply_and_announce(&webapps, &kv, &bus, &bluetooth, path).await })
+      Box::pin(async move { install::apply_and_announce(&webapps, &kv, &bus, &bluetooth, path, provenance).await })
     })
   };
 

@@ -1,5 +1,5 @@
 {
-  "version": "0.2.3",
+  "version": "0.3.0",
   "surfaces": [
     {
       "name": "asset",
@@ -277,7 +277,6 @@
       "requests": [
         {
           "method": "watch",
-          "description": "Bridge -> companion watch forward. The daemon aggregates webapp\nwatches and re-issues this with the most-demanding accuracy +\nfastest interval. `min_interval_ms = 0` lets the gateway pick.",
           "payload": "GeoWatch",
           "payload_ref": "GeoWatch",
           "response": "GeoWatchReply",
@@ -792,7 +791,6 @@
         },
         {
           "method": "logsTail",
-          "description": "Pull a one-shot batch of recent daemon log entries over the gateway.\nMirrors the client `LogsTail`; both feed the same `LogTap` ring.",
           "payload": "LogsTail",
           "payload_ref": "LogsTail",
           "response": "LogsTailReply",
@@ -800,7 +798,6 @@
         },
         {
           "method": "logsSubscribe",
-          "description": "Open a streaming daemon-log subscription over the gateway. The daemon\nreturns an opaque token; the companion releases it via `LogsUnsubscribe`.\nScoped to the gateway peer - auto-released when the peer disconnects.",
           "payload": "LogsSubscribe",
           "payload_ref": "LogsSubscribe",
           "response": "LogsSubscribeReply",
@@ -808,7 +805,6 @@
         },
         {
           "method": "deviceGetNickname",
-          "description": "Gateway-side read of the device nickname. Returns the current value\n(or None when unset). Daemon also broadcasts `DeviceNicknameChanged`\nto gateway peers on mutation so the companion stays in sync without\npolling.",
           "response": "DeviceNicknameReply",
           "response_event": "onDeviceNickname"
         }
@@ -1790,7 +1786,6 @@
     },
     "DeviceNicknameReply": {
       "kind": "struct",
-      "description": "Current device nickname. Reply to `DeviceGetNickname` and\n`DeviceSetNickname`, plus the event payload for\n`DeviceNicknameChanged` broadcasts.",
       "fields": [
         {
           "name": "nickname",
@@ -2044,7 +2039,6 @@
     },
     "Earcon": {
       "kind": "struct",
-      "description": "Play a named earcon from `AudioCapabilities.earcons`. Unknown names\nsurface as `AudioError::EarconNotFound`.",
       "fields": [
         {
           "name": "name",
@@ -2090,7 +2084,6 @@
     },
     "FavoriteChanged": {
       "kind": "struct",
-      "description": "Fired when the favorited / liked status of an item changes -\nregardless of whether it was driven by the daemon (FavoritesToggle/Set\ncommand) or by the user mutating it on the gateway-side app directly.",
       "fields": [
         {
           "name": "uri",
@@ -2138,7 +2131,6 @@
     },
     "FavoritesSetMany": {
       "kind": "struct",
-      "description": "Bulk favorites mutation. `entries` are independent `FavoritesSet`\napplications; gateway returns once it has issued each underlying\nplatform call. Per-entry errors are not surfaced - companion logs\nand best-efforts the rest. Webapps observing partial success listen\nfor `FavoriteChanged` events.",
       "fields": [
         {
           "name": "entries",
@@ -2276,7 +2268,6 @@
     },
     "GeoWatch": {
       "kind": "struct",
-      "description": "Bridge -> companion watch forward. The daemon aggregates webapp\nwatches and re-issues this with the most-demanding accuracy +\nfastest interval. `min_interval_ms = 0` lets the gateway pick.",
       "fields": [
         {
           "name": "accuracy",
@@ -2758,7 +2749,6 @@
     },
     "LogsSubscribe": {
       "kind": "struct",
-      "description": "Open a streaming daemon-log subscription over the gateway. The daemon\nreturns an opaque token; the companion releases it via `LogsUnsubscribe`.\nScoped to the gateway peer - auto-released when the peer disconnects.",
       "fields": [
         {
           "name": "source",
@@ -2779,7 +2769,6 @@
     },
     "LogsSubscribeReply": {
       "kind": "struct",
-      "description": "Reply to a gateway `LogsSubscribe`: the opaque token to pass back to\n`LogsUnsubscribe`.",
       "fields": [
         {
           "name": "token",
@@ -2789,7 +2778,6 @@
     },
     "LogsTail": {
       "kind": "struct",
-      "description": "Pull a one-shot batch of recent daemon log entries over the gateway.\nMirrors the client `LogsTail`; both feed the same `LogTap` ring.",
       "fields": [
         {
           "name": "source",
@@ -2814,7 +2802,6 @@
     },
     "LogsTailReply": {
       "kind": "struct",
-      "description": "One-shot reply to a gateway `LogsTail`.",
       "fields": [
         {
           "name": "entries",
@@ -3933,7 +3920,6 @@
     },
     "PhoneStateReply": {
       "kind": "struct",
-      "description": "Typed reply payload for `PhoneStateGet` and the unsolicited\nannounce-time snapshot the companion proactively pushes per the\nannounce-on-connect rule.",
       "fields": [
         {
           "name": "state",
@@ -3959,7 +3945,6 @@
     },
     "PlayUri": {
       "kind": "struct",
-      "description": "Play a URI on the gateway. `context` lets the gateway honor playlist\n/ album semantics for skip-next when both sides understand the\nscheme. The daemon parses the scheme and only forwards if a\nconnected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.",
       "fields": [
         {
           "name": "uri",
@@ -4554,7 +4539,6 @@
     },
     "SetCrossfade": {
       "kind": "struct",
-      "description": "`duration_ms = None` turns crossfade off; `Some(0)` is also off but\ndistinguishes intent.",
       "fields": [
         {
           "name": "durationMs",
@@ -4593,7 +4577,6 @@
     },
     "SetSpeed": {
       "kind": "struct",
-      "description": "Set absolute playback rate. `1.0` is normal speed; gateways with\nlimited speed support clamp to their nearest supported value.",
       "fields": [
         {
           "name": "speed",
@@ -4933,7 +4916,6 @@
     },
     "Tts": {
       "kind": "struct",
-      "description": "Fire-and-forget TTS request. `id` is webapp-assigned (no request\nround-trip) and used for cancellation + matching back-to-back\n`TtsStarted`/`TtsEnded` events. `voice` selects from\n`AudioCapabilities.voices`; `None` uses the gateway's default.",
       "fields": [
         {
           "name": "id",
@@ -4961,7 +4943,6 @@
     },
     "TtsEnded": {
       "kind": "struct",
-      "description": "Fired when the TTS request finished. `completed` is true when the\nfull text was spoken; false when preempted, cancelled, or the\ncompanion dropped it.",
       "fields": [
         {
           "name": "id",
@@ -4975,7 +4956,6 @@
     },
     "TtsStarted": {
       "kind": "struct",
-      "description": "Fired when the companion has begun speaking the TTS request with this\nid. May arrive after `TtsEnded` is dropped (e.g. companion preempted\nbefore speech started); webapps should treat both as best-effort.",
       "fields": [
         {
           "name": "id",
@@ -5029,7 +5009,6 @@
     },
     "VolumeChanged": {
       "kind": "struct",
-      "description": "Volume / mute snapshot. Fired on any change to either; webapps treat\n`level` as the canonical value.",
       "fields": [
         {
           "name": "level",
@@ -5054,7 +5033,6 @@
     },
     "WebappActiveChanged": {
       "kind": "struct",
-      "description": "Event payload for an active-webapp change (any initiator). Distinct from\n`WebappActive` (a request response) so it carries the new app's declared\nart profile; the companion reads `art` directly to size its pushes.",
       "fields": [
         {
           "name": "id",
@@ -5125,6 +5103,10 @@
         {
           "name": "ExtractedTooLarge",
           "description": "Extracted bundle exceeds the 1 GiB disk-protection cap."
+        },
+        {
+          "name": "ProvenanceTooLong",
+          "description": "Install carried a provenance string over `WEBAPP_PROVENANCE_MAX_LEN`."
         },
         {
           "name": "ZipMalformed",
@@ -5250,6 +5232,12 @@
           "optional": true,
           "type_ref": "ArtProfile",
           "description": "Declared art render sizes; the companion warms exactly these. `None`\nmeans the canonical `{248, 96}` default applies."
+        },
+        {
+          "name": "provenance",
+          "type": "string",
+          "optional": true,
+          "description": "Opaque provenance token recorded at install time by whoever pushed\nthe bundle, conventionally the catalog source URL. The daemon stores\nand returns it verbatim and never dereferences it; it exists so every\nclient agrees on which source an installed webapp came from, and can\ntell an update apart from a different source claiming the same uuid.\n`None` means unknown provenance (image-seeded examples, sideloads)."
         }
       ]
     },

@@ -312,6 +312,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             permissions: vec![],
             voice_grammar: None,
             art: None,
+            provenance: None,
           },
           WebappInfo {
             id: FIXED_DEMO_WEBAPP.parse().unwrap(),
@@ -326,6 +327,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             permissions: vec![],
             voice_grammar: None,
             art: None,
+            provenance: Some("https://apps.bridgething.com/catalog.json".into()),
           },
         ],
       })),
@@ -377,6 +379,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
         permissions: vec![],
         voice_grammar: None,
         art: None,
+        provenance: Some("https://apps.bridgething.com/catalog.json".into()),
       })),
     },
   ));

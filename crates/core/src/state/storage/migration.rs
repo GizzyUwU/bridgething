@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-  vec![Box::new(M0002CreateState)]
+  vec![Box::new(M0002CreateState), Box::new(M0003CreateWebappProvenance)]
 }
 
 struct M0002CreateState;
@@ -62,11 +62,53 @@ impl MigrationTrait for M0002CreateState {
   }
 }
 
+struct M0003CreateWebappProvenance;
+
+impl MigrationName for M0003CreateWebappProvenance {
+  fn name(&self) -> &str {
+    "m0003_create_webapp_provenance"
+  }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for M0003CreateWebappProvenance {
+  async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .create_table(
+        Table::create()
+          .table(WebappProvenance::Table)
+          .if_not_exists()
+          .col(
+            ColumnDef::new(WebappProvenance::WebappId)
+              .text()
+              .not_null()
+              .primary_key(),
+          )
+          .col(ColumnDef::new(WebappProvenance::Provenance).text().not_null())
+          .to_owned(),
+      )
+      .await
+  }
+
+  async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .drop_table(Table::drop().table(WebappProvenance::Table).to_owned())
+      .await
+  }
+}
+
 #[derive(DeriveIden)]
 enum Meta {
   Table,
   Key,
   Value,
+}
+
+#[derive(DeriveIden)]
+enum WebappProvenance {
+  Table,
+  WebappId,
+  Provenance,
 }
 
 #[derive(DeriveIden)]

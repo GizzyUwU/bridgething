@@ -42,8 +42,11 @@ use crate::{
 
 pub type OtaEventTx = mpsc::Sender<BridgeToGatewaySystemMsgEvent>;
 
-pub type InstalledWebappApply =
-  Arc<dyn Fn(PathBuf) -> Pin<Box<dyn Future<Output = Result<WebappInfo, WebappError>> + Send>> + Send + Sync>;
+pub type InstalledWebappApply = Arc<
+  dyn Fn(PathBuf, Option<String>) -> Pin<Box<dyn Future<Output = Result<WebappInfo, WebappError>> + Send>>
+    + Send
+    + Sync,
+>;
 
 #[derive(Debug)]
 enum Command {
@@ -168,6 +171,7 @@ enum OtaState {
     transfer_id: uuid::Uuid,
     stream_rx: mpsc::Receiver<TransferEvent>,
     patch: Option<OtaPatch>,
+    provenance: Option<String>,
   },
   Writing {
     kind: OtaKind,
@@ -385,6 +389,22 @@ impl OtaActor {
       return;
     }
 
+    if req.provenance.is_some() && !matches!(req.kind, OtaKind::InstalledWebapp) {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "provenance is only recorded for installed-webapp updates".into(),
+      }));
+      return;
+    }
+
+    if let Some(value) = req.provenance.as_deref()
+      && value.len() > libbridgething::WEBAPP_PROVENANCE_MAX_LEN
+    {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: format!("provenance exceeds {} bytes", libbridgething::WEBAPP_PROVENANCE_MAX_LEN),
+      }));
+      return;
+    }
+
     let kind = req.kind;
     let target_dir = match kind {
       OtaKind::Image | OtaKind::InstalledWebapp => None,
@@ -428,6 +448,7 @@ impl OtaActor {
           transfer_id: req.transfer.id,
           stream_rx,
           patch: req.patch.clone(),
+          provenance: req.provenance.clone(),
         };
         let _ = ack.send(Ok(OtaBeginAck {
           resume_from_offset: resume_from_offset as u32,
@@ -464,7 +485,7 @@ impl OtaActor {
   }
 
   async fn handle_stream_event(&mut self, event: TransferEvent) {
-    let (kind, current_id, expected_size, peer, transfer_id, patch) = match &self.state {
+    let (kind, current_id, expected_size, peer, transfer_id, patch, provenance) = match &self.state {
       OtaState::Streaming {
         kind,
         update_id,
@@ -472,6 +493,7 @@ impl OtaActor {
         peer,
         transfer_id,
         patch,
+        provenance,
         ..
       } => (
         *kind,
@@ -480,6 +502,7 @@ impl OtaActor {
         *peer,
         *transfer_id,
         patch.clone(),
+        provenance.clone(),
       ),
       _ => return,
     };
@@ -521,7 +544,7 @@ impl OtaActor {
         self.last_streaming_emit_at = None;
         self.last_streaming_percent = None;
         self.sinks.unbind(transfer_id);
-        self.spawn_write(kind, current_id, peer, path, patch).await;
+        self.spawn_write(kind, current_id, peer, path, patch, provenance).await;
       }
       Err(err) => {
         let code = transfer_error_code(&err);
@@ -586,6 +609,7 @@ impl OtaActor {
     peer: Option<Address>,
     payload: PathBuf,
     patch: Option<OtaPatch>,
+    provenance: Option<String>,
   ) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     self.state = OtaState::Writing {
@@ -655,7 +679,7 @@ impl OtaActor {
         let transfers = self.transfers.clone();
         tokio::spawn(async move {
           emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
-          let result = (apply)(payload.clone()).await;
+          let result = (apply)(payload.clone(), provenance).await;
           let _ = transfers.abandon(update_id.clone()).await;
           let _ = tokio::fs::remove_file(&payload).await;
           match result {
@@ -962,6 +986,7 @@ mod tests {
       permissions: vec![],
       voice_grammar: None,
       art: None,
+      provenance: None,
     }
   }
 
@@ -1005,6 +1030,7 @@ mod tests {
     restart_self_calls: Arc<AtomicUsize>,
     installed_apply_calls: Arc<AtomicUsize>,
     installed_apply_ok: Arc<AtomicBool>,
+    installed_apply_provenance: Arc<std::sync::Mutex<Option<Option<String>>>>,
     captured_acks: Arc<std::sync::Mutex<Vec<TransferAck>>>,
     _root: PathBuf,
   }
@@ -1032,12 +1058,16 @@ mod tests {
     };
     let installed_apply_calls = Arc::new(AtomicUsize::new(0));
     let installed_apply_ok = Arc::new(AtomicBool::new(true));
+    let installed_apply_provenance = Arc::new(std::sync::Mutex::new(None::<Option<String>>));
     let apply_calls = installed_apply_calls.clone();
     let apply_ok = installed_apply_ok.clone();
-    let installed_apply: InstalledWebappApply = Arc::new(move |_path| {
+    let apply_provenance = installed_apply_provenance.clone();
+    let installed_apply: InstalledWebappApply = Arc::new(move |_path, provenance| {
       let calls = apply_calls.clone();
       let ok = apply_ok.clone();
+      let seen = apply_provenance.clone();
       Box::pin(async move {
+        *seen.lock().unwrap() = Some(provenance);
         calls.fetch_add(1, Ordering::SeqCst);
         if ok.load(Ordering::SeqCst) {
           Ok(dummy_info())
@@ -1080,6 +1110,7 @@ mod tests {
       restart_self_calls,
       installed_apply_calls,
       installed_apply_ok,
+      installed_apply_provenance,
       captured_acks,
       _root: root,
     }
@@ -1120,6 +1151,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1157,6 +1189,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer),
       )
@@ -1223,6 +1256,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer),
       )
@@ -1264,6 +1298,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1299,6 +1334,7 @@ mod tests {
             sha256: Some(bogus_sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1333,6 +1369,7 @@ mod tests {
             sha256: None,
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1357,6 +1394,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1379,6 +1417,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1412,6 +1451,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1438,6 +1478,7 @@ mod tests {
             sha256: Some("deadbeef".repeat(8)),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1462,6 +1503,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1483,6 +1525,7 @@ mod tests {
             sha256: Some(sha),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1527,6 +1570,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer_a),
       )
@@ -1555,6 +1599,7 @@ mod tests {
             sha256: Some(sha),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer_b),
       )
@@ -1582,6 +1627,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer_a),
       )
@@ -1601,6 +1647,7 @@ mod tests {
             sha256: Some("deadbeef".repeat(8)),
           },
           patch: None,
+          provenance: None,
         },
         Some(peer_b),
       )
@@ -1626,6 +1673,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1687,6 +1735,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1723,6 +1772,7 @@ mod tests {
             sha256: Some(bogus_sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1838,6 +1888,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1860,6 +1911,7 @@ mod tests {
             sha256: Some(sha),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1886,6 +1938,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )
@@ -1911,6 +1964,110 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn installed_webapp_forwards_provenance_to_apply() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+    let source = "https://apps.bridgething.com/catalog.json";
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::InstalledWebapp,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+          patch: None,
+          provenance: Some(source.into()),
+        },
+        None,
+      )
+      .await
+      .expect("installed-webapp begin ok");
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
+
+    wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if p.phase == OtaPhase::Writing),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let seen = h.installed_apply_provenance.lock().unwrap().clone();
+    assert_eq!(
+      seen,
+      Some(Some(source.to_string())),
+      "provenance from OtaBegin must reach the apply step"
+    );
+  }
+
+  #[tokio::test]
+  async fn provenance_is_rejected_for_non_installed_webapp_kinds() {
+    let h = boot().await;
+    let (_, sha, size) = fixture_bytes();
+
+    let err = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+          patch: None,
+          provenance: Some("https://apps.bridgething.com/catalog.json".into()),
+        },
+        None,
+      )
+      .await
+      .expect_err("daemon-kind begin carrying provenance must be rejected");
+    assert!(
+      err.reason.contains("provenance"),
+      "reason names provenance: {}",
+      err.reason
+    );
+  }
+
+  #[tokio::test]
+  async fn overlong_provenance_is_rejected_at_begin() {
+    let h = boot().await;
+    let (_, sha, size) = fixture_bytes();
+
+    let err = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::InstalledWebapp,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+          patch: None,
+          provenance: Some("x".repeat(libbridgething::WEBAPP_PROVENANCE_MAX_LEN + 1)),
+        },
+        None,
+      )
+      .await
+      .expect_err("overlong provenance must be rejected before streaming");
+    assert!(
+      err.reason.contains("provenance"),
+      "reason names provenance: {}",
+      err.reason
+    );
+  }
+
+  #[tokio::test]
   async fn installed_webapp_apply_failure_emits_ota_error() {
     let mut h = boot().await;
     h.installed_apply_ok.store(false, Ordering::SeqCst);
@@ -1928,6 +2085,7 @@ mod tests {
             sha256: Some(sha.clone()),
           },
           patch: None,
+          provenance: None,
         },
         None,
       )

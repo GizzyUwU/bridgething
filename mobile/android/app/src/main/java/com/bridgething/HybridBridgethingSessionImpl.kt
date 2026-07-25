@@ -304,7 +304,6 @@ public class HybridBridgethingSessionImpl(
         priorCatalog?.cancel()
         priorWebappDoc?.cancel()
         priorAuth?.cancel()
-        // detach UI observers but leave the companion running in the foreground service.
         priorCompanion?.setNowPlayingObserver(null)
         priorCompanion?.setAncsAuthStateObserver(null)
         priorCompanion?.setLogObserver(null)
@@ -449,7 +448,6 @@ public class HybridBridgethingSessionImpl(
     }
 
     override suspend fun shareLogs(archiveId: String?): Boolean {
-        // the bundle write is IO, but startActivity has to run on the main thread
         val file = withContext(Dispatchers.IO) {
             runCatching { LogExport.writeBundle(context, archiveId) }.getOrNull()
         } ?: return false
@@ -516,7 +514,7 @@ public class HybridBridgethingSessionImpl(
         val c = requireCompanion(deviceId)
         val (archive, isTemporary) = resolveArchive(sourceUri)
         try {
-            return when (val result = c.ota.installWebapp(c.gateway, deviceId, archive)) {
+            return when (val result = c.ota.installWebapp(c.gateway, deviceId, archive, provenanceForSideload(sourceUri))) {
                 is WebappInstallResult.Installed -> {
                     emitWebappsChanged(deviceId)
                     toRnWebappInfo(result.info)
@@ -733,7 +731,6 @@ public class HybridBridgethingSessionImpl(
     override suspend fun deviceSetNickname(deviceId: String, nickname: String) {
         val c = requireCompanion(deviceId)
         when (val result = c.gateway.system.deviceSetNickname(deviceId, DeviceSetNickname(nickname))) {
-            // daemon broadcasts DeviceNicknameChanged; meta lands via ota.metaChanged
             is RequestResult.Ok -> Unit
             is RequestResult.DomainErr -> throw IllegalStateException("nickname rejected: ${result.error.reason}")
             is RequestResult.ProtocolErr -> throw IllegalStateException("deviceSetNickname: ${result.error}")
@@ -882,8 +879,6 @@ public class HybridBridgethingSessionImpl(
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val roleManager = ctx.getSystemService(android.app.role.RoleManager::class.java) ?: return
             if (!roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)) return
-            // RoleManager's request dialog is an activity-result api; await its close so the
-            // caller can re-check isDefaultDialer.
             val activity = BridgethingActivityRegistry.currentActivity ?: return
             val intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
             val done = CompletableDeferred<Unit>()
@@ -1029,6 +1024,16 @@ public class HybridBridgethingSessionImpl(
         is RequestResult.ProtocolErr -> throw IllegalStateException("$label: ${result.error}")
     }
 
+    /**
+     * A sideload's provenance is the URL the bytes came from. Local files get
+     * none, since a device-side path tells a future client nothing.
+     */
+    private fun provenanceForSideload(sourceUri: String): String? =
+        when (runCatching { URI(sourceUri).scheme?.lowercase() }.getOrNull()) {
+            "http", "https" -> sourceUri
+            else -> null
+        }
+
     private suspend fun resolveArchive(sourceUri: String): Pair<File, Boolean> = withContext(Dispatchers.IO) {
         when (URI(sourceUri).scheme?.lowercase()) {
             "file" -> File(URI(sourceUri)) to false
@@ -1160,7 +1165,6 @@ public class HybridBridgethingSessionImpl(
                 appName = update.playback?.appDisplayName,
             )
         }
-        // glues tick once a second on position; skip the JS bridge hop when nothing visible changed.
         if (mapped == lastNowPlaying) return
         lastNowPlaying = mapped
         emitNowPlaying(mapped)
@@ -1307,7 +1311,6 @@ public class HybridBridgethingSessionImpl(
         OtaKind.Image -> BridgethingOtaKind.IMAGE
         OtaKind.Daemon -> BridgethingOtaKind.DAEMON
         OtaKind.BuiltinWebapp -> BridgethingOtaKind.BUILTINWEBAPP
-        // installed-webapp installs return WebappInfo directly and never emit OTA events.
         OtaKind.InstalledWebapp -> error("installed-webapp does not flow through OTA events")
     }
 

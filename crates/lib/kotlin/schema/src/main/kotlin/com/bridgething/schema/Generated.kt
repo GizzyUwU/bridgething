@@ -36,18 +36,11 @@ data class Artist (
 	val artwork_id: String? = null
 )
 
-/// Invalidate the daemon-side cached asset for `id`. The companion's
-/// escape hatch when it knows an asset it previously served is stale.
 @Serializable
 data class AssetClear (
 	val id: String
 )
 
-/// Standard embedding for a byte payload that may or may not warrant a
-/// fragment stream. Senders pick by size: a small payload rides inline
-/// in the carrying message (one frame, no machinery); a large one
-/// declares a stream and fragments follow. Receivers resolve both arms
-/// through one path.
 @Serializable(with = TransferBodySerializer::class)
 sealed class TransferBody {
 	@Serializable
@@ -58,11 +51,6 @@ sealed class TransferBody {
 	data class Stream(val data: TransferRef): TransferBody()
 }
 
-/// Typed terminal response for an `AssetRequest`. Small assets arrive
-/// inline; larger ones declare a stream whose ref id is the originating
-/// request id, with the bytes following as `TransferFragment` events on
-/// the bulk lane (so now-playing traffic preempts them between
-/// fragments).
 @Serializable
 data class AssetGotReply (
 	val id: String,
@@ -70,8 +58,6 @@ data class AssetGotReply (
 	val body: TransferBody
 )
 
-/// Domain error response for an `AssetRequest`: the companion does not
-/// have the requested asset.
 @Serializable
 data class AssetNotFoundReply (
 	val id: String
@@ -189,9 +175,7 @@ data class BridgeThingMeta (
 	val credits: String
 )
 
-/// Intent the sender signals for each message. Lets the receiver know
-/// whether to send back a typed response, treat it as a one-way command,
-/// or pair it against a pending request.
+/// Intent the sender signals for each message
 @Serializable(with = MsgMetaSerializer::class)
 sealed class MsgMeta {
 	@Serializable
@@ -261,20 +245,15 @@ sealed class BridgeToGatewayMsgData {
 	@Serializable
 	@SerialName("error")
 	data class Error(val data: WireError): BridgeToGatewayMsgData()
-	/// response, command received and won't have a completion
 	@Serializable
 	@SerialName("ack")
 	object Ack: BridgeToGatewayMsgData()
-	/// response, command has been completed
 	@Serializable
 	@SerialName("done")
 	object Done: BridgeToGatewayMsgData()
 }
 
 /// bridgething -> gateway
-/// messages from bridgething to the gateway (mobile or desktop app).
-/// 
-/// these messages will pass over bluetooth.
 @Serializable
 data class BridgeToGatewayMsg (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -477,9 +456,6 @@ data class CommunicationsState (
 	val holdAvailable: Boolean? = null
 )
 
-/// Companion-side cellular / call-control snapshot. Announce-on-connect
-/// pattern: companion sends an initial `CommunicationsSnapshot` after
-/// announce, then re-sends on any field change.
 @Serializable
 data class CommunicationsSnapshot (
 	val state: CommunicationsState
@@ -494,8 +470,6 @@ data class ConfigEntry (
 	val value: String
 )
 
-/// Resolved metadata for a single context uri (playlist / album / show /
-/// artist), used to populate a stock preset's name + cover art.
 @Serializable
 data class ContextResolveReply (
 	val name: String? = null,
@@ -527,31 +501,19 @@ data class Device (
 	val default: Boolean
 )
 
-/// Gateway-side read of the device nickname. Returns the current value
-/// (or None when unset). Daemon also broadcasts `DeviceNicknameChanged`
-/// to gateway peers on mutation so the companion stays in sync without
-/// polling.
 @Serializable
 object DeviceGetNickname
 
-/// Domain-error response to `DeviceSetNickname`: nickname rejected at
-/// the daemon edge (too long, contains nul, etc).
 @Serializable
 data class DeviceNicknameRejected (
 	val reason: String
 )
 
-/// Current device nickname. Reply to `DeviceGetNickname` and
-/// `DeviceSetNickname`, plus the event payload for
-/// `DeviceNicknameChanged` broadcasts.
 @Serializable
 data class DeviceNicknameReply (
 	val nickname: String? = null
 )
 
-/// Set the device nickname. Empty string clears (treated as None). The
-/// daemon broadcasts `DeviceNicknameChanged` to gateway + client peers
-/// after writing the KV slot. Length-capped at 64 chars.
 @Serializable
 data class DeviceSetNickname (
 	val nickname: String
@@ -584,8 +546,6 @@ data class DocEntry (
 	val value: String
 )
 
-/// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
-/// surface as `AudioError::EarconNotFound`.
 @Serializable
 data class Earcon (
 	val name: String
@@ -599,17 +559,12 @@ data class EnumField (
 	val default: String? = null
 )
 
-/// Fired when the favorited / liked status of an item changes -
-/// regardless of whether it was driven by the daemon (FavoritesToggle/Set
-/// command) or by the user mutating it on the gateway-side app directly.
 @Serializable
 data class FavoriteChanged (
 	val uri: String,
 	val liked: Boolean
 )
 
-/// Batch favorites-contains reply. `liked` is index-aligned with the
-/// request's `uris`.
 @Serializable
 data class FavoritesContainsReply (
 	val liked: List<Boolean>
@@ -697,11 +652,6 @@ data class FavoritesSet (
 	val liked: Boolean
 )
 
-/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
-/// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced - companion logs
-/// and best-efforts the rest. Webapps observing partial success listen
-/// for `FavoriteChanged` events.
 @Serializable
 data class FavoritesSetMany (
 	val entries: List<FavoritesSet>
@@ -788,9 +738,6 @@ sealed class GatewayToBridgeMsgData {
 }
 
 /// gateway -> bridgething
-/// messages from the gateway (mobile or desktop app) to bridgething.
-/// 
-/// these messages will pass over bluetooth.
 @Serializable
 data class GatewayToBridgeMsg (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -857,9 +804,6 @@ data class GeoGetOnceReply (
 	val position: Position
 )
 
-/// Bridge -> companion watch forward. The daemon aggregates webapp
-/// watches and re-issues this with the most-demanding accuracy +
-/// fastest interval. `min_interval_ms = 0` lets the gateway pick.
 @Serializable
 data class GeoWatch (
 	val accuracy: GeoAccuracy,
@@ -883,13 +827,11 @@ data class HttpHeader (
 	val value: String
 )
 
-/// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
 @Serializable
 data class KeepaliveAck (
 	val seq: UInt
 )
 
-/// Periodic liveness probe the daemon sends over the iAP2 EA link.
 @Serializable
 data class KeepalivePing (
 	val seq: UInt
@@ -897,20 +839,13 @@ data class KeepalivePing (
 
 @Serializable
 data class LibraryBrowseRequest (
-	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	val nodeId: String? = null,
 	val limit: UInt,
 	val offset: UInt,
-	/// Root only: cap on the number of folders returned. `None` returns every folder.
 	val sections: UInt? = null,
-	/// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
-	/// hydration entirely and returns a cheap index of node ids, titles, and totals.
 	val preview: UInt? = null
 )
 
-/// Which slice of the user's library changed, so a consumer can scope a
-/// refetch. The daemon invalidates its home cache on any scope; the
-/// distinction is informational for richer webapp consumers.
 @Serializable
 enum class LibraryScope(val string: String) {
 	@SerialName("saved")
@@ -919,9 +854,6 @@ enum class LibraryScope(val string: String) {
 	Playlists("playlists"),
 }
 
-/// Fired when the user mutates their library on the gateway-side app while
-/// connected (a like, a playlist edit) and the change did NOT originate from a
-/// daemon command - so the daemon must invalidate any cached browse / home view.
 @Serializable
 data class LibraryChanged (
 	val scope: LibraryScope
@@ -965,9 +897,6 @@ data class LibraryErrorReply (
 	val error: LibraryError
 )
 
-/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
-/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
-/// the request `uris`.
 @Serializable
 data class LibraryFavoritesContainsRequest (
 	val uris: List<String>
@@ -979,10 +908,6 @@ data class LibraryFavoritesListRequest (
 	val offset: UInt
 )
 
-/// Recommendations seeded by up to 5 items. The daemon caps the seed
-/// list at the platform-permissive limit (Spotify hard-caps at 5
-/// combined seeds across tracks/artists/genres). Gateway decides how to
-/// distribute seeds across its native API surfaces.
 @Serializable
 data class LibraryRecommendationsRequest (
 	val seeds: List<ItemRef>,
@@ -991,9 +916,6 @@ data class LibraryRecommendationsRequest (
 	val offset: UInt
 )
 
-/// Resolve a single context uri (playlist / album / show / artist) to its
-/// name + cover art. Used to populate a stock preset slot the device only
-/// knows by `context_uri`.
 @Serializable
 data class LibraryResolveContextRequest (
 	val uri: String
@@ -1046,9 +968,6 @@ enum class LogSource(val string: String) {
 	All("all"),
 }
 
-/// Open a streaming daemon-log subscription over the gateway. The daemon
-/// returns an opaque token; the companion releases it via `LogsUnsubscribe`.
-/// Scoped to the gateway peer - auto-released when the peer disconnects.
 @Serializable
 data class LogsSubscribe (
 	val source: LogSource,
@@ -1056,15 +975,11 @@ data class LogsSubscribe (
 	val filter: String? = null
 )
 
-/// Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
-/// `LogsUnsubscribe`.
 @Serializable
 data class LogsSubscribeReply (
 	val token: String
 )
 
-/// Pull a one-shot batch of recent daemon log entries over the gateway.
-/// Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
 @Serializable
 data class LogsTail (
 	val source: LogSource,
@@ -1073,7 +988,6 @@ data class LogsTail (
 	val maxLines: UInt
 )
 
-/// One-shot reply to a gateway `LogsTail`.
 @Serializable
 data class LogsTailReply (
 	val entries: List<LogEntry>
@@ -1102,19 +1016,11 @@ data class LyricsErrorReply (
 	val message: String
 )
 
-/// Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
-/// to completion without a hit (e.g. lrclib 404, no fallback configured)
-/// and is distinct from `LyricsErrorReply` which signals a transient
-/// failure (network, parse, resolver-internal error).
 @Serializable
 data class LyricsReply (
 	val lyrics: Lyrics? = null
 )
 
-/// Identifies a track for lyrics lookup. Different resolvers consume
-/// different subsets: lrclib does signature lookup (artist + track +
-/// album + duration), other resolvers may use ISRC or platform-specific
-/// ids. Populate what's available; resolvers ignore the rest.
 @Serializable
 data class TrackIdentity (
 	val artist: String,
@@ -1635,26 +1541,11 @@ data class NumberField (
 	val default: Double? = null
 )
 
-/// Drop the daemon-side partial for `update_id`. After `CancelUpdate`
-/// keeps the partial for resume; `OtaAbandon` is the explicit clean-up
-/// when the companion no longer wants to retry this artifact.
 @Serializable
 data class OtaAbandon (
 	val updateId: String
 )
 
-/// Commit every staged bandaid piece (daemon / hub / stock) as one
-/// transaction, then restart bridgething.service once. Bandaid pushes
-/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
-/// completion (phase reaches `Writing`/100, the daemon does NOT restart); the
-/// companion sends `OtaActivate` after the final piece to swap them all
-/// live with a single restart. Image OTAs never use this -- they reboot
-/// at write completion.
-/// 
-/// `expected` is the set of `update_id`s the companion staged this
-/// batch. The daemon errors the activate if its staged set does not
-/// match exactly, which guards a desync where a daemon crash dropped the
-/// in-memory staged set between staging and activation.
 @Serializable
 data class OtaActivate (
 	val expected: List<String>
@@ -1672,12 +1563,6 @@ data class RangeSpec (
 	val length: UInt
 )
 
-/// Daemon asks the pinned companion to serve byte ranges from an asset
-/// it should have cached (and can refetch from `OtaBegin.update_url_base`
-/// on cache miss). Triggered by an inbound HTTP-Range request from
-/// libswupdate's delta downloader hitting the daemon's loopback proxy.
-/// Range count is bounded daemon-side; companions just serve whatever
-/// arrives.
 @Serializable
 data class OtaAssetRange (
 	val updateId: String,
@@ -1685,20 +1570,11 @@ data class OtaAssetRange (
 	val ranges: List<RangeSpec>
 )
 
-/// Daemon-side cancel for an in-flight range request: libcurl gave up
-/// (timeout, OTA failed, daemon is shutting down). Companion stops the
-/// fragment stream for `request_id` and frees any resources it held
-/// open.
 @Serializable
 data class OtaAssetRangeAbandon (
 	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
 )
 
-/// Domain-error response to `OtaAssetRange`: the companion can't serve
-/// the requested ranges (asset unknown for this `update_id`, refetch
-/// from `update_url_base` failed, sha mismatch on refetched asset, etc).
-/// The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
-/// the running OTA fails.
 @Serializable
 data class OtaAssetRangeRejected (
 	val reason: String
@@ -1713,13 +1589,6 @@ data class RangePart (
 	val length: UInt
 )
 
-/// Successful response to `OtaAssetRange`. The companion has the asset
-/// (or refetched it from `update_url_base`) and serves the resolved
-/// ranges in `body`: small results inline, larger ones as a fragment
-/// stream whose offsets are stream-relative (0..sum of part lengths,
-/// parts concatenated in declaration order - the daemon's HTTP-Range
-/// writer maps them to absolute positions via `parts`). `total_size` is
-/// the asset's full byte length (for `Content-Range` totals).
 @Serializable
 data class OtaAssetRangeReply (
 	val totalSize: UInt,
@@ -1756,11 +1625,6 @@ enum class OtaKind(val string: String) {
 	InstalledWebapp("installedWebapp"),
 }
 
-/// Handle to a fragment stream, embedded in the typed message that
-/// opens a transfer (a pull reply or a push begin). The bytes travel
-/// out-of-band as `TransferFragment` events keyed by `id`; the
-/// transfer completes when `total_size` bytes have arrived. For pull
-/// replies `id` is the originating request id.
 @Serializable
 data class TransferRef (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -1768,19 +1632,12 @@ data class TransferRef (
 	val sha256: String? = null
 )
 
-/// Delta algorithm the daemon applies to reconstruct a full artifact from a
-/// pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
-/// is the currently-installed artifact.
 @Serializable
 enum class OtaPatchAlgorithm(val string: String) {
 	@SerialName("zstdPatchFrom")
 	ZstdPatchFrom("zstdPatchFrom"),
 }
 
-/// Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
-/// receiving it the daemon applies `algorithm` against its current artifact
-/// and verifies the reconstruction is `result_size` bytes hashing to
-/// `result_sha256` before it reaches staging.
 @Serializable
 data class OtaPatch (
 	val algorithm: OtaPatchAlgorithm,
@@ -1788,49 +1645,25 @@ data class OtaPatch (
 	val resultSize: UInt
 )
 
-/// Companion-initiated OTA: opens or resumes a streaming push of an
-/// update artifact identified by its sha256. The daemon responds with
-/// `OtaBeginAck { resume_from_offset }` (the byte offset the first
-/// `TransferFragment` should start at, 0 for fresh pushes) or
-/// `OtaBeginRejected { reason }`.
-/// 
-/// `kind` selects the backend. See `OtaKind`.
-/// 
-/// `update_id` is the sha256 of the artifact, hex-encoded. Content-
-/// addressed so resume across daemon restarts and retries-after-failure
-/// both work without companion-side state to track. `transfer.id` is
-/// minted per attempt and only correlates the fragment stream; the
-/// daemon binds it to the `update_id`-keyed partial, so a reconnect
-/// with a fresh transfer id still resumes the same bytes.
-/// 
-/// `update_url_base` is image-kind only: the server prefix the companion
-/// may refetch the .zck delta from on cache miss while serving range
-/// requests during the Writing phase. Ignored for non-image kinds.
-/// 
-/// `patch`, when present, marks `transfer` as a delta rather than the whole
-/// artifact: the daemon reconstructs against its currently-installed artifact
-/// of this `kind` before staging. Daemon-kind only today. Absent for full
-/// pushes.
 @Serializable
 data class OtaBegin (
 	val kind: OtaKind,
 	val updateId: String,
 	val updateUrlBase: String? = null,
 	val transfer: TransferRef,
-	val patch: OtaPatch? = null
+	val patch: OtaPatch? = null,
+	/// Provenance to record against the installed webapp, conventionally the
+	/// catalog source URL. `InstalledWebapp` only; authoritative, so `None`
+	/// clears any previously recorded provenance for that uuid. Capped at
+	/// `WEBAPP_PROVENANCE_MAX_LEN` bytes.
+	val provenance: String? = null
 )
 
-/// Successful response to `OtaBegin`. `resume_from_offset` is the byte
-/// offset the first `TransferFragment` should start at: 0 for fresh pushes, or
-/// the daemon's recovered partial length for a resume.
 @Serializable
 data class OtaBeginAck (
 	val resumeFromOffset: UInt
 )
 
-/// Domain-error response to `OtaBegin`: the daemon refuses to start
-/// or resume this push (already-running OTA, conflicting in-flight
-/// update_id with mismatched size/sha, budget exhausted).
 @Serializable
 data class OtaBeginRejected (
 	val reason: String
@@ -2175,9 +2008,6 @@ data class PhoneState (
 	val activeCalls: List<PhoneCall>
 )
 
-/// Typed reply payload for `PhoneStateGet` and the unsolicited
-/// announce-time snapshot the companion proactively pushes per the
-/// announce-on-connect rule.
 @Serializable
 data class PhoneStateReply (
 	val state: PhoneState
@@ -2193,10 +2023,6 @@ data class PlayContext (
 	val position: UInt? = null
 )
 
-/// Play a URI on the gateway. `context` lets the gateway honor playlist
-/// / album semantics for skip-next when both sides understand the
-/// scheme. The daemon parses the scheme and only forwards if a
-/// connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
 @Serializable
 data class PlayUri (
 	val uri: String,
@@ -2325,14 +2151,6 @@ data class PodcastEpisode (
 	val artworkId: String? = null
 )
 
-/// Full queue replacement from the companion. `order` is the upcoming
-/// queue as a list of item uris, current excluded; `items` carries full
-/// metadata for every uri in `order`, so the daemon rebuilds the queue
-/// from the snapshot alone. The companion sends one only when the upcoming
-/// list materially changes (context switch, reorder, add-to-queue), never
-/// on a plain advance - the daemon derives the post-advance next by
-/// locating the now-playing track in the held queue. Both sides drop this
-/// state on disconnect; no deltas, revisions, or resync to track.
 @Serializable
 data class QueueSnapshot (
 	val order: List<String>,
@@ -2375,8 +2193,7 @@ data class RecommendationsReply (
 	val result: RecommendationsResult
 )
 
-/// Correlation handle the responder echoes back so the requester's
-/// pending future can resolve.
+/// Correlation handle the responder echoes back so the requester's pending future can resolve.
 @Serializable
 data class ResponseMeta (
 	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
@@ -2403,8 +2220,6 @@ data class SeekTo (
 	val positionMs: UInt
 )
 
-/// `duration_ms = None` turns crossfade off; `Some(0)` is also off but
-/// distinguishes intent.
 @Serializable
 data class SetCrossfade (
 	val durationMs: UInt? = null
@@ -2425,8 +2240,6 @@ data class SetShuffle (
 	val on: Boolean
 )
 
-/// Set absolute playback rate. `1.0` is normal speed; gateways with
-/// limited speed support clamp to their nearest supported value.
 @Serializable
 data class SetSpeed (
 	val speed: Float
@@ -2547,26 +2360,18 @@ data class Track (
 	val saved: Boolean
 )
 
-/// Sender-side abort of an in-flight transfer (source lost the bytes,
-/// upstream fetch failed). The receiver drops the bound sink; partial
-/// disk state is kept for resumable transfers and discarded otherwise.
 @Serializable
 data class TransferAbandon (
 	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
 	val reason: String
 )
 
-/// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
 @Serializable
 data class TransferAck (
 	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
 	val received: UInt
 )
 
-/// One slice of a transfer's bytes. Variable-size and offset-addressed:
-/// fragments are sent in offset order on the transfer's priority lane,
-/// sized by the sender to its preemption budget. Receivers route by
-/// `transfer_id` to the sink bound when the transfer opened.
 @Serializable
 data class TransferFragment (
 	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
@@ -2579,10 +2384,6 @@ data class TtlRetention (
 	val seconds: UInt
 )
 
-/// Fire-and-forget TTS request. `id` is webapp-assigned (no request
-/// round-trip) and used for cancellation + matching back-to-back
-/// `TtsStarted`/`TtsEnded` events. `voice` selects from
-/// `AudioCapabilities.voices`; `None` uses the gateway's default.
 @Serializable
 data class Tts (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -2595,18 +2396,12 @@ data class TtsCancel (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
-/// Fired when the TTS request finished. `completed` is true when the
-/// full text was spoken; false when preempted, cancelled, or the
-/// companion dropped it.
 @Serializable
 data class TtsEnded (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val completed: Boolean
 )
 
-/// Fired when the companion has begun speaking the TTS request with this
-/// id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
-/// before speech started); webapps should treat both as best-effort.
 @Serializable
 data class TtsStarted (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
@@ -2661,12 +2456,6 @@ data class TunnelOpen (
 @Serializable
 object TunnelOpenReply
 
-/// The companion has resolved a captured utterance into an NluResolvedIntent
-/// (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
-/// catalog slots) and is asking the daemon to dispatch. The daemon's
-/// dispatcher picks the target: stock playback, active-webapp forward, or
-/// OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
-/// Dispatched` / `DispatchFailed`.
 @Serializable
 data class VoiceDispatch (
 	val resolved: NluResolvedIntent
@@ -2700,8 +2489,6 @@ enum class VoiceDispatchErrorCode(val string: String) {
 	Internal("internal"),
 }
 
-/// Terminal failure for an inbound `VoiceDispatch`. Daemon could not
-/// route the resolved intent; companion presents the appropriate UX.
 @Serializable
 data class VoiceDispatchFailed (
 	val code: VoiceDispatchErrorCode,
@@ -2726,11 +2513,6 @@ enum class VoiceDispatchTarget(val string: String) {
 	WebappSwitch("webappSwitch"),
 }
 
-/// Notification that an inbound `VoiceDispatch` was routed. `target`
-/// describes where the daemon sent it; the daemon's own action surfaces
-/// (Player events, WebappActive changes) are the source of truth for the
-/// effect - this event is purely so the companion can render confirmation
-/// UI without polling state.
 @Serializable
 data class VoiceDispatched (
 	val target: VoiceDispatchTarget,
@@ -2738,9 +2520,6 @@ data class VoiceDispatched (
 	val webappId: String? = null
 )
 
-/// PCM frame format the daemon ships in `Frame` payloads. Voice capture
-/// runs at a fixed format per session; format is announced once on
-/// `StreamOpen` and held constant through `StreamClose`.
 @Serializable
 data class VoiceFormat (
 	val sampleRateHz: UInt,
@@ -2748,10 +2527,6 @@ data class VoiceFormat (
 	val bitsPerSample: UShort
 )
 
-/// One PCM frame in an active capture session. Sent on the Bulk lane so
-/// it interleaves between Normal-priority traffic. `seq` increments
-/// from 0; gaps mean the daemon dropped frames under backpressure and
-/// the companion should treat them as silence rather than retransmit.
 @Serializable
 data class VoiceFrame (
 	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
@@ -2759,10 +2534,6 @@ data class VoiceFrame (
 	val pcm: ByteArray
 )
 
-/// Why the gateway is opening the mic. The daemon currently treats every
-/// reason the same (open and stream); the field is kept so future policy
-/// (hotword vs. assistant routing, VAD timeout per reason) has the shape
-/// it needs.
 @Serializable
 enum class VoiceCaptureReason(val string: String) {
 	@SerialName("pushToTalk")
@@ -2796,17 +2567,12 @@ data class VoiceStreamClose (
 	val reason: VoiceCloseReason
 )
 
-/// Daemon opens a capture session. The companion is expected to begin
-/// consuming `Frame`s with the same `stream_id` until a `StreamClose`
-/// for that id arrives.
 @Serializable
 data class VoiceStreamOpen (
 	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val format: VoiceFormat
 )
 
-/// Volume / mute snapshot. Fired on any change to either; webapps treat
-/// `level` as the canonical value.
 @Serializable
 data class VolumeChanged (
 	val level: Float,
@@ -2819,9 +2585,6 @@ data class WebappActive (
 	val name: String? = null
 )
 
-/// Event payload for an active-webapp change (any initiator). Distinct from
-/// `WebappActive` (a request response) so it carries the new app's declared
-/// art profile; the companion reads `art` directly to size its pushes.
 @Serializable
 data class WebappActiveChanged (
 	val id: ByteArray? = null,
@@ -2829,8 +2592,6 @@ data class WebappActiveChanged (
 	val art: ArtProfile? = null
 )
 
-/// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
-/// echoes what's now stored after the write (None for delete).
 @Serializable
 data class WebappConfigAck (
 	val key: String,
@@ -2872,16 +2633,12 @@ data class WebappConfigSet (
 	val value: String
 )
 
-/// Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
 @Serializable
 data class WebappDocAck (
 	val key: String,
 	val value: String? = null
 )
 
-/// Broadcast when the WEBAPP writes its doc namespace, so an open
-/// companion settings page sees device-side changes live. Gateway-origin
-/// writes are not echoed back (the writer already holds the ack).
 @Serializable
 data class WebappDocChanged (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -2904,7 +2661,6 @@ data class WebappDocGet (
 @Serializable
 data class WebappDocGetReply (
 	val key: String,
-	/// `None` when the key has never been written.
 	val value: String? = null
 )
 
@@ -2992,7 +2748,14 @@ data class WebappInfo (
 	val voiceGrammar: String? = null,
 	/// Declared art render sizes; the companion warms exactly these. `None`
 	/// means the canonical `{248, 96}` default applies.
-	val art: ArtProfile? = null
+	val art: ArtProfile? = null,
+	/// Opaque provenance token recorded at install time by whoever pushed
+	/// the bundle, conventionally the catalog source URL. The daemon stores
+	/// and returns it verbatim and never dereferences it; it exists so every
+	/// client agrees on which source an installed webapp came from, and can
+	/// tell an update apart from a different source claiming the same uuid.
+	/// `None` means unknown provenance (image-seeded examples, sideloads).
+	val provenance: String? = null
 )
 
 @Serializable
@@ -3029,7 +2792,6 @@ data class WebappManifest (
 	val overlays: OverlayProfile? = null
 )
 
-/// Which bundle file a `WebappResource` request targets.
 @Serializable
 enum class WebappResourceKind(val string: String) {
 	@SerialName("icon")
@@ -3038,10 +2800,6 @@ enum class WebappResourceKind(val string: String) {
 	Settings("settings"),
 }
 
-/// On-demand fetch of a webapp bundle resource (icon bytes, companion
-/// settings page). `have` carries the sha256 the requester already
-/// caches; a match returns a bodyless reply so unchanged resources
-/// never re-cross the link.
 @Serializable
 data class WebappResource (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -3049,9 +2807,6 @@ data class WebappResource (
 	val have: String? = null
 )
 
-/// Reply to `WebappResource`. `sha256` is the current content hash;
-/// `body` is absent when the requester's `have` already matched (its
-/// cache is current). Large bodies stream as fragments per `TransferBody`.
 @Serializable
 data class WebappResourceReply (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
@@ -3276,11 +3031,6 @@ sealed class BridgeToGatewayPhoneMsg {
 	object StateGet: BridgeToGatewayPhoneMsg()
 }
 
-/// Bridge -> gateway player verbs. The companion-side SDK dispatches each
-/// to its native player integration (Spotify SDK, Apple Music SDK,
-/// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` - daemon never forwards a URI no
-/// connected gateway claims.
 @Serializable(with = BridgeToGatewayPlayerMsgSerializer::class)
 sealed class BridgeToGatewayPlayerMsg {
 	@Serializable
@@ -3411,24 +3161,18 @@ sealed class BridgeToGatewayVoiceMsg {
 
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
 sealed class BridgeToGatewayWebappMsg {
-	/// response to List
 	@Serializable
 	@SerialName("webapps")
 	data class Webapps(val data: WebappList): BridgeToGatewayWebappMsg()
-	/// response to GetActive, and event broadcast on switch
 	@Serializable
 	@SerialName("active")
 	data class Active(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// response to SwitchTo indicating the new active app
 	@Serializable
 	@SerialName("switched")
 	data class Switched(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// response to Uninstall carrying the active app after the uninstall settled
 	@Serializable
 	@SerialName("uninstalled")
 	data class Uninstalled(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// domain-level error response for any webapp op (e.g. WebappNotFound,
-	/// CannotUninstallBuiltin, IdReserved)
 	@Serializable
 	@SerialName("webappError")
 	data class WebappError(val data: com.bridgething.schema.WebappError): BridgeToGatewayWebappMsg()
@@ -3453,20 +3197,12 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("docAck")
 	data class DocAck(val data: WebappDocAck): BridgeToGatewayWebappMsg()
-	/// event: the active webapp wrote/deleted a doc key
 	@Serializable
 	@SerialName("docChanged")
 	data class DocChanged(val data: WebappDocChanged): BridgeToGatewayWebappMsg()
-	/// event: a webapp install (`OtaKind::InstalledWebapp`) completed
-	/// successfully; carries the installed webapp's metadata. The terminal
-	/// signal for an install; failures surface as `OtaError` on the system
-	/// surface.
 	@Serializable
 	@SerialName("webappInstalled")
 	data class WebappInstalled(val data: WebappInfo): BridgeToGatewayWebappMsg()
-	/// event: the active webapp changed (any initiator - hub tap, gateway
-	/// switchTo, uninstall fallback). carries the new app's id/name + declared
-	/// art profile so the companion sizes art pushes to what it renders.
 	@Serializable
 	@SerialName("activeChanged")
 	data class ActiveChanged(val data: WebappActiveChanged): BridgeToGatewayWebappMsg()
@@ -3511,10 +3247,6 @@ sealed class GatewayToBridgeAudioMsg {
 	data class VolumeChanged(val data: com.bridgething.schema.VolumeChanged): GatewayToBridgeAudioMsg()
 }
 
-/// Companion declares per-scope authority. `Release` is the "stop
-/// preferring my data for this scope" signal. Non-now-playing claims
-/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
-/// hold until release / disconnect / app-change arbitration.
 @Serializable(with = GatewayToBridgeAuthorityMsgSerializer::class)
 sealed class GatewayToBridgeAuthorityMsg {
 	@Serializable
@@ -3525,11 +3257,6 @@ sealed class GatewayToBridgeAuthorityMsg {
 	data class Release(val data: AuthorityRelease): GatewayToBridgeAuthorityMsg()
 }
 
-/// Companion-driven capabilities surface. The companion sends `Announce`
-/// immediately on session-up (before any other surface activity) and
-/// re-sends on any change. The daemon's PeerTracker flips
-/// `companion_active` on receipt and seeds initial snapshots for every
-/// surface where the companion is claiming authority.
 @Serializable(with = GatewayToBridgeCapabilitiesMsgSerializer::class)
 sealed class GatewayToBridgeCapabilitiesMsg {
 	@Serializable
@@ -3670,12 +3397,6 @@ sealed class GatewayToBridgePhoneMsg {
 	data class StateReply(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
 }
 
-/// Gateway -> bridge player events. The companion is authoritative for
-/// now-playing: `Snapshot` carries the full player state and is the sole
-/// metadata/playback source (driven by the dealer push). `QueueChanged`
-/// carries a full queue replacement when the upcoming list materially
-/// changes; the daemon derives the post-advance next from the held
-/// snapshot, so a plain advance costs no queue traffic.
 @Serializable(with = GatewayToBridgePlayerMsgSerializer::class)
 sealed class GatewayToBridgePlayerMsg {
 	@Serializable
@@ -3729,10 +3450,6 @@ sealed class GatewayToBridgeSystemMsg {
 	data class KeepaliveAck(val data: com.bridgething.schema.KeepaliveAck): GatewayToBridgeSystemMsg()
 }
 
-/// Companion-driven time surface. Companion sends `Snapshot` at announce
-/// (announce-on-connect rule for any surface where companion claims
-/// authority - Time always seeds) and again on tz / locale / clock-skew
-/// changes.
 @Serializable(with = GatewayToBridgeTimeMsgSerializer::class)
 sealed class GatewayToBridgeTimeMsg {
 	@Serializable
@@ -3784,24 +3501,18 @@ sealed class GatewayToBridgeVoiceMsg {
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)
 sealed class GatewayToBridgeWebappMsg {
-	/// request: bridge replies with `Webapps`
 	@Serializable
 	@SerialName("list")
 	object List: GatewayToBridgeWebappMsg()
-	/// request: bridge replies with `Active`
 	@Serializable
 	@SerialName("getActive")
 	object GetActive: GatewayToBridgeWebappMsg()
-	/// command: switch the kiosk to the named webapp; bridge replies with `Switched`
 	@Serializable
 	@SerialName("switchTo")
 	data class SwitchTo(val data: WebappSwitchTo): GatewayToBridgeWebappMsg()
-	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
-	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	@Serializable
 	@SerialName("uninstall")
 	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()
-	/// request: bridge replies with `Resource`
 	@Serializable
 	@SerialName("resource")
 	data class Resource(val data: WebappResource): GatewayToBridgeWebappMsg()
@@ -3967,6 +3678,12 @@ data class WebappErrorExtractedTooLargeInner (
 	val max_bytes: UInt
 )
 
+/// Generated type representing the anonymous struct variant `ProvenanceTooLong` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorProvenanceTooLongInner (
+	val max_bytes: UInt
+)
+
 /// Generated type representing the anonymous struct variant `ZipMalformed` of the `WebappError` Rust enum
 @Serializable
 data class WebappErrorZipMalformedInner (
@@ -4032,6 +3749,10 @@ sealed class WebappError {
 	@Serializable
 	@SerialName("extractedTooLarge")
 	data class ExtractedTooLarge(val data: WebappErrorExtractedTooLargeInner): WebappError()
+	/// Install carried a provenance string over `WEBAPP_PROVENANCE_MAX_LEN`.
+	@Serializable
+	@SerialName("provenanceTooLong")
+	data class ProvenanceTooLong(val data: WebappErrorProvenanceTooLongInner): WebappError()
 	/// Zip extraction failed: corrupt archive, unsafe entry names, etc.
 	@Serializable
 	@SerialName("zipMalformed")
@@ -4080,32 +3801,22 @@ data class WireErrorHandlerFailedInner (
 	val reason: String
 )
 
-/// Protocol-level failure the responder ships when a request could not be
-/// reached or dispatched. Carried by the `Error` variant on every
-/// `*MsgData` enum.
-/// 
-/// Domain-level errors (predictable, op-specific failures the caller may
-/// want to recover from) live inside the per-op response variant, not
-/// here.
+/// Protocol-level failure the responder ships when a request could not be reached or dispatched
 @Serializable(with = WireErrorSerializer::class)
 sealed class WireError {
-	/// Receiver does not recognize this request variant, or recognizes it
-	/// but cannot map the request to any operation it serves.
+	/// Receiver does not recognize this request variant, or recognizes it but cannot map the request to any operation it serves
 	@Serializable
 	@SerialName("unsupported")
 	object Unsupported: WireError()
-	/// Receiver recognizes the variant but the backend is not yet wired.
-	/// Distinct from `Unsupported` so consumers can tell "you have the
-	/// wrong daemon version" from "this surface exists but is not yet
-	/// implemented".
+	/// Receiver recognizes the variant but the backend is not yet wired
 	@Serializable
 	@SerialName("unimplemented")
 	object Unimplemented: WireError()
-	/// Receiver could not decode or validate the request payload.
+	/// Receiver could not decode or validate the request payload
 	@Serializable
 	@SerialName("malformed")
 	data class Malformed(val data: WireErrorMalformedInner): WireError()
-	/// Unexpected internal error while handling the request.
+	/// Unexpected internal error while handling the request
 	@Serializable
 	@SerialName("handlerFailed")
 	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()

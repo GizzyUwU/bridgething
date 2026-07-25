@@ -1,6 +1,6 @@
 {
   "name": "@bridgething/gateway",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Typed gateway that drives a bridgething Spotify Car Thing over a pluggable transport.",
   "license": "MIT",
   "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",

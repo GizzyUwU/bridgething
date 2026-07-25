@@ -46,8 +46,6 @@ public struct Artist: Codable, Sendable {
 	}
 }
 
-/// Invalidate the daemon-side cached asset for `id`. The companion's
-/// escape hatch when it knows an asset it previously served is stale.
 public struct AssetClear: Codable, Sendable {
 	public let id: String
 
@@ -56,11 +54,6 @@ public struct AssetClear: Codable, Sendable {
 	}
 }
 
-/// Standard embedding for a byte payload that may or may not warrant a
-/// fragment stream. Senders pick by size: a small payload rides inline
-/// in the carrying message (one frame, no machinery); a large one
-/// declares a stream and fragments follow. Receivers resolve both arms
-/// through one path.
 public enum TransferBody: Codable, Sendable {
 	case inline(Data)
 	case stream(TransferRef)
@@ -106,11 +99,6 @@ public enum TransferBody: Codable, Sendable {
 	}
 }
 
-/// Typed terminal response for an `AssetRequest`. Small assets arrive
-/// inline; larger ones declare a stream whose ref id is the originating
-/// request id, with the bytes following as `TransferFragment` events on
-/// the bulk lane (so now-playing traffic preempts them between
-/// fragments).
 public struct AssetGotReply: Codable, Sendable {
 	public let id: String
 	public let mime: String?
@@ -123,8 +111,6 @@ public struct AssetGotReply: Codable, Sendable {
 	}
 }
 
-/// Domain error response for an `AssetRequest`: the companion does not
-/// have the requested asset.
 public struct AssetNotFoundReply: Codable, Sendable {
 	public let id: String
 
@@ -290,9 +276,7 @@ public struct BridgeThingMeta: Codable, Sendable {
 	}
 }
 
-/// Intent the sender signals for each message. Lets the receiver know
-/// whether to send back a typed response, treat it as a one-way command,
-/// or pair it against a pending request.
+/// Intent the sender signals for each message
 public enum MsgMeta: Codable, Sendable {
 	case command
 	case event
@@ -367,9 +351,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	case error(WireError)
-	/// response, command received and won't have a completion
 	case ack
-	/// response, command has been completed
 	case done
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -561,9 +543,6 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 }
 
 /// bridgething -> gateway
-/// messages from bridgething to the gateway (mobile or desktop app).
-/// 
-/// these messages will pass over bluetooth.
 public struct BridgeToGatewayMsg: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let meta: MsgMeta
@@ -860,9 +839,6 @@ public struct CommunicationsState: Codable, Sendable {
 	}
 }
 
-/// Companion-side cellular / call-control snapshot. Announce-on-connect
-/// pattern: companion sends an initial `CommunicationsSnapshot` after
-/// announce, then re-sends on any field change.
 public struct CommunicationsSnapshot: Codable, Sendable {
 	public let state: CommunicationsState
 
@@ -884,8 +860,6 @@ public struct ConfigEntry: Codable, Sendable {
 	}
 }
 
-/// Resolved metadata for a single context uri (playlist / album / show /
-/// artist), used to populate a stock preset's name + cover art.
 public struct ContextResolveReply: Codable, Sendable {
 	public let name: String?
 	public let artworkId: String?
@@ -921,16 +895,10 @@ public struct Device: Codable, Sendable {
 	}
 }
 
-/// Gateway-side read of the device nickname. Returns the current value
-/// (or None when unset). Daemon also broadcasts `DeviceNicknameChanged`
-/// to gateway peers on mutation so the companion stays in sync without
-/// polling.
 public struct DeviceGetNickname: Codable, Sendable {
 	public init() {}
 }
 
-/// Domain-error response to `DeviceSetNickname`: nickname rejected at
-/// the daemon edge (too long, contains nul, etc).
 public struct DeviceNicknameRejected: Codable, Sendable {
 	public let reason: String
 
@@ -939,9 +907,6 @@ public struct DeviceNicknameRejected: Codable, Sendable {
 	}
 }
 
-/// Current device nickname. Reply to `DeviceGetNickname` and
-/// `DeviceSetNickname`, plus the event payload for
-/// `DeviceNicknameChanged` broadcasts.
 public struct DeviceNicknameReply: Codable, Sendable {
 	public let nickname: String?
 
@@ -950,9 +915,6 @@ public struct DeviceNicknameReply: Codable, Sendable {
 	}
 }
 
-/// Set the device nickname. Empty string clears (treated as None). The
-/// daemon broadcasts `DeviceNicknameChanged` to gateway + client peers
-/// after writing the KV slot. Length-capped at 64 chars.
 public struct DeviceSetNickname: Codable, Sendable {
 	public let nickname: String
 
@@ -1004,8 +966,6 @@ public struct DocEntry: Codable, Sendable {
 	}
 }
 
-/// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
-/// surface as `AudioError::EarconNotFound`.
 public struct Earcon: Codable, Sendable {
 	public let name: String
 
@@ -1028,9 +988,6 @@ public struct EnumField: Codable, Sendable {
 	}
 }
 
-/// Fired when the favorited / liked status of an item changes -
-/// regardless of whether it was driven by the daemon (FavoritesToggle/Set
-/// command) or by the user mutating it on the gateway-side app directly.
 public struct FavoriteChanged: Codable, Sendable {
 	public let uri: String
 	public let liked: Bool
@@ -1041,8 +998,6 @@ public struct FavoriteChanged: Codable, Sendable {
 	}
 }
 
-/// Batch favorites-contains reply. `liked` is index-aligned with the
-/// request's `uris`.
 public struct FavoritesContainsReply: Codable, Sendable {
 	public let liked: [Bool]
 
@@ -1212,11 +1167,6 @@ public struct FavoritesSet: Codable, Sendable {
 	}
 }
 
-/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
-/// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced - companion logs
-/// and best-efforts the rest. Webapps observing partial success listen
-/// for `FavoriteChanged` events.
 public struct FavoritesSetMany: Codable, Sendable {
 	public let entries: [FavoritesSet]
 
@@ -1471,9 +1421,6 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 }
 
 /// gateway -> bridgething
-/// messages from the gateway (mobile or desktop app) to bridgething.
-/// 
-/// these messages will pass over bluetooth.
 public struct GatewayToBridgeMsg: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let meta: MsgMeta
@@ -1556,9 +1503,6 @@ public struct GeoGetOnceReply: Codable, Sendable {
 	}
 }
 
-/// Bridge -> companion watch forward. The daemon aggregates webapp
-/// watches and re-issues this with the most-demanding accuracy +
-/// fastest interval. `min_interval_ms = 0` lets the gateway pick.
 public struct GeoWatch: Codable, Sendable {
 	public let accuracy: GeoAccuracy
 	public let minIntervalMs: UInt32
@@ -1594,7 +1538,6 @@ public struct HttpHeader: Codable, Sendable {
 	}
 }
 
-/// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
 public struct KeepaliveAck: Codable, Sendable {
 	public let seq: UInt32
 
@@ -1603,7 +1546,6 @@ public struct KeepaliveAck: Codable, Sendable {
 	}
 }
 
-/// Periodic liveness probe the daemon sends over the iAP2 EA link.
 public struct KeepalivePing: Codable, Sendable {
 	public let seq: UInt32
 
@@ -1613,14 +1555,10 @@ public struct KeepalivePing: Codable, Sendable {
 }
 
 public struct LibraryBrowseRequest: Codable, Sendable {
-	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	public let nodeId: String?
 	public let limit: UInt32
 	public let offset: UInt32
-	/// Root only: cap on the number of folders returned. `None` returns every folder.
 	public let sections: UInt32?
-	/// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
-	/// hydration entirely and returns a cheap index of node ids, titles, and totals.
 	public let preview: UInt32?
 
 	public init(nodeId: String?, limit: UInt32, offset: UInt32, sections: UInt32?, preview: UInt32?) {
@@ -1632,17 +1570,11 @@ public struct LibraryBrowseRequest: Codable, Sendable {
 	}
 }
 
-/// Which slice of the user's library changed, so a consumer can scope a
-/// refetch. The daemon invalidates its home cache on any scope; the
-/// distinction is informational for richer webapp consumers.
 public enum LibraryScope: String, Codable, Sendable {
 	case saved
 	case playlists
 }
 
-/// Fired when the user mutates their library on the gateway-side app while
-/// connected (a like, a playlist edit) and the change did NOT originate from a
-/// daemon command - so the daemon must invalidate any cached browse / home view.
 public struct LibraryChanged: Codable, Sendable {
 	public let scope: LibraryScope
 
@@ -1741,9 +1673,6 @@ public struct LibraryErrorReply: Codable, Sendable {
 	}
 }
 
-/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
-/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
-/// the request `uris`.
 public struct LibraryFavoritesContainsRequest: Codable, Sendable {
 	public let uris: [String]
 
@@ -1762,10 +1691,6 @@ public struct LibraryFavoritesListRequest: Codable, Sendable {
 	}
 }
 
-/// Recommendations seeded by up to 5 items. The daemon caps the seed
-/// list at the platform-permissive limit (Spotify hard-caps at 5
-/// combined seeds across tracks/artists/genres). Gateway decides how to
-/// distribute seeds across its native API surfaces.
 public struct LibraryRecommendationsRequest: Codable, Sendable {
 	public let seeds: [ItemRef]
 	public let kind: ItemKind?
@@ -1780,9 +1705,6 @@ public struct LibraryRecommendationsRequest: Codable, Sendable {
 	}
 }
 
-/// Resolve a single context uri (playlist / album / show / artist) to its
-/// name + cover art. Used to populate a stock preset slot the device only
-/// knows by `context_uri`.
 public struct LibraryResolveContextRequest: Codable, Sendable {
 	public let uri: String
 
@@ -1840,9 +1762,6 @@ public enum LogSource: String, Codable, Sendable {
 	case all
 }
 
-/// Open a streaming daemon-log subscription over the gateway. The daemon
-/// returns an opaque token; the companion releases it via `LogsUnsubscribe`.
-/// Scoped to the gateway peer - auto-released when the peer disconnects.
 public struct LogsSubscribe: Codable, Sendable {
 	public let source: LogSource
 	public let levels: [LogLevel]
@@ -1855,8 +1774,6 @@ public struct LogsSubscribe: Codable, Sendable {
 	}
 }
 
-/// Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
-/// `LogsUnsubscribe`.
 public struct LogsSubscribeReply: Codable, Sendable {
 	public let token: String
 
@@ -1865,8 +1782,6 @@ public struct LogsSubscribeReply: Codable, Sendable {
 	}
 }
 
-/// Pull a one-shot batch of recent daemon log entries over the gateway.
-/// Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
 public struct LogsTail: Codable, Sendable {
 	public let source: LogSource
 	public let levels: [LogLevel]
@@ -1881,7 +1796,6 @@ public struct LogsTail: Codable, Sendable {
 	}
 }
 
-/// One-shot reply to a gateway `LogsTail`.
 public struct LogsTailReply: Codable, Sendable {
 	public let entries: [LogEntry]
 
@@ -1928,10 +1842,6 @@ public struct LyricsErrorReply: Codable, Sendable {
 	}
 }
 
-/// Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
-/// to completion without a hit (e.g. lrclib 404, no fallback configured)
-/// and is distinct from `LyricsErrorReply` which signals a transient
-/// failure (network, parse, resolver-internal error).
 public struct LyricsReply: Codable, Sendable {
 	public let lyrics: Lyrics?
 
@@ -1940,10 +1850,6 @@ public struct LyricsReply: Codable, Sendable {
 	}
 }
 
-/// Identifies a track for lyrics lookup. Different resolvers consume
-/// different subsets: lrclib does signature lookup (artist + track +
-/// album + duration), other resolvers may use ISRC or platform-specific
-/// ids. Populate what's available; resolvers ignore the rest.
 public struct TrackIdentity: Codable, Sendable {
 	public let artist: String
 	public let track: String
@@ -2760,9 +2666,6 @@ public struct NumberField: Codable, Sendable {
 	}
 }
 
-/// Drop the daemon-side partial for `update_id`. After `CancelUpdate`
-/// keeps the partial for resume; `OtaAbandon` is the explicit clean-up
-/// when the companion no longer wants to retry this artifact.
 public struct OtaAbandon: Codable, Sendable {
 	public let updateId: String
 
@@ -2771,18 +2674,6 @@ public struct OtaAbandon: Codable, Sendable {
 	}
 }
 
-/// Commit every staged bandaid piece (daemon / hub / stock) as one
-/// transaction, then restart bridgething.service once. Bandaid pushes
-/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
-/// completion (phase reaches `Writing`/100, the daemon does NOT restart); the
-/// companion sends `OtaActivate` after the final piece to swap them all
-/// live with a single restart. Image OTAs never use this -- they reboot
-/// at write completion.
-/// 
-/// `expected` is the set of `update_id`s the companion staged this
-/// batch. The daemon errors the activate if its staged set does not
-/// match exactly, which guards a desync where a daemon crash dropped the
-/// in-memory staged set between staging and activation.
 public struct OtaActivate: Codable, Sendable {
 	public let expected: [String]
 
@@ -2807,12 +2698,6 @@ public struct RangeSpec: Codable, Sendable {
 	}
 }
 
-/// Daemon asks the pinned companion to serve byte ranges from an asset
-/// it should have cached (and can refetch from `OtaBegin.update_url_base`
-/// on cache miss). Triggered by an inbound HTTP-Range request from
-/// libswupdate's delta downloader hitting the daemon's loopback proxy.
-/// Range count is bounded daemon-side; companions just serve whatever
-/// arrives.
 public struct OtaAssetRange: Codable, Sendable {
 	public let updateId: String
 	public let asset: String
@@ -2825,10 +2710,6 @@ public struct OtaAssetRange: Codable, Sendable {
 	}
 }
 
-/// Daemon-side cancel for an in-flight range request: libcurl gave up
-/// (timeout, OTA failed, daemon is shutting down). Companion stops the
-/// fragment stream for `request_id` and frees any resources it held
-/// open.
 public struct OtaAssetRangeAbandon: Codable, Sendable {
 	@MsgpackUuid public var requestId: UUID
 
@@ -2837,11 +2718,6 @@ public struct OtaAssetRangeAbandon: Codable, Sendable {
 	}
 }
 
-/// Domain-error response to `OtaAssetRange`: the companion can't serve
-/// the requested ranges (asset unknown for this `update_id`, refetch
-/// from `update_url_base` failed, sha mismatch on refetched asset, etc).
-/// The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
-/// the running OTA fails.
 public struct OtaAssetRangeRejected: Codable, Sendable {
 	public let reason: String
 
@@ -2863,13 +2739,6 @@ public struct RangePart: Codable, Sendable {
 	}
 }
 
-/// Successful response to `OtaAssetRange`. The companion has the asset
-/// (or refetched it from `update_url_base`) and serves the resolved
-/// ranges in `body`: small results inline, larger ones as a fragment
-/// stream whose offsets are stream-relative (0..sum of part lengths,
-/// parts concatenated in declaration order - the daemon's HTTP-Range
-/// writer maps them to absolute positions via `parts`). `total_size` is
-/// the asset's full byte length (for `Content-Range` totals).
 public struct OtaAssetRangeReply: Codable, Sendable {
 	public let totalSize: UInt32
 	public let parts: [RangePart]
@@ -2906,11 +2775,6 @@ public enum OtaKind: String, Codable, Sendable {
 	case installedWebapp
 }
 
-/// Handle to a fragment stream, embedded in the typed message that
-/// opens a transfer (a pull reply or a push begin). The bytes travel
-/// out-of-band as `TransferFragment` events keyed by `id`; the
-/// transfer completes when `total_size` bytes have arrived. For pull
-/// replies `id` is the originating request id.
 public struct TransferRef: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let totalSize: UInt32
@@ -2923,17 +2787,10 @@ public struct TransferRef: Codable, Sendable {
 	}
 }
 
-/// Delta algorithm the daemon applies to reconstruct a full artifact from a
-/// pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
-/// is the currently-installed artifact.
 public enum OtaPatchAlgorithm: String, Codable, Sendable {
 	case zstdPatchFrom
 }
 
-/// Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
-/// receiving it the daemon applies `algorithm` against its current artifact
-/// and verifies the reconstruction is `result_size` bytes hashing to
-/// `result_sha256` before it reaches staging.
 public struct OtaPatch: Codable, Sendable {
 	public let algorithm: OtaPatchAlgorithm
 	public let resultSha256: String
@@ -2946,48 +2803,28 @@ public struct OtaPatch: Codable, Sendable {
 	}
 }
 
-/// Companion-initiated OTA: opens or resumes a streaming push of an
-/// update artifact identified by its sha256. The daemon responds with
-/// `OtaBeginAck { resume_from_offset }` (the byte offset the first
-/// `TransferFragment` should start at, 0 for fresh pushes) or
-/// `OtaBeginRejected { reason }`.
-/// 
-/// `kind` selects the backend. See `OtaKind`.
-/// 
-/// `update_id` is the sha256 of the artifact, hex-encoded. Content-
-/// addressed so resume across daemon restarts and retries-after-failure
-/// both work without companion-side state to track. `transfer.id` is
-/// minted per attempt and only correlates the fragment stream; the
-/// daemon binds it to the `update_id`-keyed partial, so a reconnect
-/// with a fresh transfer id still resumes the same bytes.
-/// 
-/// `update_url_base` is image-kind only: the server prefix the companion
-/// may refetch the .zck delta from on cache miss while serving range
-/// requests during the Writing phase. Ignored for non-image kinds.
-/// 
-/// `patch`, when present, marks `transfer` as a delta rather than the whole
-/// artifact: the daemon reconstructs against its currently-installed artifact
-/// of this `kind` before staging. Daemon-kind only today. Absent for full
-/// pushes.
 public struct OtaBegin: Codable, Sendable {
 	public let kind: OtaKind
 	public let updateId: String
 	public let updateUrlBase: String?
 	public let transfer: TransferRef
 	public let patch: OtaPatch?
+	/// Provenance to record against the installed webapp, conventionally the
+	/// catalog source URL. `InstalledWebapp` only; authoritative, so `None`
+	/// clears any previously recorded provenance for that uuid. Capped at
+	/// `WEBAPP_PROVENANCE_MAX_LEN` bytes.
+	public let provenance: String?
 
-	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef, patch: OtaPatch?) {
+	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef, patch: OtaPatch?, provenance: String?) {
 		self.kind = kind
 		self.updateId = updateId
 		self.updateUrlBase = updateUrlBase
 		self.transfer = transfer
 		self.patch = patch
+		self.provenance = provenance
 	}
 }
 
-/// Successful response to `OtaBegin`. `resume_from_offset` is the byte
-/// offset the first `TransferFragment` should start at: 0 for fresh pushes, or
-/// the daemon's recovered partial length for a resume.
 public struct OtaBeginAck: Codable, Sendable {
 	public let resumeFromOffset: UInt32
 
@@ -2996,9 +2833,6 @@ public struct OtaBeginAck: Codable, Sendable {
 	}
 }
 
-/// Domain-error response to `OtaBegin`: the daemon refuses to start
-/// or resume this push (already-running OTA, conflicting in-flight
-/// update_id with mismatched size/sha, budget exhausted).
 public struct OtaBeginRejected: Codable, Sendable {
 	public let reason: String
 
@@ -3443,9 +3277,6 @@ public struct PhoneState: Codable, Sendable {
 	}
 }
 
-/// Typed reply payload for `PhoneStateGet` and the unsolicited
-/// announce-time snapshot the companion proactively pushes per the
-/// announce-on-connect rule.
 public struct PhoneStateReply: Codable, Sendable {
 	public let state: PhoneState
 
@@ -3468,10 +3299,6 @@ public struct PlayContext: Codable, Sendable {
 	}
 }
 
-/// Play a URI on the gateway. `context` lets the gateway honor playlist
-/// / album semantics for skip-next when both sides understand the
-/// scheme. The daemon parses the scheme and only forwards if a
-/// connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
 public struct PlayUri: Codable, Sendable {
 	public let uri: String
 	public let context: PlayContext?
@@ -3660,14 +3487,6 @@ public struct PodcastEpisode: Codable, Sendable {
 	}
 }
 
-/// Full queue replacement from the companion. `order` is the upcoming
-/// queue as a list of item uris, current excluded; `items` carries full
-/// metadata for every uri in `order`, so the daemon rebuilds the queue
-/// from the snapshot alone. The companion sends one only when the upcoming
-/// list materially changes (context switch, reorder, add-to-queue), never
-/// on a plain advance - the daemon derives the post-advance next by
-/// locating the now-playing track in the held queue. Both sides drop this
-/// state on disconnect; no deltas, revisions, or resync to track.
 public struct QueueSnapshot: Codable, Sendable {
 	public let order: [String]
 	public let items: [QueueItem]
@@ -3762,8 +3581,7 @@ public struct RecommendationsReply: Codable, Sendable {
 	}
 }
 
-/// Correlation handle the responder echoes back so the requester's
-/// pending future can resolve.
+/// Correlation handle the responder echoes back so the requester's pending future can resolve.
 public struct ResponseMeta: Codable, Sendable {
 	@MsgpackUuid public var requestId: UUID
 
@@ -3805,8 +3623,6 @@ public struct SeekTo: Codable, Sendable {
 	}
 }
 
-/// `duration_ms = None` turns crossfade off; `Some(0)` is also off but
-/// distinguishes intent.
 public struct SetCrossfade: Codable, Sendable {
 	public let durationMs: UInt32?
 
@@ -3839,8 +3655,6 @@ public struct SetShuffle: Codable, Sendable {
 	}
 }
 
-/// Set absolute playback rate. `1.0` is normal speed; gateways with
-/// limited speed support clamp to their nearest supported value.
 public struct SetSpeed: Codable, Sendable {
 	public let speed: Float
 
@@ -4026,9 +3840,6 @@ public struct Track: Codable, Sendable {
 	}
 }
 
-/// Sender-side abort of an in-flight transfer (source lost the bytes,
-/// upstream fetch failed). The receiver drops the bound sink; partial
-/// disk state is kept for resumable transfers and discarded otherwise.
 public struct TransferAbandon: Codable, Sendable {
 	@MsgpackUuid public var transferId: UUID
 	public let reason: String
@@ -4039,7 +3850,6 @@ public struct TransferAbandon: Codable, Sendable {
 	}
 }
 
-/// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
 public struct TransferAck: Codable, Sendable {
 	@MsgpackUuid public var transferId: UUID
 	public let received: UInt32
@@ -4050,10 +3860,6 @@ public struct TransferAck: Codable, Sendable {
 	}
 }
 
-/// One slice of a transfer's bytes. Variable-size and offset-addressed:
-/// fragments are sent in offset order on the transfer's priority lane,
-/// sized by the sender to its preemption budget. Receivers route by
-/// `transfer_id` to the sink bound when the transfer opened.
 public struct TransferFragment: Codable, Sendable {
 	@MsgpackUuid public var transferId: UUID
 	public let offset: UInt32
@@ -4074,10 +3880,6 @@ public struct TtlRetention: Codable, Sendable {
 	}
 }
 
-/// Fire-and-forget TTS request. `id` is webapp-assigned (no request
-/// round-trip) and used for cancellation + matching back-to-back
-/// `TtsStarted`/`TtsEnded` events. `voice` selects from
-/// `AudioCapabilities.voices`; `None` uses the gateway's default.
 public struct Tts: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let text: String
@@ -4098,9 +3900,6 @@ public struct TtsCancel: Codable, Sendable {
 	}
 }
 
-/// Fired when the TTS request finished. `completed` is true when the
-/// full text was spoken; false when preempted, cancelled, or the
-/// companion dropped it.
 public struct TtsEnded: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let completed: Bool
@@ -4111,9 +3910,6 @@ public struct TtsEnded: Codable, Sendable {
 	}
 }
 
-/// Fired when the companion has begun speaking the TTS request with this
-/// id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
-/// before speech started); webapps should treat both as best-effort.
 public struct TtsStarted: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 
@@ -4227,12 +4023,6 @@ public struct TunnelOpenReply: Codable, Sendable {
 	public init() {}
 }
 
-/// The companion has resolved a captured utterance into an NluResolvedIntent
-/// (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
-/// catalog slots) and is asking the daemon to dispatch. The daemon's
-/// dispatcher picks the target: stock playback, active-webapp forward, or
-/// OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
-/// Dispatched` / `DispatchFailed`.
 public struct VoiceDispatch: Codable, Sendable {
 	public let resolved: NluResolvedIntent
 
@@ -4262,8 +4052,6 @@ public enum VoiceDispatchErrorCode: String, Codable, Sendable {
 	case `internal`
 }
 
-/// Terminal failure for an inbound `VoiceDispatch`. Daemon could not
-/// route the resolved intent; companion presents the appropriate UX.
 public struct VoiceDispatchFailed: Codable, Sendable {
 	public let code: VoiceDispatchErrorCode
 	public let intent: String
@@ -4290,11 +4078,6 @@ public enum VoiceDispatchTarget: String, Codable, Sendable {
 	case webappSwitch
 }
 
-/// Notification that an inbound `VoiceDispatch` was routed. `target`
-/// describes where the daemon sent it; the daemon's own action surfaces
-/// (Player events, WebappActive changes) are the source of truth for the
-/// effect - this event is purely so the companion can render confirmation
-/// UI without polling state.
 public struct VoiceDispatched: Codable, Sendable {
 	public let target: VoiceDispatchTarget
 	public let intent: String
@@ -4307,9 +4090,6 @@ public struct VoiceDispatched: Codable, Sendable {
 	}
 }
 
-/// PCM frame format the daemon ships in `Frame` payloads. Voice capture
-/// runs at a fixed format per session; format is announced once on
-/// `StreamOpen` and held constant through `StreamClose`.
 public struct VoiceFormat: Codable, Sendable {
 	public let sampleRateHz: UInt32
 	public let channels: UInt16
@@ -4322,10 +4102,6 @@ public struct VoiceFormat: Codable, Sendable {
 	}
 }
 
-/// One PCM frame in an active capture session. Sent on the Bulk lane so
-/// it interleaves between Normal-priority traffic. `seq` increments
-/// from 0; gaps mean the daemon dropped frames under backpressure and
-/// the companion should treat them as silence rather than retransmit.
 public struct VoiceFrame: Codable, Sendable {
 	@MsgpackUuid public var streamId: UUID
 	public let seq: UInt32
@@ -4338,10 +4114,6 @@ public struct VoiceFrame: Codable, Sendable {
 	}
 }
 
-/// Why the gateway is opening the mic. The daemon currently treats every
-/// reason the same (open and stream); the field is kept so future policy
-/// (hotword vs. assistant routing, VAD timeout per reason) has the shape
-/// it needs.
 public enum VoiceCaptureReason: String, Codable, Sendable {
 	case pushToTalk
 	case assistant
@@ -4373,9 +4145,6 @@ public struct VoiceStreamClose: Codable, Sendable {
 	}
 }
 
-/// Daemon opens a capture session. The companion is expected to begin
-/// consuming `Frame`s with the same `stream_id` until a `StreamClose`
-/// for that id arrives.
 public struct VoiceStreamOpen: Codable, Sendable {
 	@MsgpackUuid public var streamId: UUID
 	public let format: VoiceFormat
@@ -4386,8 +4155,6 @@ public struct VoiceStreamOpen: Codable, Sendable {
 	}
 }
 
-/// Volume / mute snapshot. Fired on any change to either; webapps treat
-/// `level` as the canonical value.
 public struct VolumeChanged: Codable, Sendable {
 	public let level: Float
 	public let muted: Bool
@@ -4408,9 +4175,6 @@ public struct WebappActive: Codable, Sendable {
 	}
 }
 
-/// Event payload for an active-webapp change (any initiator). Distinct from
-/// `WebappActive` (a request response) so it carries the new app's declared
-/// art profile; the companion reads `art` directly to size its pushes.
 public struct WebappActiveChanged: Codable, Sendable {
 	@OptionalMsgpackUuid public var id: UUID?
 	public let name: String?
@@ -4423,8 +4187,6 @@ public struct WebappActiveChanged: Codable, Sendable {
 	}
 }
 
-/// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
-/// echoes what's now stored after the write (None for delete).
 public struct WebappConfigAck: Codable, Sendable {
 	public let key: String
 	public let value: String?
@@ -4493,7 +4255,6 @@ public struct WebappConfigSet: Codable, Sendable {
 	}
 }
 
-/// Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
 public struct WebappDocAck: Codable, Sendable {
 	public let key: String
 	public let value: String?
@@ -4504,9 +4265,6 @@ public struct WebappDocAck: Codable, Sendable {
 	}
 }
 
-/// Broadcast when the WEBAPP writes its doc namespace, so an open
-/// companion settings page sees device-side changes live. Gateway-origin
-/// writes are not echoed back (the writer already holds the ack).
 public struct WebappDocChanged: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let key: String
@@ -4541,7 +4299,6 @@ public struct WebappDocGet: Codable, Sendable {
 
 public struct WebappDocGetReply: Codable, Sendable {
 	public let key: String
-	/// `None` when the key has never been written.
 	public let value: String?
 
 	public init(key: String, value: String?) {
@@ -4695,8 +4452,15 @@ public struct WebappInfo: Codable, Sendable {
 	/// Declared art render sizes; the companion warms exactly these. `None`
 	/// means the canonical `{248, 96}` default applies.
 	public let art: ArtProfile?
+	/// Opaque provenance token recorded at install time by whoever pushed
+	/// the bundle, conventionally the catalog source URL. The daemon stores
+	/// and returns it verbatim and never dereferences it; it exists so every
+	/// client agrees on which source an installed webapp came from, and can
+	/// tell an update apart from a different source claiming the same uuid.
+	/// `None` means unknown provenance (image-seeded examples, sideloads).
+	public let provenance: String?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?, provenance: String?) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -4709,6 +4473,7 @@ public struct WebappInfo: Codable, Sendable {
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
 		self.art = art
+		self.provenance = provenance
 	}
 }
 
@@ -4763,16 +4528,11 @@ public struct WebappManifest: Codable, Sendable {
 	}
 }
 
-/// Which bundle file a `WebappResource` request targets.
 public enum WebappResourceKind: String, Codable, Sendable {
 	case icon
 	case settings
 }
 
-/// On-demand fetch of a webapp bundle resource (icon bytes, companion
-/// settings page). `have` carries the sha256 the requester already
-/// caches; a match returns a bodyless reply so unchanged resources
-/// never re-cross the link.
 public struct WebappResource: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let kind: WebappResourceKind
@@ -4785,9 +4545,6 @@ public struct WebappResource: Codable, Sendable {
 	}
 }
 
-/// Reply to `WebappResource`. `sha256` is the current content hash;
-/// `body` is absent when the requester's `have` already matched (its
-/// cache is current). Large bodies stream as fragments per `TransferBody`.
 public struct WebappResourceReply: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 	public let kind: WebappResourceKind
@@ -5519,11 +5276,6 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 	}
 }
 
-/// Bridge -> gateway player verbs. The companion-side SDK dispatches each
-/// to its native player integration (Spotify SDK, Apple Music SDK,
-/// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` - daemon never forwards a URI no
-/// connected gateway claims.
 public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	case play(PlayUri)
 	case queue(QueueUri)
@@ -5998,16 +5750,10 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 }
 
 public enum BridgeToGatewayWebappMsg: Codable, Sendable {
-	/// response to List
 	case webapps(WebappList)
-	/// response to GetActive, and event broadcast on switch
 	case active(WebappActive)
-	/// response to SwitchTo indicating the new active app
 	case switched(WebappActive)
-	/// response to Uninstall carrying the active app after the uninstall settled
 	case uninstalled(WebappActive)
-	/// domain-level error response for any webapp op (e.g. WebappNotFound,
-	/// CannotUninstallBuiltin, IdReserved)
 	case webappError(WebappError)
 	case resource(WebappResourceReply)
 	case configGet(WebappConfigGetReply)
@@ -6016,16 +5762,8 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	case docGet(WebappDocGetReply)
 	case docList(WebappDocListReply)
 	case docAck(WebappDocAck)
-	/// event: the active webapp wrote/deleted a doc key
 	case docChanged(WebappDocChanged)
-	/// event: a webapp install (`OtaKind::InstalledWebapp`) completed
-	/// successfully; carries the installed webapp's metadata. The terminal
-	/// signal for an install; failures surface as `OtaError` on the system
-	/// surface.
 	case webappInstalled(WebappInfo)
-	/// event: the active webapp changed (any initiator - hub tap, gateway
-	/// switchTo, uninstall fallback). carries the new app's id/name + declared
-	/// art profile so the companion sizes art pushes to what it renders.
 	case activeChanged(WebappActiveChanged)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -6351,10 +6089,6 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 	}
 }
 
-/// Companion declares per-scope authority. `Release` is the "stop
-/// preferring my data for this scope" signal. Non-now-playing claims
-/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
-/// hold until release / disconnect / app-change arbitration.
 public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 	case claim(AuthorityClaim)
 	case release(AuthorityRelease)
@@ -6400,11 +6134,6 @@ public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 	}
 }
 
-/// Companion-driven capabilities surface. The companion sends `Announce`
-/// immediately on session-up (before any other surface activity) and
-/// re-sends on any change. The daemon's PeerTracker flips
-/// `companion_active` on receipt and seeds initial snapshots for every
-/// surface where the companion is claiming authority.
 public enum GatewayToBridgeCapabilitiesMsg: Codable, Sendable {
 	case announce(GatewayCapabilities)
 
@@ -6965,12 +6694,6 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	}
 }
 
-/// Gateway -> bridge player events. The companion is authoritative for
-/// now-playing: `Snapshot` carries the full player state and is the sole
-/// metadata/playback source (driven by the dealer push). `QueueChanged`
-/// carries a full queue replacement when the upcoming list materially
-/// changes; the daemon derives the post-advance next from the held
-/// snapshot, so a plain advance costs no queue traffic.
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
 	case queueChanged(QueueSnapshot)
@@ -7162,10 +6885,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	}
 }
 
-/// Companion-driven time surface. Companion sends `Snapshot` at announce
-/// (announce-on-connect rule for any surface where companion claims
-/// authority - Time always seeds) and again on tz / locale / clock-skew
-/// changes.
 public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 	case snapshot(TimeInfo)
 
@@ -7374,16 +7093,10 @@ public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 }
 
 public enum GatewayToBridgeWebappMsg: Codable, Sendable {
-	/// request: bridge replies with `Webapps`
 	case list
-	/// request: bridge replies with `Active`
 	case getActive
-	/// command: switch the kiosk to the named webapp; bridge replies with `Switched`
 	case switchTo(WebappSwitchTo)
-	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
-	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	case uninstall(WebappUninstall)
-	/// request: bridge replies with `Resource`
 	case resource(WebappResource)
 	case configGet(WebappConfigGet)
 	case configList(WebappConfigList)
@@ -7815,6 +7528,15 @@ public struct WebappErrorExtractedTooLargeInner: Codable, Sendable {
 	}
 }
 
+/// Generated type representing the anonymous struct variant `ProvenanceTooLong` of the `WebappError` Rust enum
+public struct WebappErrorProvenanceTooLongInner: Codable, Sendable {
+	public let max_bytes: UInt32
+
+	public init(max_bytes: UInt32) {
+		self.max_bytes = max_bytes
+	}
+}
+
 /// Generated type representing the anonymous struct variant `ZipMalformed` of the `WebappError` Rust enum
 public struct WebappErrorZipMalformedInner: Codable, Sendable {
 	public let reason: String
@@ -7893,6 +7615,8 @@ public enum WebappError: Codable, Sendable {
 	case idReserved(WebappErrorIdReservedInner)
 	/// Extracted bundle exceeds the 1 GiB disk-protection cap.
 	case extractedTooLarge(WebappErrorExtractedTooLargeInner)
+	/// Install carried a provenance string over `WEBAPP_PROVENANCE_MAX_LEN`.
+	case provenanceTooLong(WebappErrorProvenanceTooLongInner)
 	/// Zip extraction failed: corrupt archive, unsafe entry names, etc.
 	case zipMalformed(WebappErrorZipMalformedInner)
 	/// Bundle has no index.html at its root.
@@ -7917,6 +7641,7 @@ public enum WebappError: Codable, Sendable {
 			cannotUninstallBuiltin,
 			idReserved,
 			extractedTooLarge,
+			provenanceTooLong,
 			zipMalformed,
 			missingIndexHtml,
 			invalidManifest,
@@ -7953,6 +7678,11 @@ public enum WebappError: Codable, Sendable {
 			case .extractedTooLarge:
 				if let content = try? container.decode(WebappErrorExtractedTooLargeInner.self, forKey: .data) {
 					self = .extractedTooLarge(content)
+					return
+				}
+			case .provenanceTooLong:
+				if let content = try? container.decode(WebappErrorProvenanceTooLongInner.self, forKey: .data) {
+					self = .provenanceTooLong(content)
 					return
 				}
 			case .zipMalformed:
@@ -8013,6 +7743,9 @@ public enum WebappError: Codable, Sendable {
 		case .extractedTooLarge(let content):
 			try container.encode(CodingKeys.extractedTooLarge, forKey: .type)
 			try container.encode(content, forKey: .data)
+		case .provenanceTooLong(let content):
+			try container.encode(CodingKeys.provenanceTooLong, forKey: .type)
+			try container.encode(content, forKey: .data)
 		case .zipMalformed(let content):
 			try container.encode(CodingKeys.zipMalformed, forKey: .type)
 			try container.encode(content, forKey: .data)
@@ -8058,25 +7791,15 @@ public struct WireErrorHandlerFailedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
-/// Protocol-level failure the responder ships when a request could not be
-/// reached or dispatched. Carried by the `Error` variant on every
-/// `*MsgData` enum.
-/// 
-/// Domain-level errors (predictable, op-specific failures the caller may
-/// want to recover from) live inside the per-op response variant, not
-/// here.
+/// Protocol-level failure the responder ships when a request could not be reached or dispatched
 public enum WireError: Codable, Sendable {
-	/// Receiver does not recognize this request variant, or recognizes it
-	/// but cannot map the request to any operation it serves.
+	/// Receiver does not recognize this request variant, or recognizes it but cannot map the request to any operation it serves
 	case unsupported
-	/// Receiver recognizes the variant but the backend is not yet wired.
-	/// Distinct from `Unsupported` so consumers can tell "you have the
-	/// wrong daemon version" from "this surface exists but is not yet
-	/// implemented".
+	/// Receiver recognizes the variant but the backend is not yet wired
 	case unimplemented
-	/// Receiver could not decode or validate the request payload.
+	/// Receiver could not decode or validate the request payload
 	case malformed(WireErrorMalformedInner)
-	/// Unexpected internal error while handling the request.
+	/// Unexpected internal error while handling the request
 	case handlerFailed(WireErrorHandlerFailedInner)
 
 	enum CodingKeys: String, CodingKey, Codable {

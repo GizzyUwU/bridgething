@@ -10,7 +10,6 @@ import NitroModules
 import React
 import UIKit
 
-/// Forwards a React Native reload-start to a closure so the backend can drop its JS callbacks before the runtime is torn down.
 private final class ReloadDetacher: NSObject, RCTReloadListener {
     private let onReload: () -> Void
     init(onReload: @escaping () -> Void) {
@@ -23,7 +22,6 @@ private final class ReloadDetacher: NSObject, RCTReloadListener {
     }
 }
 
-/// `BridgethingSessionBackend` impl. JS owns preferences and reapplies them on bootstrap.
 public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unchecked Sendable {
     public typealias GlueFactory = @Sendable () -> any BridgethingGlue
     public typealias SignOutFn = @Sendable () -> Void
@@ -308,7 +306,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.unlock()
         task?.cancel()
 
-        // clear persisted credentials for the signed-in provider so it doesn't auto-restore.
         Self.defaults.removeObject(forKey: PrefKey.activeProvider)
         registration?.signOut()
 
@@ -445,7 +442,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let result = await ota.installWebapp(
             gateway: companion.gateway,
             deviceId: deviceId,
-            bundlePath: archiveUrl
+            bundlePath: archiveUrl,
+            provenance: Self.provenanceForSideload(sourceUri)
         )
         switch result {
         case let .installed(info):
@@ -454,6 +452,14 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         case let .failed(reason):
             throw SessionError.installFailed(reason)
         }
+    }
+
+    private static func provenanceForSideload(_ sourceUri: String) -> String? {
+        guard let url = URL(string: sourceUri),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return sourceUri
     }
 
     private static func resolveArchive(_ sourceUri: String) async throws -> (URL, Bool) {
@@ -728,7 +734,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         )
         switch result {
         case .ok:
-            // the daemon broadcasts DeviceNicknameChanged; meta lands via ota.metaChanged
             return
         case let .domain(rejected):
             throw SessionError.nicknameRejected(rejected.reason)
@@ -979,7 +984,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
             let glue = registration.factory()
             stateLock.withLock { activeRegistration = registration }
-            // subscribe before setActive; glue may emit authenticated synchronously during attach.
             await glue.setAuthObserver { [weak self] state in
                 self?.handleGlueAuthState(state)
             }
@@ -1081,7 +1085,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         case let .ok(value):
             return value
         case .domain:
-            // Never is uninhabited; unreachable.
             fatalError("RequestResult<_, Never>.domain is uninhabited")
         case let .protocolError(err):
             throw SessionError.protocolError(err)

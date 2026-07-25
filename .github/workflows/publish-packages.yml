@@ -1,0 +1,63 @@
+name: publish-packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "crates/lib/**"
+      - "packages/gateway/typescript/**"
+      - "packages/adapter-network/**"
+      - "packages/updater/**"
+      - "packages/client-ts/**"
+      - "packages/create-bridgething/**"
+      - "scripts/publish-packages.ts"
+      - ".github/workflows/publish-packages.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Resolve versions and pack without publishing"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # provenance attestations are unsupported from a private repository. flip to true when published
+      NPM_CONFIG_PROVENANCE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: ensure npm supports trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm --version
+
+      - run: bun install --frozen-lockfile
+
+      - name: publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: bun scripts/publish-packages.ts
+
+      - name: publish
+        if: github.event_name == 'push' || !inputs.dry_run
+        run: bun scripts/publish-packages.ts --publish

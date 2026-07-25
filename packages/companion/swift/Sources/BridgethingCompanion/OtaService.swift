@@ -345,7 +345,8 @@ public actor OtaService {
     public func installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
-        bundlePath: URL
+        bundlePath: URL,
+        provenance: String?
     ) async -> WebappInstallResult {
         if inFlight.contains(deviceId) {
             return .failed(reason: "another update is already in flight for this device")
@@ -407,7 +408,8 @@ public actor OtaService {
             updateId: sha256,
             updateUrlBase: nil,
             transfer: TransferRef(id: transferId, totalSize: UInt32(totalSize), sha256: sha256),
-            patch: nil
+            patch: nil,
+            provenance: provenance
         )
         let beginResult: RequestResult<OtaBeginAck, OtaBeginRejected>
         do {
@@ -1260,7 +1262,8 @@ public actor OtaService {
             updateId: sha256,
             updateUrlBase: updateUrlBase,
             transfer: TransferRef(id: transferId, totalSize: UInt32(totalSize), sha256: sha256),
-            patch: patch
+            patch: patch,
+            provenance: nil
         )
         let beginResult: RequestResult<OtaBeginAck, OtaBeginRejected>
         do {

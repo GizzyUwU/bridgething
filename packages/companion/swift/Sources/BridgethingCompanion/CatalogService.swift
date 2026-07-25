@@ -9,23 +9,23 @@ import Foundation
     import FoundationNetworking
 #endif
 
-/// Persists the catalog subscription list and the provenance pins
 public protocol CatalogStore: Sendable {
     func loadSources() async -> [URL]
     func saveSources(_ urls: [URL]) async
-    func loadPins() async -> [String: URL]
-    func savePins(_ pins: [String: URL]) async
 }
 
-/// Fetches catalogs and downloads app bundles
 public protocol CatalogFetcher: Sendable {
     func fetchCatalog(_ url: URL) async throws -> Catalog
     func download(_ url: URL, to destination: URL) async throws
 }
 
-/// The byte pump that streams a bundle to the device
 public protocol WebappInstaller: Sendable {
-    func installWebapp(gateway: BridgethingGateway, deviceId: String, bundlePath: URL) async -> WebappInstallResult
+    func installWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: URL,
+        provenance: String?
+    ) async -> WebappInstallResult
 }
 
 extension OtaService: WebappInstaller {}
@@ -48,7 +48,6 @@ public struct CatalogAppListing: Encodable, Sendable, Equatable {
     }
 }
 
-/// A pending update for an installed app, sourced only from its pinned source.
 public struct CatalogAppUpdate: Encodable, Sendable, Equatable {
     public let appId: String
     public let name: String
@@ -91,7 +90,6 @@ public actor CatalogService {
 
     private var attachedGateway: BridgethingGateway?
     private var sourceURLs: [URL] = []
-    private var pins: [String: URL] = [:]
     private var deviceMeta: [String: BridgeThingMeta] = [:]
     private var catalogs: [URL: Catalog] = [:]
     private var loaded = false
@@ -166,9 +164,9 @@ public actor CatalogService {
         }
     }
 
-    public func pinnedSource(appId: String) async -> URL? {
-        await loadStateIfNeeded()
-        return pins[appId]
+    public func pinnedSource(deviceId: String, appId: String) async -> URL? {
+        let installed = await installedApps(deviceId: deviceId)
+        return Self.pins(from: installed)[appId]
     }
 
     // MARK: - browse
@@ -193,7 +191,6 @@ public actor CatalogService {
         return Self.aggregate(
             orderedCatalogs: orderedCatalogs(),
             installed: installed,
-            pins: pins,
             deviceLibVersion: deviceLib
         )
     }
@@ -221,12 +218,15 @@ public actor CatalogService {
             return .failed(reason: reason)
         }
 
-        let result = await installer.installWebapp(gateway: gateway, deviceId: deviceId, bundlePath: bundle)
+        let result = await installer.installWebapp(
+            gateway: gateway,
+            deviceId: deviceId,
+            bundlePath: bundle,
+            provenance: sourceURL.absoluteString
+        )
         try? FileManager.default.removeItem(at: bundle)
         switch result {
         case let .installed(info):
-            pins[app.id] = sourceURL
-            await store.savePins(pins)
             eventContinuation.yield(.installed(deviceId: deviceId, appId: app.id, version: info.version))
         case let .failed(reason):
             eventContinuation.yield(.installFailed(deviceId: deviceId, appId: app.id, reason: reason))
@@ -260,7 +260,6 @@ public actor CatalogService {
         let deviceLib = deviceMeta[deviceId]?.libbridgethingVersion
         return Self.updates(
             catalogs: catalogs,
-            pins: pins,
             installed: installed,
             deviceLibVersion: deviceLib
         )
@@ -305,15 +304,23 @@ public actor CatalogService {
 
     // MARK: - pure aggregation logic
 
+    static func pins(from installed: [WebappInfo]) -> [String: URL] {
+        var out: [String: URL] = [:]
+        for info in installed {
+            guard let raw = info.provenance, let url = URL(string: raw) else { continue }
+            out[info.id.uuidString.lowercased()] = url
+        }
+        return out
+    }
+
     static func aggregate(
         orderedCatalogs: [(url: URL, catalog: Catalog)],
         installed: [WebappInfo],
-        pins: [String: URL],
         deviceLibVersion: String?
     ) -> [CatalogAppListing] {
         let installedById = Dictionary(installed.map { ($0.id.uuidString.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        let pins = pins(from: installed)
 
-        // uuid -> ordered list of (source, app entry) offering it.
         var offerings: [String: [(url: URL, app: CatalogApp)]] = [:]
         var order: [String] = []
         for (url, catalog) in orderedCatalogs {
@@ -350,10 +357,10 @@ public actor CatalogService {
 
     static func updates(
         catalogs: [URL: Catalog],
-        pins: [String: URL],
         installed: [WebappInfo],
         deviceLibVersion: String?
     ) -> [CatalogAppUpdate] {
+        let pins = pins(from: installed)
         var out: [CatalogAppUpdate] = []
         for info in installed where info.source == .installed && info.role == .standard {
             let id = info.id.uuidString.lowercased()
@@ -373,9 +380,37 @@ public actor CatalogService {
         return out.sorted { ($0.name, $0.appId) < ($1.name, $1.appId) }
     }
 
+    static func releasedAtInstant(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = fractional.date(from: raw) { return parsed }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: raw)
+    }
+
+    static func sortedByReleasedAt(_ versions: [CatalogAppVersion]) -> [CatalogAppVersion] {
+        versions.enumerated()
+            .map { (offset: $0.offset, element: $0.element, at: releasedAtInstant($0.element.releasedAt)) }
+            .sorted { a, b in
+                switch (a.at, b.at) {
+                case let (l?, r?):
+                    return l == r ? a.offset < b.offset : l > r
+                case (nil, nil):
+                    return a.offset < b.offset
+                case (nil, _):
+                    return false
+                case (_, nil):
+                    return true
+                }
+            }
+            .map(\.element)
+    }
+
     static func newestCompatible(_ app: CatalogApp, deviceLibVersion: String?) -> CatalogAppVersion? {
-        guard let deviceLib = deviceLibVersion else { return app.versions.first }
-        return app.versions.first {
+        let ordered = sortedByReleasedAt(app.versions)
+        guard let deviceLib = deviceLibVersion else { return ordered.first }
+        return ordered.first {
             SemverCompat.satisfies(deviceVersion: deviceLib, minimum: $0.minLibbridgethingVersion)
         }
     }
@@ -394,7 +429,6 @@ public actor CatalogService {
             await store.saveSources(sources)
         }
         sourceURLs = sources
-        pins = await store.loadPins()
         loaded = true
     }
 
@@ -471,7 +505,6 @@ enum CatalogServiceError: Error, CustomStringConvertible {
 
 public actor FileCatalogStore: CatalogStore {
     private let sourcesURL: URL
-    private let pinsURL: URL
 
     public init(directory: URL? = nil) {
         let base = directory
@@ -480,7 +513,6 @@ public actor FileCatalogStore: CatalogStore {
             ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("bridgething-catalog")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         sourcesURL = base.appendingPathComponent("sources.json")
-        pinsURL = base.appendingPathComponent("pins.json")
     }
 
     public func loadSources() -> [URL] {
@@ -494,33 +526,17 @@ public actor FileCatalogStore: CatalogStore {
         let strings = urls.map(\.absoluteString)
         if let data = try? JSONEncoder().encode(strings) { try? data.write(to: sourcesURL) }
     }
-
-    public func loadPins() -> [String: URL] {
-        guard let data = try? Data(contentsOf: pinsURL),
-              let strings = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return strings.compactMapValues(URL.init(string:))
-    }
-
-    public func savePins(_ pins: [String: URL]) {
-        let strings = pins.mapValues(\.absoluteString)
-        if let data = try? JSONEncoder().encode(strings) { try? data.write(to: pinsURL) }
-    }
 }
 
 public actor InMemoryCatalogStore: CatalogStore {
     private var sources: [URL]
-    private var pins: [String: URL]
 
-    public init(sources: [URL] = [], pins: [String: URL] = [:]) {
+    public init(sources: [URL] = []) {
         self.sources = sources
-        self.pins = pins
     }
 
     public func loadSources() -> [URL] { sources }
     public func saveSources(_ urls: [URL]) { sources = urls }
-    public func loadPins() -> [String: URL] { pins }
-    public func savePins(_ pins: [String: URL]) { self.pins = pins }
 }
 
 public final class URLSessionCatalogFetcher: CatalogFetcher {

@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-// aligns the publishable TS packages to the daemon (cargo workspace) version, builds them, and publishes.
-// dry run by default; pass --publish to actually push to npm.
-
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,7 +16,12 @@ const PACKAGES: Pkg[] = [
   { name: 'create-bridgething', dir: 'packages/create-bridgething', scoped: false },
 ];
 
-// the create-bridgething template ships this dep pinned; keep it in lockstep so scaffolds pull the matching client.
+const BOOTSTRAP_PENDING = [
+  '@bridgething/adapter-react-native',
+  '@bridgething/session-react-native',
+  '@bridgething/webapp-shared',
+];
+
 const TEMPLATE_MANIFEST = 'packages/create-bridgething/template/package.json';
 const TEMPLATE_DEP = '@bridgething/client';
 
@@ -56,9 +58,6 @@ function reEscape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 }
 
-// bun.lock caches each workspace member's version, and `workspace:*` resolves against that cache, not the live
-// package.json. incremental `bun install` won't refresh it (only a full regen does, which churns every transitive dep),
-// so patch the members we publish in place, in lockstep with their package.json bumps.
 function patchLockfile(version: string): void {
   const full = join(ROOT, 'bun.lock');
   if (!existsSync(full)) return;
@@ -80,6 +79,20 @@ async function run(cmd: string, args: string[], cwd: string): Promise<void> {
     console.error(`\ncommand failed (exit ${code}): ${cmd} ${args.join(' ')}`);
     process.exit(code);
   }
+}
+
+async function npmViewOk(spec: string): Promise<boolean> {
+  const proc = Bun.spawn(['npm', 'view', spec, 'version'], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' });
+  await new Response(proc.stdout).text();
+  await new Response(proc.stderr).text();
+  return (await proc.exited) === 0;
+}
+
+type Disposition = 'publish' | 'already-published' | 'needs-bootstrap';
+
+async function disposition(pkg: Pkg, version: string): Promise<Disposition> {
+  if (!(await npmViewOk(pkg.name))) return 'needs-bootstrap';
+  return (await npmViewOk(`${pkg.name}@${version}`)) ? 'already-published' : 'publish';
 }
 
 async function capture(cmd: string, args: string[], cwd: string): Promise<string> {
@@ -109,12 +122,33 @@ console.log(`  template dep ${TEMPLATE_DEP}: ${prevDep ?? '(none)'} -> ^${versio
 patchLockfile(version);
 console.log('  bun.lock: workspace members synced');
 
-const filters = PACKAGES.flatMap(p => ['--filter', p.name]);
+console.log('\nregistry check:');
+const plan = new Map<string, Disposition>();
+for (const p of PACKAGES) {
+  const d = await disposition(p, version);
+  plan.set(p.name, d);
+  const note = {
+    publish: `will publish ${version}`,
+    'already-published': `${version} already on registry, skipping`,
+    'needs-bootstrap': 'NOT on registry - needs a manual first publish, skipping',
+  }[d];
+  console.log(`  ${p.name}: ${note}`);
+}
+if (BOOTSTRAP_PENDING.length > 0) {
+  console.log(`\nnot yet publishable (never published, no trusted publisher possible):`);
+  for (const name of BOOTSTRAP_PENDING) console.log(`  ${name}`);
+}
+
+const toPublish = PACKAGES.filter(p => plan.get(p.name) === 'publish');
+if (toPublish.length === 0) {
+  console.log('\nnothing to publish.');
+  process.exit(0);
+}
+
+const filters = toPublish.flatMap(p => ['--filter', p.name]);
 await run('bunx', ['turbo', 'run', 'build', ...filters], ROOT);
 
-// two-step per https://github.com/oven-sh/bun (bun publish can't read .npmrc auth since oct 2025):
-//   bun pm pack resolves workspace:* to real versions, then npm publish uses npm's reliable .npmrc auth.
-for (const p of PACKAGES) {
+for (const p of toPublish) {
   const dir = join(ROOT, p.dir);
   if (!doPublish) {
     await run('bun', ['pm', 'pack', '--dry-run'], dir);
@@ -144,8 +178,9 @@ for (const p of PACKAGES) {
   }
 }
 
+const names = toPublish.map(p => p.name).join(', ');
 console.log(
   doPublish
-    ? `\npublished ${PACKAGES.map(p => p.name).join(', ')} at ${version}`
-    : `\ndry run complete. re-run with --publish to publish ${PACKAGES.map(p => p.name).join(', ')} at ${version}`,
+    ? `\npublished ${names} at ${version}`
+    : `\ndry run complete. re-run with --publish to publish ${names} at ${version}`,
 );

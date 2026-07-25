@@ -1302,6 +1302,7 @@ export type WebappError =
   | { type: 'cannotUninstallBuiltin'; data: { id: string } }
   | { type: 'idReserved'; data: { id: string } }
   | { type: 'extractedTooLarge'; data: { max_bytes: number } }
+  | { type: 'provenanceTooLong'; data: { max_bytes: number } }
   | { type: 'zipMalformed'; data: { reason: string } }
   | { type: 'missingIndexHtml' }
   | { type: 'invalidManifest'; data: { reason: string } }
@@ -1344,6 +1345,12 @@ export type WebappInfo = {
    * means the canonical `{248, 96}` default applies.
    */
   art: ArtProfile | null;
+  /**
+   * Opaque provenance token recorded at install time by whoever pushed
+   * the bundle, conventionally the catalog source URL. The daemon stores
+   * and returns it verbatim and never dereferences it.
+   */
+  provenance: string | null;
 };
 
 /**

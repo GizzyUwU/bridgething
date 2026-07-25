@@ -4,6 +4,9 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
+/// Upper bound on `WebappInfo::provenance`
+pub const WEBAPP_PROVENANCE_MAX_LEN: usize = 2048;
+
 /// Domain errors emitted by any webapp surface (gateway- or client-side).
 /// Single catalog: both protocols speak the same variant set.
 #[typeshare]
@@ -21,6 +24,8 @@ pub enum WebappError {
   IdReserved { id: String },
   /// Extracted bundle exceeds the 1 GiB disk-protection cap.
   ExtractedTooLarge { max_bytes: u32 },
+  /// Install carried a provenance string over `WEBAPP_PROVENANCE_MAX_LEN`.
+  ProvenanceTooLong { max_bytes: u32 },
   /// Zip extraction failed: corrupt archive, unsafe entry names, etc.
   ZipMalformed { reason: String },
   /// Bundle has no index.html at its root.
@@ -168,6 +173,10 @@ pub struct WebappInfo {
   /// Declared art render sizes; the companion warms exactly these. `None`
   /// means the canonical `{248, 96}` default applies.
   pub art: Option<ArtProfile>,
+  /// Opaque provenance token recorded at install time by whoever pushed
+  /// the bundle, conventionally the catalog source URL. The daemon stores
+  /// and returns it verbatim and never dereferences it.
+  pub provenance: Option<String>,
 }
 
 /// On-disk `manifest.json` shape. Read from the bundle at install time

@@ -1,8 +1,19 @@
-const cargoToml: string = await Bun.file('./Cargo.toml').text();
-const version: string | undefined = cargoToml.match(/version\s*=\s*["']([^"']+)["']/)?.[1];
+const WORKSPACE_MANIFEST = '../../Cargo.toml';
+
+const cargoToml: string = await Bun.file(WORKSPACE_MANIFEST).text();
+const workspacePackage: string | undefined = cargoToml
+  .split(/^\[/m)
+  .find(section => section.startsWith('workspace.package]'));
+
+if (!workspacePackage) {
+  console.error(`[workspace.package] not found in ${WORKSPACE_MANIFEST}`);
+  process.exit(1);
+}
+
+const version: string | undefined = workspacePackage.match(/^\s*version\s*=\s*["']([^"']+)["']/m)?.[1];
 
 if (!version) {
-  console.error('Version not found in Cargo.toml');
+  console.error(`version not found in [workspace.package] of ${WORKSPACE_MANIFEST}`);
   process.exit(1);
 }
 

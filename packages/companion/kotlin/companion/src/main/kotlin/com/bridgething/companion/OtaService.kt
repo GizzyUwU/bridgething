@@ -344,6 +344,7 @@ public class OtaService(
         gateway: BridgethingGateway,
         deviceId: String,
         bundlePath: File,
+        provenance: String?,
     ): WebappInstallResult {
         val totalSize = try {
             bundlePath.length()
@@ -384,6 +385,7 @@ public class OtaService(
             updateUrlBase = null,
             transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
             patch = null,
+            provenance = provenance,
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
@@ -1196,6 +1198,7 @@ public class OtaService(
             updateUrlBase = updateUrlBase,
             transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
             patch = patch,
+            provenance = null,
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {

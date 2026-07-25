@@ -35,9 +35,16 @@ private func makeCatalog(_ apps: [CatalogApp]) -> Catalog {
             apps: apps, recommendedSources: [])
 }
 
-private func installed(_ id: String, _ ver: String, source: WebappSource = .installed, role: WebappRole = .standard) -> WebappInfo {
+private func installed(
+    _ id: String,
+    _ ver: String,
+    source: WebappSource = .installed,
+    role: WebappRole = .standard,
+    provenance: URL? = nil
+) -> WebappInfo {
     WebappInfo(id: UUID(uuidString: id)!, name: "x", source: source, role: role, version: ver,
-               description: nil, iconHash: nil, settingsHash: nil, config: [], permissions: [], voiceGrammar: nil, art: nil)
+               description: nil, iconHash: nil, settingsHash: nil, config: [], permissions: [], voiceGrammar: nil, art: nil,
+               provenance: provenance?.absoluteString)
 }
 
 final class SemverCompatTests: XCTestCase {
@@ -92,14 +99,12 @@ final class CatalogAggregateTests: XCTestCase {
     func testPinnedSourceIsPrimaryAndCompatFilters() {
         let listings = CatalogService.aggregate(
             orderedCatalogs: orderedCatalogs(),
-            installed: [installed(CALENDAR_ID, "0.1.5")],
-            pins: [CALENDAR_ID: SOURCE_B],
+            installed: [installed(CALENDAR_ID, "0.1.5", provenance: SOURCE_B)],
             deviceLibVersion: "v12.0.1"
         )
         XCTAssertEqual(listings.count, 2)
         let cal = try! XCTUnwrap(listings.first { $0.app.id == CALENDAR_ID })
         XCTAssertEqual(cal.sourceURL, SOURCE_B)
-        // 0.3.0 needs lib 99.0.0; device is 12.0.1, so the newest compatible is 0.1.5.
         XCTAssertEqual(cal.newestCompatible?.version, "0.1.5")
         XCTAssertEqual(cal.installedVersion, "0.1.5")
         XCTAssertFalse(cal.updateAvailable)
@@ -115,7 +120,6 @@ final class CatalogAggregateTests: XCTestCase {
         let listings = CatalogService.aggregate(
             orderedCatalogs: orderedCatalogs(),
             installed: [],
-            pins: [:],
             deviceLibVersion: "v12.0.1"
         )
         let cal = try! XCTUnwrap(listings.first { $0.app.id == CALENDAR_ID })
@@ -127,7 +131,7 @@ final class CatalogAggregateTests: XCTestCase {
     func testNoCompatibleVersionForOldDevice() {
         let a = makeCatalog([makeApp(CALENDAR_ID, "Calendar", [ver("0.3.0", minLib: "99.0.0")])])
         let listings = CatalogService.aggregate(
-            orderedCatalogs: [(SOURCE_A, a)], installed: [], pins: [:], deviceLibVersion: "v12.0.1"
+            orderedCatalogs: [(SOURCE_A, a)], installed: [], deviceLibVersion: "v12.0.1"
         )
         XCTAssertNil(listings[0].newestCompatible)
     }
@@ -135,9 +139,66 @@ final class CatalogAggregateTests: XCTestCase {
     func testNilDeviceVersionListsNewest() {
         let a = makeCatalog([makeApp(CALENDAR_ID, "Calendar", [ver("0.3.0", minLib: "99.0.0")])])
         let listings = CatalogService.aggregate(
-            orderedCatalogs: [(SOURCE_A, a)], installed: [], pins: [:], deviceLibVersion: nil
+            orderedCatalogs: [(SOURCE_A, a)], installed: [], deviceLibVersion: nil
         )
         XCTAssertEqual(listings[0].newestCompatible?.version, "0.3.0")
+    }
+}
+
+final class CatalogProvenanceTests: XCTestCase {
+    func testPinsComeFromDeviceReportedProvenance() {
+        let pins = CatalogService.pins(from: [
+            installed(CALENDAR_ID, "0.1.0", provenance: SOURCE_B),
+            installed(WEATHER_ID, "0.1.0"),
+        ])
+        XCTAssertEqual(pins[CALENDAR_ID], SOURCE_B)
+        XCTAssertNil(pins[WEATHER_ID])
+    }
+
+    func testGarbageProvenanceYieldsNoPinRatherThanAHijack() {
+        let info = WebappInfo(
+            id: UUID(uuidString: CALENDAR_ID)!, name: "x", source: .installed, role: .standard, version: "0.1.0",
+            description: nil, iconHash: nil, settingsHash: nil, config: [], permissions: [], voiceGrammar: nil, art: nil,
+            provenance: "not a url at all"
+        )
+        let pinned = CatalogService.pins(from: [info])[CALENDAR_ID]
+        XCTAssertNotEqual(pinned, SOURCE_A)
+        XCTAssertNotEqual(pinned, SOURCE_B)
+    }
+}
+
+final class CatalogVersionOrderingTests: XCTestCase {
+    func testNewestIsByReleasedAtNotArrayOrder() {
+        let app = makeApp(CALENDAR_ID, "Calendar", [
+            ver("0.1.0", released: "2026-01-01T00:00:00Z"),
+            ver("0.9.0", released: "2026-06-01T00:00:00Z"),
+        ])
+        XCTAssertEqual(CatalogService.newestCompatible(app, deviceLibVersion: "v12.0.1")?.version, "0.9.0")
+    }
+
+    func testNonUtcOffsetsCompareAsInstants() {
+        let app = makeApp(CALENDAR_ID, "Calendar", [
+            ver("0.2.0", released: "2026-06-01T00:00:00+02:00"),
+            ver("0.1.0", released: "2026-06-01T00:00:00Z"),
+        ])
+        XCTAssertEqual(CatalogService.newestCompatible(app, deviceLibVersion: "v12.0.1")?.version, "0.1.0")
+    }
+
+    func testUnparseableTimestampsSortLastAndKeepOrder() {
+        let app = makeApp(CALENDAR_ID, "Calendar", [
+            ver("0.1.0", released: "whenever"),
+            ver("0.3.0", released: "2026-02-01T00:00:00Z"),
+        ])
+        XCTAssertEqual(CatalogService.newestCompatible(app, deviceLibVersion: "v12.0.1")?.version, "0.3.0")
+    }
+
+    func testCompatFilterAppliesAfterSorting() {
+        let app = makeApp(CALENDAR_ID, "Calendar", [
+            ver("0.1.0", released: "2026-01-01T00:00:00Z"),
+            ver("0.9.0", minLib: "99.0.0", released: "2026-06-01T00:00:00Z"),
+            ver("0.5.0", released: "2026-03-01T00:00:00Z"),
+        ])
+        XCTAssertEqual(CatalogService.newestCompatible(app, deviceLibVersion: "v12.0.1")?.version, "0.5.0")
     }
 }
 
@@ -147,10 +208,9 @@ final class CatalogUpdatesTests: XCTestCase {
         let b = makeCatalog([makeApp(CALENDAR_ID, "Calendar", [ver("0.3.0"), ver("0.1.0", released: "2026-04-01T00:00:00Z")])])
         let catalogs: [URL: Catalog] = [SOURCE_A: a, SOURCE_B: b]
 
-        // pinned to A: target is A's newest (0.2.0), not B's 0.3.0.
         let updates = CatalogService.updates(
-            catalogs: catalogs, pins: [CALENDAR_ID: SOURCE_A],
-            installed: [installed(CALENDAR_ID, "0.1.0")], deviceLibVersion: "v12.0.1"
+            catalogs: catalogs,
+            installed: [installed(CALENDAR_ID, "0.1.0", provenance: SOURCE_A)], deviceLibVersion: "v12.0.1"
         )
         XCTAssertEqual(updates.count, 1)
         XCTAssertEqual(updates[0].target.version, "0.2.0")
@@ -162,15 +222,13 @@ final class CatalogUpdatesTests: XCTestCase {
         let a = makeCatalog([makeApp(CALENDAR_ID, "Calendar", [ver("0.2.0")])])
         let catalogs: [URL: Catalog] = [SOURCE_A: a]
 
-        // unpinned installed app: no update offered (provenance unknown).
-        XCTAssertTrue(CatalogService.updates(catalogs: catalogs, pins: [:],
+        XCTAssertTrue(CatalogService.updates(catalogs: catalogs,
             installed: [installed(CALENDAR_ID, "0.1.0")], deviceLibVersion: "v12.0.1").isEmpty)
-        // builtin: never a catalog app.
-        XCTAssertTrue(CatalogService.updates(catalogs: catalogs, pins: [CALENDAR_ID: SOURCE_A],
-            installed: [installed(CALENDAR_ID, "0.1.0", source: .builtin)], deviceLibVersion: "v12.0.1").isEmpty)
-        // already newest: no update.
-        XCTAssertTrue(CatalogService.updates(catalogs: catalogs, pins: [CALENDAR_ID: SOURCE_A],
-            installed: [installed(CALENDAR_ID, "0.2.0")], deviceLibVersion: "v12.0.1").isEmpty)
+        XCTAssertTrue(CatalogService.updates(catalogs: catalogs,
+            installed: [installed(CALENDAR_ID, "0.1.0", source: .builtin, provenance: SOURCE_A)],
+            deviceLibVersion: "v12.0.1").isEmpty)
+        XCTAssertTrue(CatalogService.updates(catalogs: catalogs,
+            installed: [installed(CALENDAR_ID, "0.2.0", provenance: SOURCE_A)], deviceLibVersion: "v12.0.1").isEmpty)
     }
 }
 
@@ -178,29 +236,28 @@ final class CatalogStoreTests: XCTestCase {
     func testInMemoryRoundTrips() async {
         let store = InMemoryCatalogStore()
         await store.saveSources([SOURCE_A, SOURCE_B])
-        await store.savePins([CALENDAR_ID: SOURCE_B])
         let s = await store.loadSources()
-        let p = await store.loadPins()
         XCTAssertEqual(s, [SOURCE_A, SOURCE_B])
-        XCTAssertEqual(p, [CALENDAR_ID: SOURCE_B])
     }
 
     func testFileStoreRoundTrips() async {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("btcat-\(UUID().uuidString)")
         let store = FileCatalogStore(directory: dir)
         await store.saveSources([SOURCE_A])
-        await store.savePins([WEATHER_ID: SOURCE_A])
         let reopened = FileCatalogStore(directory: dir)
         let s = await reopened.loadSources()
-        let p = await reopened.loadPins()
         XCTAssertEqual(s, [SOURCE_A])
-        XCTAssertEqual(p, [WEATHER_ID: SOURCE_A])
         try? FileManager.default.removeItem(at: dir)
     }
 }
 
 private struct UnusedInstaller: WebappInstaller {
-    func installWebapp(gateway _: BridgethingGateway, deviceId _: String, bundlePath _: URL) async -> WebappInstallResult {
+    func installWebapp(
+        gateway _: BridgethingGateway,
+        deviceId _: String,
+        bundlePath _: URL,
+        provenance _: String?
+    ) async -> WebappInstallResult {
         .failed(reason: "unused")
     }
 }

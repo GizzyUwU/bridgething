@@ -64,25 +64,10 @@ import type {
 } from './shared.js';
 import type { MsgMeta, WireError } from './wire.js';
 
-/**
- * Invalidate the daemon-side cached asset for `id`. The companion's
- * escape hatch when it knows an asset it previously served is stale.
- */
 export type AssetClear = { id: string };
 
-/**
- * Typed terminal response for an `AssetRequest`. Small assets arrive
- * inline; larger ones declare a stream whose ref id is the originating
- * request id, with the bytes following as `TransferFragment` events on
- * the bulk lane (so now-playing traffic preempts them between
- * fragments).
- */
 export type AssetGotReply = { id: string; mime: string | null; body: TransferBody };
 
-/**
- * Domain error response for an `AssetRequest`: the companion does not
- * have the requested asset.
- */
 export type AssetNotFoundReply = { id: string };
 
 export type AssetRequest = { id: string; requestId: string };
@@ -124,9 +109,6 @@ export type BridgeToGatewayLyricsMsg = { event: 'get'; data: LyricsRequest };
 
 /**
  * bridgething -> gateway
- * messages from bridgething to the gateway (mobile or desktop app).
- *
- * these messages will pass over bluetooth.
  */
 export type BridgeToGatewayMsg = { id: string; meta: MsgMeta; data: BridgeToGatewayMsgData };
 
@@ -179,13 +161,6 @@ export type BridgeToGatewayPhoneMsg =
   | { event: 'dtmf'; data: PhoneDtmfAction }
   | { event: 'stateGet' };
 
-/**
- * Bridge -> gateway player verbs. The companion-side SDK dispatches each
- * to its native player integration (Spotify SDK, Apple Music SDK,
- * MediaSession). Routing for `Play(uri)` is gated on
- * `Capabilities.uri_schemes` - daemon never forwards a URI no
- * connected gateway claims.
- */
 export type BridgeToGatewayPlayerMsg =
   | { event: 'play'; data: PlayUri }
   | { event: 'queue'; data: QueueUri }
@@ -253,69 +228,26 @@ export type BrowseReply = { result: BrowseResult };
 
 export type ChromeNavigate = { url: string };
 
-/**
- * Companion-side cellular / call-control snapshot. Announce-on-connect
- * pattern: companion sends an initial `CommunicationsSnapshot` after
- * announce, then re-sends on any field change.
- */
 export type CommunicationsSnapshot = { state: CommunicationsState };
 
-/**
- * Resolved metadata for a single context uri (playlist / album / show /
- * artist), used to populate a stock preset's name + cover art.
- */
 export type ContextResolveReply = { name: string | null; artworkId: string | null; subtitle: string | null };
 
-/**
- * Domain-error response to `DeviceSetNickname`: nickname rejected at
- * the daemon edge (too long, contains nul, etc).
- */
 export type DeviceNicknameRejected = { reason: string };
 
-/**
- * Current device nickname. Reply to `DeviceGetNickname` and
- * `DeviceSetNickname`, plus the event payload for
- * `DeviceNicknameChanged` broadcasts.
- */
 export type DeviceNicknameReply = { nickname: string | null };
 
-/**
- * Set the device nickname. Empty string clears (treated as None). The
- * daemon broadcasts `DeviceNicknameChanged` to gateway + client peers
- * after writing the KV slot. Length-capped at 64 chars.
- */
 export type DeviceSetNickname = { nickname: string };
 
-/**
- * Play a named earcon from `AudioCapabilities.earcons`. Unknown names
- * surface as `AudioError::EarconNotFound`.
- */
 export type Earcon = { name: string };
 
-/**
- * Fired when the favorited / liked status of an item changes -
- * regardless of whether it was driven by the daemon (FavoritesToggle/Set
- * command) or by the user mutating it on the gateway-side app directly.
- */
 export type FavoriteChanged = { uri: string; liked: boolean };
 
-/**
- * Batch favorites-contains reply. `liked` is index-aligned with the
- * request's `uris`.
- */
 export type FavoritesContainsReply = { liked: Array<boolean> };
 
 export type FavoritesListReply = { page: FavoritesPage };
 
 export type FavoritesSet = { item: ItemRef; liked: boolean };
 
-/**
- * Bulk favorites mutation. `entries` are independent `FavoritesSet`
- * applications; gateway returns once it has issued each underlying
- * platform call. Per-entry errors are not surfaced - companion logs
- * and best-efforts the rest. Webapps observing partial success listen
- * for `FavoriteChanged` events.
- */
 export type FavoritesSetMany = { entries: Array<FavoritesSet> };
 
 export type FavoritesToggle = { item: ItemRef };
@@ -330,23 +262,10 @@ export type GatewayToBridgeAudioMsg =
   | { event: 'ttsEnded'; data: TtsEnded }
   | { event: 'volumeChanged'; data: VolumeChanged };
 
-/**
- * Companion declares per-scope authority. `Release` is the "stop
- * preferring my data for this scope" signal. Non-now-playing claims
- * fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
- * hold until release / disconnect / app-change arbitration.
- */
 export type GatewayToBridgeAuthorityMsg =
   | { event: 'claim'; data: AuthorityClaim }
   | { event: 'release'; data: AuthorityRelease };
 
-/**
- * Companion-driven capabilities surface. The companion sends `Announce`
- * immediately on session-up (before any other surface activity) and
- * re-sends on any change. The daemon's PeerTracker flips
- * `companion_active` on receipt and seeds initial snapshots for every
- * surface where the companion is claiming authority.
- */
 export type GatewayToBridgeCapabilitiesMsg = { event: 'announce'; data: GatewayCapabilities };
 
 export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: ChromeNavigate };
@@ -373,9 +292,6 @@ export type GatewayToBridgeLyricsMsg =
 
 /**
  * gateway -> bridgething
- * messages from the gateway (mobile or desktop app) to bridgething.
- *
- * these messages will pass over bluetooth.
  */
 export type GatewayToBridgeMsg = { id: string; meta: MsgMeta; data: GatewayToBridgeMsgData };
 
@@ -426,14 +342,6 @@ export type GatewayToBridgePhoneMsg =
   | { event: 'callEnded'; data: PhoneCallEnded }
   | { event: 'stateReply'; data: PhoneStateReply };
 
-/**
- * Gateway -> bridge player events. The companion is authoritative for
- * now-playing: `Snapshot` carries the full player state and is the sole
- * metadata/playback source (driven by the dealer push). `QueueChanged`
- * carries a full queue replacement when the upcoming list materially
- * changes; the daemon derives the post-advance next from the held
- * snapshot, so a plain advance costs no queue traffic.
- */
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
   | { event: 'queueChanged'; data: QueueSnapshot }
@@ -453,12 +361,6 @@ export type GatewayToBridgeSystemMsg =
   | { event: 'logsUnsubscribe'; data: LogsUnsubscribe }
   | { event: 'keepaliveAck'; data: KeepaliveAck };
 
-/**
- * Companion-driven time surface. Companion sends `Snapshot` at announce
- * (announce-on-connect rule for any surface where companion claims
- * authority - Time always seeds) and again on tz / locale / clock-skew
- * changes.
- */
 export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
 
 export type GatewayToBridgeTransferMsg =
@@ -498,65 +400,28 @@ export type GeoGetOnce = { accuracy: GeoAccuracy };
 
 export type GeoGetOnceReply = { position: Position };
 
-/**
- * Bridge -> companion watch forward. The daemon aggregates webapp
- * watches and re-issues this with the most-demanding accuracy +
- * fastest interval. `min_interval_ms = 0` lets the gateway pick.
- */
 export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
 
-/**
- * Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
- */
 export type KeepaliveAck = { seq: number };
 
-/**
- * Periodic liveness probe the daemon sends over the iAP2 EA link.
- */
 export type KeepalivePing = { seq: number };
 
 export type LibraryBrowseRequest = {
-  /**
-   * Drilldown node id from a prior `BrowseFolder`. `None` means "root".
-   */
   nodeId: string | null;
   limit: number;
   offset: number;
-  /**
-   * Root only: cap on the number of folders returned. `None` returns every folder.
-   */
   sections?: number | null;
-  /**
-   * Root only: preview children per folder. `None` is the gateway default; `0` skips preview
-   * hydration entirely and returns a cheap index of node ids, titles, and totals.
-   */
   preview?: number | null;
 };
 
-/**
- * Fired when the user mutates their library on the gateway-side app while
- * connected (a like, a playlist edit) and the change did NOT originate from a
- * daemon command - so the daemon must invalidate any cached browse / home view.
- */
 export type LibraryChanged = { scope: LibraryScope };
 
 export type LibraryErrorReply = { error: LibraryError };
 
-/**
- * Batch "is each of these favorited?" lookup. Mirrors Spotify's
- * `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
- * the request `uris`.
- */
 export type LibraryFavoritesContainsRequest = { uris: Array<string> };
 
 export type LibraryFavoritesListRequest = { limit: number; offset: number };
 
-/**
- * Recommendations seeded by up to 5 items. The daemon caps the seed
- * list at the platform-permissive limit (Spotify hard-caps at 5
- * combined seeds across tracks/artists/genres). Gateway decides how to
- * distribute seeds across its native API surfaces.
- */
 export type LibraryRecommendationsRequest = {
   seeds: Array<ItemRef>;
   kind: ItemKind | null;
@@ -564,44 +429,18 @@ export type LibraryRecommendationsRequest = {
   offset: number;
 };
 
-/**
- * Resolve a single context uri (playlist / album / show / artist) to its
- * name + cover art. Used to populate a stock preset slot the device only
- * knows by `context_uri`.
- */
 export type LibraryResolveContextRequest = { uri: string };
 
-/**
- * Which slice of the user's library changed, so a consumer can scope a
- * refetch. The daemon invalidates its home cache on any scope; the
- * distinction is informational for richer webapp consumers.
- */
 export type LibraryScope = 'saved' | 'playlists';
 
 export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
 
-/**
- * Open a streaming daemon-log subscription over the gateway. The daemon
- * returns an opaque token; the companion releases it via `LogsUnsubscribe`.
- * Scoped to the gateway peer - auto-released when the peer disconnects.
- */
 export type LogsSubscribe = { source: LogSource; levels: Array<LogLevel>; filter: string | null };
 
-/**
- * Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
- * `LogsUnsubscribe`.
- */
 export type LogsSubscribeReply = { token: string };
 
-/**
- * Pull a one-shot batch of recent daemon log entries over the gateway.
- * Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
- */
 export type LogsTail = { source: LogSource; levels: Array<LogLevel>; filter: string | null; maxLines: number };
 
-/**
- * One-shot reply to a gateway `LogsTail`.
- */
 export type LogsTailReply = { entries: Array<LogEntry> };
 
 export type LogsUnsubscribe = { token: string };
@@ -612,12 +451,6 @@ export type Lyrics = { synced: Array<LyricLine> | null; plain: string | null; so
 
 export type LyricsErrorReply = { message: string };
 
-/**
- * Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
- * to completion without a hit (e.g. lrclib 404, no fallback configured)
- * and is distinct from `LyricsErrorReply` which signals a transient
- * failure (network, parse, resolver-internal error).
- */
 export type LyricsReply = { lyrics: Lyrics | null };
 
 export type LyricsRequest = { track: TrackIdentity };
@@ -657,127 +490,33 @@ export type NotificationInvoke = { id: string };
 
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
-/**
- * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
- * keeps the partial for resume; `OtaAbandon` is the explicit clean-up
- * when the companion no longer wants to retry this artifact.
- */
 export type OtaAbandon = { updateId: string };
 
-/**
- * Commit every staged bandaid piece (daemon / hub / stock) as one
- * transaction, then restart bridgething.service once. Bandaid pushes
- * (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
- * completion (phase reaches `Writing`/100, the daemon does NOT restart); the
- * companion sends `OtaActivate` after the final piece to swap them all
- * live with a single restart. Image OTAs never use this -- they reboot
- * at write completion.
- *
- * `expected` is the set of `update_id`s the companion staged this
- * batch. The daemon errors the activate if its staged set does not
- * match exactly, which guards a desync where a daemon crash dropped the
- * in-memory staged set between staging and activation.
- */
 export type OtaActivate = { expected: Array<string> };
 
-/**
- * Daemon asks the pinned companion to serve byte ranges from an asset
- * it should have cached (and can refetch from `OtaBegin.update_url_base`
- * on cache miss). Triggered by an inbound HTTP-Range request from
- * libswupdate's delta downloader hitting the daemon's loopback proxy.
- * Range count is bounded daemon-side; companions just serve whatever
- * arrives.
- */
 export type OtaAssetRange = { updateId: string; asset: string; ranges: Array<RangeSpec> };
 
-/**
- * Daemon-side cancel for an in-flight range request: libcurl gave up
- * (timeout, OTA failed, daemon is shutting down). Companion stops the
- * fragment stream for `request_id` and frees any resources it held
- * open.
- */
 export type OtaAssetRangeAbandon = { requestId: string };
 
-/**
- * Domain-error response to `OtaAssetRange`: the companion can't serve
- * the requested ranges (asset unknown for this `update_id`, refetch
- * from `update_url_base` failed, sha mismatch on refetched asset, etc).
- * The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
- * the running OTA fails.
- */
 export type OtaAssetRangeRejected = { reason: string };
 
-/**
- * Successful response to `OtaAssetRange`. The companion has the asset
- * (or refetched it from `update_url_base`) and serves the resolved
- * ranges in `body`: small results inline, larger ones as a fragment
- * stream whose offsets are stream-relative (0..sum of part lengths,
- * parts concatenated in declaration order - the daemon's HTTP-Range
- * writer maps them to absolute positions via `parts`). `total_size` is
- * the asset's full byte length (for `Content-Range` totals).
- */
 export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart>; body: TransferBody };
 
-/**
- * Companion-initiated OTA: opens or resumes a streaming push of an
- * update artifact identified by its sha256. The daemon responds with
- * `OtaBeginAck { resume_from_offset }` (the byte offset the first
- * `TransferFragment` should start at, 0 for fresh pushes) or
- * `OtaBeginRejected { reason }`.
- *
- * `kind` selects the backend. See `OtaKind`.
- *
- * `update_id` is the sha256 of the artifact, hex-encoded. Content-
- * addressed so resume across daemon restarts and retries-after-failure
- * both work without companion-side state to track. `transfer.id` is
- * minted per attempt and only correlates the fragment stream; the
- * daemon binds it to the `update_id`-keyed partial, so a reconnect
- * with a fresh transfer id still resumes the same bytes.
- *
- * `update_url_base` is image-kind only: the server prefix the companion
- * may refetch the .zck delta from on cache miss while serving range
- * requests during the Writing phase. Ignored for non-image kinds.
- *
- * `patch`, when present, marks `transfer` as a delta rather than the whole
- * artifact: the daemon reconstructs against its currently-installed artifact
- * of this `kind` before staging. Daemon-kind only today. Absent for full
- * pushes.
- */
 export type OtaBegin = {
   kind: OtaKind;
   updateId: string;
   updateUrlBase: string | null;
   transfer: TransferRef;
   patch: OtaPatch | null;
+  provenance: string | null;
 };
 
-/**
- * Successful response to `OtaBegin`. `resume_from_offset` is the byte
- * offset the first `TransferFragment` should start at: 0 for fresh pushes, or
- * the daemon's recovered partial length for a resume.
- */
 export type OtaBeginAck = { resumeFromOffset: number };
 
-/**
- * Domain-error response to `OtaBegin`: the daemon refuses to start
- * or resume this push (already-running OTA, conflicting in-flight
- * update_id with mismatched size/sha, budget exhausted).
- */
 export type OtaBeginRejected = { reason: string };
 
-/**
- * Delta descriptor on `OtaBegin`. The streamed `transfer` is a patch; after
- * receiving it the daemon applies `algorithm` against its current artifact
- * and verifies the reconstruction is `result_size` bytes hashing to
- * `result_sha256` before it reaches staging.
- */
 export type OtaPatch = { algorithm: OtaPatchAlgorithm; resultSha256: string; resultSize: number };
 
-/**
- * Delta algorithm the daemon applies to reconstruct a full artifact from a
- * pushed patch. `ZstdPatchFrom` is a `zstd --patch-from` frame whose prefix
- * is the currently-installed artifact.
- */
 export type OtaPatchAlgorithm = 'zstdPatchFrom';
 
 export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
@@ -799,31 +538,10 @@ export type PhoneInitiateAction = {
 
 export type PhoneMuteAction = { mute: boolean };
 
-/**
- * Typed reply payload for `PhoneStateGet` and the unsolicited
- * announce-time snapshot the companion proactively pushes per the
- * announce-on-connect rule.
- */
 export type PhoneStateReply = { state: PhoneState };
 
-/**
- * Play a URI on the gateway. `context` lets the gateway honor playlist
- * / album semantics for skip-next when both sides understand the
- * scheme. The daemon parses the scheme and only forwards if a
- * connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
- */
 export type PlayUri = { uri: string; context: PlayContext | null };
 
-/**
- * Full queue replacement from the companion. `order` is the upcoming
- * queue as a list of item uris, current excluded; `items` carries full
- * metadata for every uri in `order`, so the daemon rebuilds the queue
- * from the snapshot alone. The companion sends one only when the upcoming
- * list materially changes (context switch, reorder, add-to-queue), never
- * on a plain advance - the daemon derives the post-advance next by
- * locating the now-playing track in the held queue. Both sides drop this
- * state on disconnect; no deltas, revisions, or resync to track.
- */
 export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 
 export type QueueUri = { uri: string; position: QueuePosition };
@@ -834,10 +552,6 @@ export type SearchReply = { result: SearchResult };
 
 export type SeekTo = { positionMs: number };
 
-/**
- * `duration_ms = None` turns crossfade off; `Some(0)` is also off but
- * distinguishes intent.
- */
 export type SetCrossfade = { durationMs: number | null };
 
 export type SetMute = { muted: boolean };
@@ -846,22 +560,12 @@ export type SetRepeat = { mode: RepeatMode };
 
 export type SetShuffle = { on: boolean };
 
-/**
- * Set absolute playback rate. `1.0` is normal speed; gateways with
- * limited speed support clamp to their nearest supported value.
- */
 export type SetSpeed = { speed: number };
 
 export type SetVolume = { level: number };
 
 export type SkipToIndex = { index: number };
 
-/**
- * Identifies a track for lyrics lookup. Different resolvers consume
- * different subsets: lrclib does signature lookup (artist + track +
- * album + duration), other resolvers may use ISRC or platform-specific
- * ids. Populate what's available; resolvers ignore the rest.
- */
 export type TrackIdentity = {
   artist: string;
   track: string;
@@ -870,66 +574,22 @@ export type TrackIdentity = {
   isrc: string | null;
 };
 
-/**
- * Sender-side abort of an in-flight transfer (source lost the bytes,
- * upstream fetch failed). The receiver drops the bound sink; partial
- * disk state is kept for resumable transfers and discarded otherwise.
- */
 export type TransferAbandon = { transferId: string; reason: string };
 
-/**
- * Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
- */
 export type TransferAck = { transferId: string; received: number };
 
-/**
- * Standard embedding for a byte payload that may or may not warrant a
- * fragment stream. Senders pick by size: a small payload rides inline
- * in the carrying message (one frame, no machinery); a large one
- * declares a stream and fragments follow. Receivers resolve both arms
- * through one path.
- */
 export type TransferBody = { type: 'inline'; data: Uint8Array } | { type: 'stream'; data: TransferRef };
 
-/**
- * One slice of a transfer's bytes. Variable-size and offset-addressed:
- * fragments are sent in offset order on the transfer's priority lane,
- * sized by the sender to its preemption budget. Receivers route by
- * `transfer_id` to the sink bound when the transfer opened.
- */
 export type TransferFragment = { transferId: string; offset: number; bytes: Uint8Array };
 
-/**
- * Handle to a fragment stream, embedded in the typed message that
- * opens a transfer (a pull reply or a push begin). The bytes travel
- * out-of-band as `TransferFragment` events keyed by `id`; the
- * transfer completes when `total_size` bytes have arrived. For pull
- * replies `id` is the originating request id.
- */
 export type TransferRef = { id: string; totalSize: number; sha256: string | null };
 
-/**
- * Fire-and-forget TTS request. `id` is webapp-assigned (no request
- * round-trip) and used for cancellation + matching back-to-back
- * `TtsStarted`/`TtsEnded` events. `voice` selects from
- * `AudioCapabilities.voices`; `None` uses the gateway's default.
- */
 export type Tts = { id: string; text: string; voice: string | null };
 
 export type TtsCancel = { id: string };
 
-/**
- * Fired when the TTS request finished. `completed` is true when the
- * full text was spoken; false when preempted, cancelled, or the
- * companion dropped it.
- */
 export type TtsEnded = { id: string; completed: boolean };
 
-/**
- * Fired when the companion has begun speaking the TTS request with this
- * id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
- * before speech started); webapps should treat both as best-effort.
- */
 export type TtsStarted = { id: string };
 
 export type TunnelErrorReply = { error: TunnelError };
@@ -938,30 +598,12 @@ export type TunnelOpen = { tunnelId: string; host: string; port: number };
 
 export type TunnelOpenReply = Record<symbol, never>;
 
-/**
- * Why the gateway is opening the mic. The daemon currently treats every
- * reason the same (open and stream); the field is kept so future policy
- * (hotword vs. assistant routing, VAD timeout per reason) has the shape
- * it needs.
- */
 export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
 
 export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
 
-/**
- * The companion has resolved a captured utterance into an NluResolvedIntent
- * (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
- * catalog slots) and is asking the daemon to dispatch. The daemon's
- * dispatcher picks the target: stock playback, active-webapp forward, or
- * OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
- * Dispatched` / `DispatchFailed`.
- */
 export type VoiceDispatch = { resolved: NluResolvedIntent };
 
-/**
- * Terminal failure for an inbound `VoiceDispatch`. Daemon could not
- * route the resolved intent; companion presents the appropriate UX.
- */
 export type VoiceDispatchFailed = {
   code: VoiceDispatchErrorCode;
   intent: string;
@@ -969,60 +611,24 @@ export type VoiceDispatchFailed = {
   msg: string;
 };
 
-/**
- * Notification that an inbound `VoiceDispatch` was routed. `target`
- * describes where the daemon sent it; the daemon's own action surfaces
- * (Player events, WebappActive changes) are the source of truth for the
- * effect - this event is purely so the companion can render confirmation
- * UI without polling state.
- */
 export type VoiceDispatched = { target: VoiceDispatchTarget; intent: string; webappId: string | null };
 
-/**
- * PCM frame format the daemon ships in `Frame` payloads. Voice capture
- * runs at a fixed format per session; format is announced once on
- * `StreamOpen` and held constant through `StreamClose`.
- */
 export type VoiceFormat = { sampleRateHz: number; channels: number; bitsPerSample: number };
 
-/**
- * One PCM frame in an active capture session. Sent on the Bulk lane so
- * it interleaves between Normal-priority traffic. `seq` increments
- * from 0; gaps mean the daemon dropped frames under backpressure and
- * the companion should treat them as silence rather than retransmit.
- */
 export type VoiceFrame = { streamId: string; seq: number; pcm: Uint8Array };
 
 export type VoiceMicOpen = { reason: VoiceCaptureReason };
 
 export type VoiceStreamClose = { streamId: string; reason: VoiceCloseReason };
 
-/**
- * Daemon opens a capture session. The companion is expected to begin
- * consuming `Frame`s with the same `stream_id` until a `StreamClose`
- * for that id arrives.
- */
 export type VoiceStreamOpen = { streamId: string; format: VoiceFormat };
 
-/**
- * Volume / mute snapshot. Fired on any change to either; webapps treat
- * `level` as the canonical value.
- */
 export type VolumeChanged = { level: number; muted: boolean };
 
 export type WebappActive = { id: string | null; name: string | null };
 
-/**
- * Event payload for an active-webapp change (any initiator). Distinct from
- * `WebappActive` (a request response) so it carries the new app's declared
- * art profile; the companion reads `art` directly to size its pushes.
- */
 export type WebappActiveChanged = { id: string | null; name: string | null; art: ArtProfile | null };
 
-/**
- * Ack for WebappConfigSet / WebappConfigDelete. The `value` field
- * echoes what's now stored after the write (None for delete).
- */
 export type WebappConfigAck = { key: string; value: string | null };
 
 export type WebappConfigDelete = { id: string; key: string };
@@ -1037,29 +643,15 @@ export type WebappConfigListReply = { entries: Array<ConfigEntry> };
 
 export type WebappConfigSet = { id: string; key: string; value: string };
 
-/**
- * Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
- */
 export type WebappDocAck = { key: string; value: string | null };
 
-/**
- * Broadcast when the WEBAPP writes its doc namespace, so an open
- * companion settings page sees device-side changes live. Gateway-origin
- * writes are not echoed back (the writer already holds the ack).
- */
 export type WebappDocChanged = { id: string; key: string; value: string | null };
 
 export type WebappDocDelete = { id: string; key: string };
 
 export type WebappDocGet = { id: string; key: string };
 
-export type WebappDocGetReply = {
-  key: string;
-  /**
-   * `None` when the key has never been written.
-   */
-  value: string | null;
-};
+export type WebappDocGetReply = { key: string; value: string | null };
 
 export type WebappDocList = { id: string };
 
@@ -1069,24 +661,10 @@ export type WebappDocSet = { id: string; key: string; value: string };
 
 export type WebappList = { webapps: Array<WebappInfo> };
 
-/**
- * On-demand fetch of a webapp bundle resource (icon bytes, companion
- * settings page). `have` carries the sha256 the requester already
- * caches; a match returns a bodyless reply so unchanged resources
- * never re-cross the link.
- */
 export type WebappResource = { id: string; kind: WebappResourceKind; have: string | null };
 
-/**
- * Which bundle file a `WebappResource` request targets.
- */
 export type WebappResourceKind = 'icon' | 'settings';
 
-/**
- * Reply to `WebappResource`. `sha256` is the current content hash;
- * `body` is absent when the requester's `have` already matched (its
- * cache is current). Large bodies stream as fragments per `TransferBody`.
- */
 export type WebappResourceReply = {
   id: string;
   kind: WebappResourceKind;

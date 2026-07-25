@@ -12,6 +12,8 @@ import com.bridgething.schema.WebappSource
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.OffsetDateTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,47 +34,35 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-/**
- * Persists the catalog subscription list and the provenance pins (which source
- * each installed app came from). Injected so the host can back it with whatever
- * storage it prefers; the default writes JSON files.
- */
 public interface CatalogStore {
     public suspend fun loadSources(): List<String>
     public suspend fun saveSources(urls: List<String>)
-    public suspend fun loadPins(): Map<String, String>
-    public suspend fun savePins(pins: Map<String, String>)
 }
 
-/** Fetches catalogs and downloads bundles. Injected so aggregation and install can be tested offline. */
 public interface CatalogFetcher {
     public suspend fun fetchCatalog(url: String): Catalog
     public suspend fun download(url: String, destination: File)
 }
 
-/** The byte pump that streams a bundle to the device. [OtaService] implements it; the catalog reuses the one OTA path. */
 public interface WebappInstaller {
-    public suspend fun installWebapp(gateway: BridgethingGateway, deviceId: String, bundlePath: File): WebappInstallResult
+    public suspend fun installWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: File,
+        provenance: String?,
+    ): WebappInstallResult
 }
 
-/**
- * One aggregated entry in the store UI: an app drawn from its primary source
- * (the pinned source if installed, else the first subscribed source offering
- * it), annotated with compat, install state, and where else it is available.
- */
 @Serializable
 public data class CatalogAppListing(
     val app: CatalogApp,
     val sourceUrl: String,
-    /** Newest version whose min_libbridgething_version the device satisfies, or null if too old for every version. */
     val newestCompatible: CatalogAppVersion?,
     val installedVersion: String?,
     val updateAvailable: Boolean,
-    /** Other subscribed sources that list this same uuid. */
     val alsoAvailableFrom: List<String>,
 )
 
-/** A pending update for an installed app, sourced only from its pinned source. */
 @Serializable
 public data class CatalogAppUpdate(
     val appId: String,
@@ -82,17 +72,11 @@ public data class CatalogAppUpdate(
     val sourceUrl: String,
 )
 
-/**
- * Background update-poll configuration. Off by default; even when on, the
- * default is to surface [CatalogEvent.UpdateAvailable] rather than install
- * silently, since the user curates which webapps live on their device.
- */
 public data class CatalogPollConfig(
     val intervalSeconds: Long = 6 * 60 * 60L,
     val autoInstall: Boolean = false,
 )
 
-/** High-level events the host app drives UI from. */
 public sealed class CatalogEvent {
     public data class Refreshed(val sourceCount: Int, val appCount: Int) : CatalogEvent()
     public data class SourceFailed(val url: String, val reason: String) : CatalogEvent()
@@ -101,12 +85,6 @@ public sealed class CatalogEvent {
     public data class InstallFailed(val deviceId: String, val appId: String, val reason: String) : CatalogEvent()
 }
 
-/**
- * The webapp app-store service. Owns the subscription list and provenance pins,
- * aggregates `catalog.v1` sources, filters by the device's libbridgethingVersion,
- * and drives installs/updates through the OTA byte pump. Delivery is never
- * reimplemented here; only discovery, provenance, and compat live in this class.
- */
 public class CatalogService(
     private val installer: WebappInstaller,
     private val store: CatalogStore = InMemoryCatalogStore(),
@@ -120,7 +98,6 @@ public class CatalogService(
 
     private var attachedGateway: BridgethingGateway? = null
     private var sourceUrls: List<String> = emptyList()
-    private var pins: Map<String, String> = emptyMap()
     private val deviceMeta = mutableMapOf<String, BridgeThingMeta>()
     private val catalogs = mutableMapOf<String, Catalog>()
     private var loaded = false
@@ -134,7 +111,6 @@ public class CatalogService(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
-    /** High-level events the host app drives UI off. */
     public val events: Flow<CatalogEvent> = eventsFlow.asSharedFlow()
 
     public suspend fun start(gateway: BridgethingGateway) {
@@ -184,11 +160,11 @@ public class CatalogService(
         }
     }
 
-    public suspend fun pinnedSource(appId: String): String? = mutex.withLock { loadStateLocked(); pins[appId] }
+    public suspend fun pinnedSource(deviceId: String, appId: String): String? =
+        pins(installedApps(deviceId))[appId]
 
     // browse
 
-    /** Fetch every subscribed catalog. A source that fails emits [CatalogEvent.SourceFailed] and keeps its last-known catalog. */
     public suspend fun refresh() {
         val urls = mutex.withLock { loadStateLocked(); sourceUrls }
         for (url in urls) {
@@ -203,27 +179,17 @@ public class CatalogService(
         eventsFlow.emit(CatalogEvent.Refreshed(count, appCount))
     }
 
-    /**
-     * Aggregated, compat-annotated listings for the store UI. Reads the device's
-     * installed apps and its libbridgethingVersion; call [refresh] first.
-     */
     public suspend fun availableApps(deviceId: String): List<CatalogAppListing> {
         val installed = installedApps(deviceId)
-        val (ordered, currentPins, deviceLib) = mutex.withLock {
+        val (ordered, deviceLib) = mutex.withLock {
             loadStateLocked()
-            Triple(orderedCatalogsLocked(), pins.toMap(), deviceMeta[deviceId]?.libbridgethingVersion)
+            orderedCatalogsLocked() to deviceMeta[deviceId]?.libbridgethingVersion
         }
-        return aggregate(ordered, installed, currentPins, deviceLib)
+        return aggregate(ordered, installed, deviceLib)
     }
 
     // install
 
-    /**
-     * Download the version's zip, verify it matches the catalog's declared size +
-     * sha256, deliver it via the OTA pump, and on success pin the app to the
-     * source it came from. The sha256 check here is the catalog's integrity
-     * guarantee; the daemon separately verifies transfer integrity.
-     */
     public suspend fun install(
         deviceId: String,
         app: CatalogApp,
@@ -243,27 +209,17 @@ public class CatalogService(
             return WebappInstallResult.Failed(reason)
         }
 
-        val result = installer.installWebapp(gateway, deviceId, bundle)
+        val result = installer.installWebapp(gateway, deviceId, bundle, sourceUrl)
         runCatching { bundle.delete() }
         when (result) {
-            is WebappInstallResult.Installed -> {
-                mutex.withLock {
-                    pins = pins + (app.id to sourceUrl)
-                    store.savePins(pins)
-                }
+            is WebappInstallResult.Installed ->
                 eventsFlow.emit(CatalogEvent.Installed(deviceId, app.id, result.info.version))
-            }
             is WebappInstallResult.Failed ->
                 eventsFlow.emit(CatalogEvent.InstallFailed(deviceId, app.id, result.reason))
         }
         return result
     }
 
-    /**
-     * Install by ids, resolving the app + version from the last refreshed catalog
-     * for [sourceUrl]. Convenience for callers (the RN bridge) that hold
-     * identifiers rather than the decoded objects.
-     */
     public suspend fun install(deviceId: String, appId: String, version: String, sourceUrl: String): WebappInstallResult {
         val (app, ver) = mutex.withLock {
             loadStateLocked()
@@ -280,14 +236,13 @@ public class CatalogService(
 
     // updates
 
-    /** Pending updates for installed apps, each sourced only from the app's pinned source. */
     public suspend fun checkForUpdates(deviceId: String): List<CatalogAppUpdate> {
         val installed = installedApps(deviceId)
-        val (snapshot, currentPins, deviceLib) = mutex.withLock {
+        val (snapshot, deviceLib) = mutex.withLock {
             loadStateLocked()
-            Triple(catalogs.toMap(), pins.toMap(), deviceMeta[deviceId]?.libbridgethingVersion)
+            catalogs.toMap() to deviceMeta[deviceId]?.libbridgethingVersion
         }
-        return updates(snapshot, currentPins, installed, deviceLib)
+        return updates(snapshot, installed, deviceLib)
     }
 
     public suspend fun setPollConfig(config: CatalogPollConfig?) {
@@ -336,7 +291,6 @@ public class CatalogService(
             store.saveSources(sources)
         }
         sourceUrls = sources
-        pins = store.loadPins()
         loaded = true
     }
 
@@ -395,10 +349,10 @@ public class CatalogService(
         internal fun aggregate(
             orderedCatalogs: List<Pair<String, Catalog>>,
             installed: List<WebappInfo>,
-            pins: Map<String, String>,
             deviceLibVersion: String?,
         ): List<CatalogAppListing> {
             val installedById = installed.associateBy { it.id.toString().lowercase() }
+            val pins = pins(installed)
 
             val offerings = LinkedHashMap<String, MutableList<Pair<String, CatalogApp>>>()
             for ((url, catalog) in orderedCatalogs) {
@@ -436,10 +390,10 @@ public class CatalogService(
 
         internal fun updates(
             catalogs: Map<String, Catalog>,
-            pins: Map<String, String>,
             installed: List<WebappInfo>,
             deviceLibVersion: String?,
         ): List<CatalogAppUpdate> {
+            val pins = pins(installed)
             val out = mutableListOf<CatalogAppUpdate>()
             for (info in installed) {
                 if (info.source != WebappSource.Installed || info.role != WebappRole.Standard) continue
@@ -461,25 +415,34 @@ public class CatalogService(
             return out.sortedWith(compareBy({ it.name }, { it.appId }))
         }
 
-        /**
-         * Newest version (catalog order is newest-first) the device satisfies. A
-         * null device version means it has not announced yet; treat every version
-         * as compatible so the UI can still list the app.
-         */
+        internal fun pins(installed: List<WebappInfo>): Map<String, String> =
+            installed.mapNotNull { info ->
+                info.provenance?.let { info.id.toString().lowercase() to it }
+            }.toMap()
+
+        internal fun releasedAtInstant(raw: String): Instant? =
+            runCatching { OffsetDateTime.parse(raw).toInstant() }.getOrNull()
+
+        internal fun sortedByReleasedAt(versions: List<CatalogAppVersion>): List<CatalogAppVersion> =
+            versions.withIndex().sortedWith(
+                compareBy<IndexedValue<CatalogAppVersion>> { releasedAtInstant(it.value.releasedAt) == null }
+                    .thenByDescending { releasedAtInstant(it.value.releasedAt) ?: Instant.MIN }
+                    .thenBy { it.index }
+            ).map { it.value }
+
         internal fun newestCompatible(app: CatalogApp, deviceLibVersion: String?): CatalogAppVersion? {
-            if (deviceLibVersion == null) return app.versions.firstOrNull()
-            return app.versions.firstOrNull {
+            val ordered = sortedByReleasedAt(app.versions)
+            if (deviceLibVersion == null) return ordered.firstOrNull()
+            return ordered.firstOrNull {
                 SemverCompat.satisfies(deviceLibVersion, it.minLibbridgethingVersion)
             }
         }
     }
 }
 
-/** File-backed [CatalogStore]. Stores two small JSON files under [directory]. */
 public class FileCatalogStore(private val directory: File) : CatalogStore {
     private val json = Json { prettyPrint = false }
     private val sourcesFile get() = File(directory, "sources.json")
-    private val pinsFile get() = File(directory, "pins.json")
 
     override suspend fun loadSources(): List<String> = withContext(Dispatchers.IO) {
         runCatching { json.decodeFromString<List<String>>(sourcesFile.readText()) }.getOrDefault(emptyList())
@@ -489,33 +452,18 @@ public class FileCatalogStore(private val directory: File) : CatalogStore {
         directory.mkdirs()
         sourcesFile.writeText(json.encodeToString(urls))
     }
-
-    override suspend fun loadPins(): Map<String, String> = withContext(Dispatchers.IO) {
-        runCatching { json.decodeFromString<Map<String, String>>(pinsFile.readText()) }.getOrDefault(emptyMap())
-    }
-
-    override suspend fun savePins(pins: Map<String, String>): Unit = withContext(Dispatchers.IO) {
-        directory.mkdirs()
-        pinsFile.writeText(json.encodeToString(pins))
-    }
 }
 
-/** In-memory [CatalogStore] for tests and hosts that persist elsewhere. */
 public class InMemoryCatalogStore(
     sources: List<String> = emptyList(),
-    pins: Map<String, String> = emptyMap(),
 ) : CatalogStore {
     private val mutex = Mutex()
     private var sources: List<String> = sources
-    private var pins: Map<String, String> = pins
 
     override suspend fun loadSources(): List<String> = mutex.withLock { sources }
     override suspend fun saveSources(urls: List<String>) { mutex.withLock { sources = urls } }
-    override suspend fun loadPins(): Map<String, String> = mutex.withLock { pins }
-    override suspend fun savePins(pins: Map<String, String>) { mutex.withLock { this.pins = pins } }
 }
 
-/** Default [CatalogFetcher] over OkHttp. */
 public class OkHttpCatalogFetcher(
     private val httpClient: OkHttpClient,
     private val json: Json,

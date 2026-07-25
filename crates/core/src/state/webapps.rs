@@ -4,11 +4,13 @@ use std::{
   sync::Arc,
 };
 
-use libbridgething::{ConfigField, WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource};
+use libbridgething::{
+  ConfigField, WEBAPP_PROVENANCE_MAX_LEN, WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource,
+};
 use tokio::{fs, sync::RwLock};
 use uuid::Uuid;
 
-use super::StateResult;
+use super::{StateResult, storage::WebappProvenanceStore};
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 pub const SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
@@ -38,17 +40,23 @@ pub struct WebappBundle {
   pub icon_hash: Option<String>,
   pub settings_hash: Option<String>,
   pub bundle_hash: String,
+  pub provenance: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WebappRegistry {
   installed_root: PathBuf,
   builtin_root: PathBuf,
+  provenance: WebappProvenanceStore,
   bundles: Arc<RwLock<HashMap<Uuid, WebappBundle>>>,
 }
 
 impl WebappRegistry {
-  pub async fn init(installed_root: PathBuf, builtin_root: PathBuf) -> StateResult<Self> {
+  pub async fn init(
+    installed_root: PathBuf,
+    builtin_root: PathBuf,
+    provenance: WebappProvenanceStore,
+  ) -> StateResult<Self> {
     if !installed_root.exists() {
       tracing::debug!("creating installed webapps root at {}", installed_root.display());
       fs::create_dir_all(&installed_root).await?;
@@ -63,6 +71,7 @@ impl WebappRegistry {
     let me = Self {
       installed_root,
       builtin_root,
+      provenance,
       bundles: Arc::new(RwLock::new(HashMap::new())),
     };
     me.rescan().await;
@@ -78,13 +87,18 @@ impl WebappRegistry {
         tracing::warn!("duplicate webapp uuid in builtin root: {}", path.display());
       }
     }
+    let provenance = self.provenance.all().await.unwrap_or_else(|err| {
+      tracing::warn!(?err, "webapp provenance read failed; treating all as unknown");
+      HashMap::new()
+    });
     for path in scan_root(&self.installed_root).await {
       if let Some(bundle) = load_bundle(&path, WebappSource::Installed).await {
-        let bundle = if is_reserved(bundle.manifest.id) {
+        let mut bundle = if is_reserved(bundle.manifest.id) {
           remap_to_dev_shadow(bundle)
         } else {
           bundle
         };
+        bundle.provenance = provenance.get(&bundle.manifest.id).cloned();
         if let Some(prev) = bundles.insert(bundle.manifest.id, bundle.clone()) {
           tracing::debug!(
             "installed webapp '{}' shadows existing entry at {}",
@@ -163,7 +177,19 @@ impl WebappRegistry {
       .map(|b| b.manifest.id)
   }
 
-  pub async fn install_from_path(&self, archive_path: PathBuf) -> Result<WebappInfo, WebappError> {
+  pub async fn install_from_path(
+    &self,
+    archive_path: PathBuf,
+    provenance: Option<String>,
+  ) -> Result<WebappInfo, WebappError> {
+    if let Some(value) = provenance.as_deref()
+      && value.len() > WEBAPP_PROVENANCE_MAX_LEN
+    {
+      return Err(WebappError::ProvenanceTooLong {
+        max_bytes: WEBAPP_PROVENANCE_MAX_LEN as u32,
+      });
+    }
+
     let staging = self.installed_root.join(format!(".tmp.{}", Uuid::now_v7().simple()));
     fs::create_dir_all(&staging)
       .await
@@ -230,6 +256,12 @@ impl WebappRegistry {
       .await
       .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
 
+    self
+      .provenance
+      .set(bundle.manifest.id, provenance.as_deref())
+      .await
+      .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
+
     self.rescan().await;
     let installed = self.bundle(bundle.manifest.id).await.ok_or(WebappError::Internal {
       reason: "post-install scan dropped the bundle".into(),
@@ -267,6 +299,7 @@ impl WebappRegistry {
       return Ok(false);
     }
     fs::remove_dir_all(&bundle.path).await?;
+    self.provenance.clear(id).await?;
     self.rescan().await;
     Ok(true)
   }
@@ -375,6 +408,7 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     icon_hash,
     settings_hash,
     bundle_hash,
+    provenance: None,
   })
 }
 
@@ -550,6 +584,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     permissions: b.manifest.permissions.clone(),
     voice_grammar: b.manifest.voice_grammar.clone(),
     art: b.manifest.art,
+    provenance: b.provenance.clone(),
   }
 }
 

@@ -36,6 +36,7 @@ pub struct OtaBegin {
   pub update_url_base: Option<String>,
   pub transfer: TransferRef,
   pub patch: Option<OtaPatch>,
+  pub provenance: Option<String>,
 }
 
 #[typeshare]
