@@ -113,6 +113,31 @@ final class CompanionDispatchTests: XCTestCase {
         await h.companion.stop()
     }
 
+    func testAwaitMetaResolvesWhenVersionLandsAfterTheCall() async throws {
+        let h = try await boot()
+        let ota = await h.companion.ota
+        let deviceId = await h.driver.deviceId
+
+        XCTAssertNil(await ota.meta(deviceId: deviceId), "precondition: meta must not be cached yet")
+
+        async let pending = ota.awaitMeta(deviceId: deviceId)
+        try await h.driver.send(.version(Self.testMeta(nickname: nil)), meta: .event)
+
+        let resolved = await pending
+        XCTAssertEqual(resolved?.serialNumber, "SN-TEST-0001")
+        await h.companion.stop()
+    }
+
+    func testAwaitMetaTimesOutWhenNoVersionEverArrives() async throws {
+        let h = try await boot()
+        let ota = await h.companion.ota
+        let deviceId = await h.driver.deviceId
+
+        let resolved = await ota.awaitMeta(deviceId: deviceId, timeoutNanos: 200_000_000)
+        XCTAssertNil(resolved, "awaitMeta must give up rather than hang the pairing flow")
+        await h.companion.stop()
+    }
+
     private static func waitUntil(
         deadline: Duration = .seconds(5),
         _ predicate: () async -> Bool

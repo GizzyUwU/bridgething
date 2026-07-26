@@ -401,7 +401,7 @@ public actor BridgethingCompanion {
 
     public func enableAncsNotifications(deviceId: String) async -> AncsSetupResult {
         #if os(iOS)
-            guard let serial = await ota.meta(deviceId: deviceId)?.serialNumber else {
+            guard let serial = await ota.awaitMeta(deviceId: deviceId)?.serialNumber else {
                 return AncsSetupResult(kind: .failed("no metadata for device \(deviceId)"), authState: .unknown)
             }
             log(.info, "enableAncsNotifications: acquiring coordinator")
@@ -432,7 +432,7 @@ public actor BridgethingCompanion {
             defer { ancsPromotionInFlight = false }
             let coordinator = await makeOrReuseCoordinator()
             for id in connectedDeviceIds {
-                guard let serial = await ota.meta(deviceId: id)?.serialNumber else { continue }
+                guard let serial = await ota.awaitMeta(deviceId: id)?.serialNumber else { continue }
                 await coordinator.setAuthState(serial: serial, currentAncsAuthState(deviceId: id))
                 if await coordinator.hasPairedAccessory(serial: serial) {
                     await coordinator.reconnectIfPaired(serial: serial)

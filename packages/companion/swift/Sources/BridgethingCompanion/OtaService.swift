@@ -116,6 +116,7 @@ public actor OtaService {
     private var attachedGateway: BridgethingGateway?
     private var pollConfig: OtaPollConfig?
     private var deviceMeta: [String: BridgeThingMeta] = [:]
+    private var metaWaiters: [String: [(UUID, CheckedContinuation<BridgeThingMeta?, Never>)]] = [:]
     private var inFlight: Set<String> = []
 
     private var imageInstallTargets: [String: String] = [:]
@@ -493,6 +494,27 @@ public actor OtaService {
         deviceMeta[deviceId]
     }
 
+    public func awaitMeta(deviceId: String, timeoutNanos: UInt64 = 10_000_000_000) async -> BridgeThingMeta? {
+        if let meta = deviceMeta[deviceId] { return meta }
+        let id = UUID()
+        return await withCheckedContinuation { (cont: CheckedContinuation<BridgeThingMeta?, Never>) in
+            metaWaiters[deviceId, default: []].append((id, cont))
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: timeoutNanos)
+                await self?.expireMetaWaiter(deviceId: deviceId, id: id)
+            }
+        }
+    }
+
+    private func expireMetaWaiter(deviceId: String, id: UUID) {
+        guard var waiters = metaWaiters[deviceId],
+            let index = waiters.firstIndex(where: { $0.0 == id })
+        else { return }
+        let waiter = waiters.remove(at: index)
+        metaWaiters[deviceId] = waiters.isEmpty ? nil : waiters
+        waiter.1.resume(returning: nil)
+    }
+
     public func setPollConfig(_ config: OtaPollConfig?) {
         pollConfig = config
         pollTask?.cancel()
@@ -607,6 +629,9 @@ public actor OtaService {
     private func recordMeta(deviceId: String, meta: BridgeThingMeta) {
         let isNew = deviceMeta[deviceId] == nil
         deviceMeta[deviceId] = meta
+        for waiter in metaWaiters.removeValue(forKey: deviceId) ?? [] {
+            waiter.1.resume(returning: meta)
+        }
         metaChangedContinuation.yield((deviceId: deviceId, meta: meta))
         if let target = imageInstallTargets[deviceId], meta.imageVersion == target {
             imageInstallTargets.removeValue(forKey: deviceId)
