@@ -25,8 +25,8 @@ use libbridgething::{
   OtaKind, OtaPhase, Priority,
   gateway::{
     BridgeToGatewayMsg, BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayTransferMsg,
-    GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeSystemMsg, OtaAssetRange, OtaAssetRangeRejected,
-    OtaAssetRangeReply, OtaBegin, TransferBody, TransferRef,
+    GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeSystemMsg, OtaActivate, OtaAssetRange,
+    OtaAssetRangeRejected, OtaAssetRangeReply, OtaBegin, OtaPatch, OtaPatchAlgorithm, TransferBody, TransferRef,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
@@ -41,7 +41,10 @@ use crate::{
 
 const RANGE_CHUNK_BYTES: usize = 64 * 1024;
 const RANGE_INLINE_MAX_BYTES: u32 = 16 * 1024;
+const PATCH_LEVEL: i32 = 19;
+const PATCH_WINDOW_LOG: u32 = 27;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_push_update(
   url: &str,
   chaos: ChaosConfig,
@@ -50,7 +53,21 @@ pub async fn run_push_update(
   artifact: PathBuf,
   update_url_base: Option<String>,
   zcks: HashMap<String, PathBuf>,
+  patch_from: Option<PathBuf>,
+  compress: bool,
 ) -> Result<()> {
+  let (artifact, patch) = match (patch_from, compress) {
+    (Some(source), _) => {
+      let (path, spec) = cut_daemon_patch(&source, &artifact).await?;
+      (path, Some(spec))
+    }
+    (None, true) => {
+      let (path, spec) = compress_artifact(&artifact).await?;
+      (path, Some(spec))
+    }
+    (None, false) => (artifact, None),
+  };
+
   let metadata = tokio::fs::metadata(&artifact)
     .await
     .with_context(|| format!("stat artifact {}", artifact.display()))?;
@@ -81,7 +98,7 @@ pub async fn run_push_update(
       total_size: size,
       sha256: Some(sha256.clone()),
     },
-    patch: None,
+    patch,
     provenance: None,
   };
   let resume_from_offset = match send_begin(&mut conn, begin).await? {
@@ -118,9 +135,131 @@ pub async fn run_push_update(
     }
   });
 
-  let result = run_event_loop(&mut conn, registry, Arc::new(zcks), chunk_size).await;
+  let mut activate = matches!(kind, OtaKind::Daemon | OtaKind::BuiltinWebapp).then(|| ActivateOnStaged {
+    update_id: sha256.clone(),
+    sent: false,
+  });
+
+  let result = run_event_loop(&mut conn, registry, Arc::new(zcks), chunk_size, &mut activate).await;
   stream.abort();
   result
+}
+
+struct ActivateOnStaged {
+  update_id: String,
+  sent: bool,
+}
+
+async fn send_activate(out: &tokio::sync::mpsc::Sender<OutboundFrame>, update_id: &str) -> Result<()> {
+  out
+    .send(OutboundFrame::normal(GatewayToBridgeMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: MsgMeta::Command,
+      data: GatewayToBridgeSystemMsg::OtaActivate(OtaActivate {
+        expected: vec![update_id.to_string()],
+      })
+      .into(),
+    }))
+    .await
+    .map_err(|_| anyhow!("connection writer closed before OtaActivate"))
+}
+
+async fn compress_artifact(target: &Path) -> Result<(PathBuf, OtaPatch)> {
+  let result_sha256 = hash_file(target).await?;
+  let target_len = tokio::fs::metadata(target)
+    .await
+    .with_context(|| format!("stat artifact {}", target.display()))?
+    .len();
+  let result_size = u32::try_from(target_len).map_err(|_| anyhow!("artifact larger than 4 GiB; refusing"))?;
+
+  let out = std::env::temp_dir().join(format!("bridgething-daemon-full-{}.zst", uuid::Uuid::now_v7()));
+  let (src, dst) = (target.to_path_buf(), out.clone());
+  tokio::task::spawn_blocking(move || -> Result<()> {
+    let mut encoder = zstd::stream::write::Encoder::new(
+      std::fs::File::create(&dst).with_context(|| format!("create {}", dst.display()))?,
+      PATCH_LEVEL,
+    )?;
+    encoder.set_parameter(zstd::zstd_safe::CParameter::EnableLongDistanceMatching(true))?;
+    encoder.set_parameter(zstd::zstd_safe::CParameter::WindowLog(PATCH_WINDOW_LOG))?;
+    let mut reader =
+      std::io::BufReader::new(std::fs::File::open(&src).with_context(|| format!("open {}", src.display()))?);
+    std::io::copy(&mut reader, &mut encoder)?;
+    encoder.finish()?;
+    Ok(())
+  })
+  .await
+  .map_err(|err| anyhow!("compress task join: {err}"))??;
+
+  let len = tokio::fs::metadata(&out).await?.len();
+  tracing::info!(
+    artifact = %out.display(),
+    compressed_len = len,
+    result_size,
+    ratio = format!("{:.1}%", 100.0 * len as f64 / target_len as f64),
+    "compressed artifact with plain zstd"
+  );
+  Ok((
+    out,
+    OtaPatch {
+      algorithm: OtaPatchAlgorithm::Zstd,
+      result_sha256,
+      result_size,
+      source_sha256: None,
+    },
+  ))
+}
+
+async fn cut_daemon_patch(source: &Path, target: &Path) -> Result<(PathBuf, OtaPatch)> {
+  let source_sha256 = hash_file(source).await?;
+  let result_sha256 = hash_file(target).await?;
+  let target_len = tokio::fs::metadata(target)
+    .await
+    .with_context(|| format!("stat daemon binary {}", target.display()))?
+    .len();
+  let result_size = u32::try_from(target_len).map_err(|_| anyhow!("daemon binary larger than 4 GiB; refusing"))?;
+
+  let out = std::env::temp_dir().join(format!("bridgething-daemon-patch-{}.zst", uuid::Uuid::now_v7()));
+  let (src, tgt, dst) = (source.to_path_buf(), target.to_path_buf(), out.clone());
+  tokio::task::spawn_blocking(move || write_patch(&src, &tgt, &dst))
+    .await
+    .map_err(|err| anyhow!("patch task join: {err}"))??;
+
+  let patch_len = tokio::fs::metadata(&out).await?.len();
+  tracing::info!(
+    source = %source.display(),
+    patch = %out.display(),
+    patch_len,
+    result_size,
+    ratio = format!("{:.1}%", 100.0 * patch_len as f64 / target_len as f64),
+    "cut daemon delta patch"
+  );
+
+  Ok((
+    out,
+    OtaPatch {
+      algorithm: OtaPatchAlgorithm::ZstdPatchFrom,
+      result_sha256,
+      result_size,
+      source_sha256: Some(source_sha256),
+    },
+  ))
+}
+
+fn write_patch(source: &Path, target: &Path, out: &Path) -> Result<()> {
+  let prefix = std::fs::read(source).with_context(|| format!("read patch source {}", source.display()))?;
+  let mut encoder = zstd::stream::write::Encoder::with_ref_prefix(
+    std::fs::File::create(out).with_context(|| format!("create patch {}", out.display()))?,
+    PATCH_LEVEL,
+    &prefix,
+  )?;
+  encoder.set_parameter(zstd::zstd_safe::CParameter::EnableLongDistanceMatching(true))?;
+  encoder.set_parameter(zstd::zstd_safe::CParameter::WindowLog(PATCH_WINDOW_LOG))?;
+  let mut reader = std::io::BufReader::new(
+    std::fs::File::open(target).with_context(|| format!("open daemon binary {}", target.display()))?,
+  );
+  std::io::copy(&mut reader, &mut encoder)?;
+  encoder.finish()?;
+  Ok(())
 }
 
 async fn hash_file(path: &Path) -> Result<String> {
@@ -178,11 +317,20 @@ async fn run_event_loop(
   registry: AckRegistry,
   zcks: Arc<HashMap<String, PathBuf>>,
   chunk_size: usize,
+  activate: &mut Option<ActivateOnStaged>,
 ) -> Result<()> {
   loop {
     match tokio::time::timeout(Duration::from_secs(300), conn.inbound_rx.recv()).await {
       Ok(Some(msg)) => {
-        if let Some(action) = handle_inbound(msg, conn.outbound_tx.clone(), &registry, zcks.clone(), chunk_size).await?
+        if let Some(action) = handle_inbound(
+          msg,
+          conn.outbound_tx.clone(),
+          &registry,
+          zcks.clone(),
+          chunk_size,
+          activate,
+        )
+        .await?
         {
           return action;
         }
@@ -202,6 +350,7 @@ async fn handle_inbound(
   registry: &AckRegistry,
   zcks: Arc<HashMap<String, PathBuf>>,
   chunk_size: usize,
+  activate: &mut Option<ActivateOnStaged>,
 ) -> Result<Option<Result<()>>> {
   let request_id = msg.id;
   match msg.data {
@@ -217,6 +366,15 @@ async fn handle_inbound(
         eta_ms = ?p.eta_ms,
         "progress"
       );
+      if matches!(p.phase, OtaPhase::Writing) && p.percent >= 100 {
+        if let Some(pending) = activate.as_mut()
+          && !pending.sent
+        {
+          pending.sent = true;
+          tracing::info!(update_id = %pending.update_id, "piece staged - committing with OtaActivate");
+          send_activate(&out, &pending.update_id).await?;
+        }
+      }
       if matches!(p.phase, OtaPhase::Reboot) {
         tracing::info!("daemon entering reboot - exiting");
         return Ok(Some(Ok(())));

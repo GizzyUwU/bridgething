@@ -35,16 +35,32 @@ public struct OtaArtifactDigest: Decodable, Sendable, Equatable {
     public let sha256: String
 }
 
+public struct OtaPatchDigest: Decodable, Sendable, Equatable {
+    public let size: UInt64
+    public let sha256: String
+    public let sourceSha256: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case size
+        case sha256
+        case sourceSha256 = "source_sha256"
+    }
+
+    public var digest: OtaArtifactDigest { OtaArtifactDigest(size: size, sha256: sha256) }
+}
+
 public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
     public let daemon: OtaArtifactDigest?
+    public let daemonZst: OtaArtifactDigest?
     public let imageSwu: OtaArtifactDigest?
     public let imageZck: OtaArtifactDigest?
     public let imageBootZck: OtaArtifactDigest?
     public let webapps: [String: OtaArtifactDigest]
-    public let daemonPatches: [String: OtaArtifactDigest]
+    public let daemonPatches: [String: OtaPatchDigest]
 
     private enum CodingKeys: String, CodingKey {
         case daemon
+        case daemonZst = "daemon_zst"
         case imageSwu = "image_swu"
         case imageZck = "image_zck"
         case imageBootZck = "image_boot_zck"
@@ -55,11 +71,12 @@ public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         daemon = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .daemon)
+        daemonZst = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .daemonZst)
         imageSwu = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageSwu)
         imageZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageZck)
         imageBootZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageBootZck)
         webapps = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .webapps) ?? [:]
-        daemonPatches = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .daemonPatches) ?? [:]
+        daemonPatches = try container.decodeIfPresent([String: OtaPatchDigest].self, forKey: .daemonPatches) ?? [:]
     }
 }
 
@@ -116,6 +133,7 @@ public struct OtaCompositeVersion: Sendable, Equatable {
 
 public struct OtaArtifactURLs: Sendable, Equatable {
     public let daemonBinary: URL
+    public let daemonBinaryZst: URL
     public let imageSwu: URL
     public let imageZck: URL
     public let imageBootZck: URL
@@ -133,6 +151,11 @@ public struct OtaArtifactURLs: Sendable, Equatable {
             .appendingPathComponent(channel)
             .appendingPathComponent(daemonVersion)
             .appendingPathComponent("bridgething")
+        daemonBinaryZst = rootURL
+            .appendingPathComponent("daemon")
+            .appendingPathComponent(channel)
+            .appendingPathComponent(daemonVersion)
+            .appendingPathComponent("bridgething.zst")
         imageSwu = rootURL
             .appendingPathComponent("images")
             .appendingPathComponent(channel)

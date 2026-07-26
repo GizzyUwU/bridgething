@@ -45,6 +45,7 @@ pub struct OtaBegin {
 #[ts(export, export_to = "gateway.ts")]
 pub enum OtaPatchAlgorithm {
   ZstdPatchFrom,
+  Zstd,
 }
 
 #[typeshare]
@@ -56,6 +57,7 @@ pub struct OtaPatch {
   pub algorithm: OtaPatchAlgorithm,
   pub result_sha256: String,
   pub result_size: u32,
+  pub source_sha256: Option<String>,
 }
 
 #[typeshare]

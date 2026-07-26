@@ -33,7 +33,7 @@ import java.io.File
 import java.util.UUID
 
 class OtaStreamTest {
-    private val fragmentBytes = TransferPacer.LARGE_FRAGMENT_BYTES
+    private val fragmentBytes = TransferPacer.FRAGMENT_BYTES
 
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -142,8 +142,16 @@ class OtaStreamTest {
         val first = nextFragment()
         assertEquals(0, first.offset.toInt())
         assembled += first.bytes.size
+
+        val expectedInFlight = (TransferPacer.MIN_WINDOW_BYTES / fragmentBytes).toInt()
+        assertTrue(expectedInFlight >= 4, "initial window must span several fragments")
+        repeat(expectedInFlight - 1) {
+            val f = nextFragment()
+            assertEquals(assembled, f.offset.toInt(), "range fragments must arrive contiguous in offset order")
+            assembled += f.bytes.size
+        }
         val past = runCatching { withTimeout(600) { nextFragment() } }
-        assertTrue(past.isFailure, "range sender ran past the initial one-fragment window without an ack")
+        assertTrue(past.isFailure, "range sender ran past its window without an ack")
 
         var acked = assembled
         ack(acked)

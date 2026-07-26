@@ -158,6 +158,7 @@ final class CompanionDispatchTests: XCTestCase {
             appName: "bridgething",
             nickname: nickname,
             appVersion: "0.0.1",
+            daemonSha256: nil,
             osName: "superbird",
             osVersion: "2026.05.0",
             osDescription: "test image",

@@ -1,6 +1,7 @@
 package com.bridgething.companion
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -17,73 +18,101 @@ class TransferPacerTest {
         return TransferPacer(startOffset) { clock.now } to clock
     }
 
+    private data class Run(val throughput: Double, val window: Long)
+
+    private fun simulate(linkBytesPerSec: Double, rtt: Double, seconds: Double): Run {
+        val (pacer, clock) = makePacer()
+        var acked = 0L
+        var elapsed = 0.0
+        while (elapsed < seconds) {
+            val batch = pacer.windowBytes
+            val onWire = batch / linkBytesPerSec
+            val step = maxOf(onWire, rtt)
+            clock.advance(step)
+            elapsed += step
+            acked += batch
+            pacer.observe(acked)
+        }
+        return Run(acked / elapsed, pacer.windowBytes)
+    }
+
     @Test
-    fun `initial window is one large fragment`() {
+    fun `floor spans several ack intervals so the stream never stops and waits`() {
         val (pacer, _) = makePacer()
-        assertEquals(TransferPacer.LARGE_FRAGMENT_BYTES.toLong(), pacer.windowBytes)
-        assertEquals(TransferPacer.LARGE_FRAGMENT_BYTES, pacer.fragmentBytes)
+        assertTrue(pacer.windowBytes >= 4 * TransferPacer.ACK_INTERVAL_BYTES)
+        assertTrue(
+            pacer.windowBytes / pacer.fragmentBytes >= 4,
+            "at least four fragments must be in flight before the first ack is needed",
+        )
     }
 
     @Test
-    fun `fast acks ride the cap with large fragments`() {
+    fun `reaches link rate over bluetooth`() {
+        val link = 175_000.0
+        val run = simulate(link, rtt = 0.25, seconds = 60.0)
+        assertTrue(
+            run.throughput > link * 0.9,
+            "pacer must not be the constraint on a link this slow; got ${run.throughput.toInt()} B/s of ${link.toInt()}",
+        )
+    }
+
+    @Test
+    fun `reaches link rate when the round trip is long`() {
+        val link = 175_000.0
+        val run = simulate(link, rtt = 0.5, seconds = 120.0)
+        assertTrue(run.throughput > link * 0.9, "got ${run.throughput.toInt()} B/s of ${link.toInt()}")
+    }
+
+    @Test
+    fun `window stays inside the queueing budget`() {
+        val link = 175_000.0
+        val run = simulate(link, rtt = 0.25, seconds = 60.0)
+        val queued = run.window / link
+        assertTrue(queued <= TransferPacer.TARGET_DELAY_SECONDS * 1.5, "queued ${queued}s of link time")
+    }
+
+    @Test
+    fun `window stays inside the daemons buffered depth`() {
+        val run = simulate(20_000_000.0, rtt = 0.002, seconds = 5.0)
+        assertTrue(run.window <= TransferPacer.MAX_WINDOW_BYTES)
+        assertTrue(run.window / TransferPacer.FRAGMENT_BYTES <= 16)
+    }
+
+    @Test
+    fun `a transient stall does not collapse the window`() {
         val (pacer, clock) = makePacer()
         var acked = 0L
         repeat(8) {
-            clock.advance(0.1)
-            acked += 16 * 1024
+            clock.advance(0.25)
+            acked += 44 * 1024
             pacer.observe(acked)
         }
-        assertEquals(TransferPacer.MAX_WINDOW_BYTES, pacer.windowBytes)
-        assertEquals(TransferPacer.LARGE_FRAGMENT_BYTES, pacer.fragmentBytes)
-    }
+        val settled = pacer.windowBytes
+        assertTrue(settled > TransferPacer.MIN_WINDOW_BYTES)
 
-    @Test
-    fun `slow acks bound queue to the target delay with small fragments`() {
-        val (pacer, clock) = makePacer()
-        var acked = 0L
-        repeat(10) {
-            clock.advance(2.0)
-            acked += 16 * 1024
-            pacer.observe(acked)
-        }
-        assertTrue(pacer.windowBytes <= 8 * 1024, "8 KB/s x 0.6s target delay stays under a second of queue")
-        assertTrue(pacer.windowBytes >= TransferPacer.MIN_WINDOW_BYTES)
-        assertEquals(TransferPacer.SMALL_FRAGMENT_BYTES, pacer.fragmentBytes)
-    }
-
-    @Test
-    fun `degrading link sheds queue on one long ack gap`() {
-        val (pacer, clock) = makePacer()
-        var acked = 0L
-        repeat(8) {
-            clock.advance(0.1)
-            acked += 16 * 1024
-            pacer.observe(acked)
-        }
-        assertEquals(TransferPacer.MAX_WINDOW_BYTES, pacer.windowBytes)
-        clock.advance(3.0)
+        clock.advance(4.0)
         acked += 4 * 1024
         pacer.observe(acked)
-        assertTrue(pacer.windowBytes < TransferPacer.MAX_WINDOW_BYTES)
+        assertEquals(settled, pacer.windowBytes, "one slow sample must not shed the window")
     }
 
     @Test
-    fun `recovery grows the window back`() {
+    fun `sustained degradation does shrink the window`() {
         val (pacer, clock) = makePacer()
         var acked = 0L
-        repeat(10) {
+        repeat(8) {
+            clock.advance(0.25)
+            acked += 128 * 1024
+            pacer.observe(acked)
+        }
+        val fast = pacer.windowBytes
+        repeat(TransferPacer.RATE_SAMPLE_COUNT) {
             clock.advance(2.0)
-            acked += 4 * 1024
+            acked += 8 * 1024
             pacer.observe(acked)
         }
-        assertEquals(TransferPacer.MIN_WINDOW_BYTES, pacer.windowBytes)
-        repeat(20) {
-            clock.advance(0.05)
-            acked += 16 * 1024
-            pacer.observe(acked)
-        }
-        assertEquals(TransferPacer.MAX_WINDOW_BYTES, pacer.windowBytes)
-        assertEquals(TransferPacer.LARGE_FRAGMENT_BYTES, pacer.fragmentBytes)
+        assertTrue(pacer.windowBytes < fast, "a link that is genuinely slow now must queue less")
+        assertTrue(pacer.windowBytes >= TransferPacer.MIN_WINDOW_BYTES)
     }
 
     @Test
@@ -92,6 +121,16 @@ class TransferPacerTest {
         clock.advance(5.0)
         pacer.observe(8 * 1024)
         pacer.observe(4 * 1024)
-        assertEquals(TransferPacer.LARGE_FRAGMENT_BYTES.toLong(), pacer.windowBytes, "no rate estimate without progress")
+        assertNull(pacer.ratePerSec, "no rate estimate without progress")
+        assertEquals(TransferPacer.MIN_WINDOW_BYTES, pacer.windowBytes)
+    }
+
+    @Test
+    fun `resume baseline does not invent a huge first sample`() {
+        val (pacer, clock) = makePacer(startOffset = 30L * 1024 * 1024)
+        clock.advance(0.25)
+        pacer.observe(30L * 1024 * 1024 + 44 * 1024)
+        val rate = pacer.ratePerSec ?: 0.0
+        assertTrue(rate < 1_000_000, "rate came out as ${rate.toInt()} B/s, which means the baseline was 0")
     }
 }

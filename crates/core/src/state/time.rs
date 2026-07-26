@@ -1,6 +1,6 @@
 use std::{
   sync::Arc,
-  time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+  time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use libbridgething::{
@@ -155,6 +155,8 @@ impl TimeManager {
 
 #[cfg(test)]
 mod tests {
+  use std::time::Duration;
+
   use super::*;
 
   fn manager() -> TimeManager {

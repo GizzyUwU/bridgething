@@ -215,13 +215,9 @@ public struct BridgeThingMeta: Codable, Sendable {
 	public let bridgethingVersion: String
 	public let libbridgethingVersion: String
 	public let appName: String
-	/// User-set display name for this device. None when the user hasn't
-	/// set one yet; consumers fall back to `model_name` / `serial_number`.
-	/// Set via the gateway-side `system.device.setNickname` surface.
 	public let nickname: String?
-	/// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
-	/// the manifest's daemon-component version for OTA hot-swap decisions.
 	public let appVersion: String
+	public let daemonSha256: String?
 	public let osName: String
 	public let osVersion: String
 	public let osDescription: String
@@ -230,18 +226,8 @@ public struct BridgeThingMeta: Codable, Sendable {
 	public let fccId: String
 	public let icId: String
 	public let modelName: String
-	/// OTA channel the running image was cut on, e.g. `stable` or `dev`.
-	/// The companion's poll loop only auto-pushes when its configured
-	/// channel matches; a mismatch surfaces a "channel switch needs full
-	/// flash" event rather than swapping channels in-band.
 	public let channel: String
-	/// Image variant the running image was cut as, e.g. `prod` or `dev`.
-	/// Maps to the yocto image recipe name `bridgething-<variant>-image`,
-	/// which is what the companion uses to construct the OTA artifact URL
-	/// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
 	public let imageVariant: String
-	/// Canonical image version (CalVer, e.g. `2026.05.0`). What the
-	/// companion compares to the manifest's image-component version.
 	public let imageVersion: String
 	public let imageBuildId: String
 	public let imageBuildDate: String
@@ -250,12 +236,13 @@ public struct BridgeThingMeta: Codable, Sendable {
 	public let discord: String
 	public let credits: String
 
-	public init(bridgethingVersion: String, libbridgethingVersion: String, appName: String, nickname: String?, appVersion: String, osName: String, osVersion: String, osDescription: String, btMac: String, serialNumber: String, fccId: String, icId: String, modelName: String, channel: String, imageVariant: String, imageVersion: String, imageBuildId: String, imageBuildDate: String, imageDistro: String, imageMachine: String, discord: String, credits: String) {
+	public init(bridgethingVersion: String, libbridgethingVersion: String, appName: String, nickname: String?, appVersion: String, daemonSha256: String?, osName: String, osVersion: String, osDescription: String, btMac: String, serialNumber: String, fccId: String, icId: String, modelName: String, channel: String, imageVariant: String, imageVersion: String, imageBuildId: String, imageBuildDate: String, imageDistro: String, imageMachine: String, discord: String, credits: String) {
 		self.bridgethingVersion = bridgethingVersion
 		self.libbridgethingVersion = libbridgethingVersion
 		self.appName = appName
 		self.nickname = nickname
 		self.appVersion = appVersion
+		self.daemonSha256 = daemonSha256
 		self.osName = osName
 		self.osVersion = osVersion
 		self.osDescription = osDescription
@@ -2822,17 +2809,20 @@ public struct TransferRef: Codable, Sendable {
 
 public enum OtaPatchAlgorithm: String, Codable, Sendable {
 	case zstdPatchFrom
+	case zstd
 }
 
 public struct OtaPatch: Codable, Sendable {
 	public let algorithm: OtaPatchAlgorithm
 	public let resultSha256: String
 	public let resultSize: UInt32
+	public let sourceSha256: String?
 
-	public init(algorithm: OtaPatchAlgorithm, resultSha256: String, resultSize: UInt32) {
+	public init(algorithm: OtaPatchAlgorithm, resultSha256: String, resultSize: UInt32, sourceSha256: String?) {
 		self.algorithm = algorithm
 		self.resultSha256 = resultSha256
 		self.resultSize = resultSize
+		self.sourceSha256 = sourceSha256
 	}
 }
 

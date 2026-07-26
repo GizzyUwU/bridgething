@@ -5233,11 +5233,6 @@ public object FfiConverterTypeAuthState : FfiConverterRustBuffer<AuthState>{
 
 
 
-/**
- * Coarse endpoint class. Spotify's own `DeviceType` long tail collapses
- * here so callers pick an icon from a closed set instead of matching on a
- * protobuf name.
- */
 
 enum class DeviceKind {
     

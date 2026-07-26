@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { domainIcon, domainOf, friendlyName, isControllable, isDefaultPick } from './domains';
+import { domainOf, friendlyName, isControllable, isDefaultPick } from './domains';
 import type { HaState } from './ha';
+import { DomainIcon } from './icons';
 
 const DEFAULT_CAP = 12;
 
@@ -69,7 +70,7 @@ export default function Picker({ all, initial, onDone, onCancel }: Props) {
               className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
                 on ? 'bg-bt-blue/20 ring-1 ring-bt-blue' : 'bg-black/25 active:bg-black/40'
               }`}>
-              <span className="text-xl">{domainIcon(s.entityId)}</span>
+              <DomainIcon entityId={s.entityId} size={20} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{friendlyName(s)}</span>
                 <span className="block truncate text-xs text-bt-soft-gray">{s.entityId}</span>

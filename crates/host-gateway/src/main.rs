@@ -91,6 +91,16 @@ enum Command {
     /// Path to the aarch64 daemon binary. Relative paths resolve
     /// against `--fixture` when set, otherwise CWD.
     binary: PathBuf,
+    /// Cut a zstd delta against this older daemon binary and push that
+    /// instead of the whole thing, the way a released update reaches a
+    /// phone. Must be the exact binary the device is running, which the
+    /// daemon enforces against its own digest before applying.
+    #[arg(long)]
+    patch_from: Option<PathBuf>,
+    /// Compress the binary with plain zstd before pushing. No source needed, so this is the fallback
+    /// a device gets when no delta applies; roughly a quarter the bytes of a raw binary.
+    #[arg(long)]
+    compress: bool,
   },
   /// Open `OtaBegin` for a builtin-webapp update and stream a hub or stock webapp bundle zip.
   /// Bundle's `manifest.json` id must be `HUB_WEBAPP_ID` or `STOCK_WEBAPP_ID`.
@@ -159,10 +169,16 @@ async fn main() -> anyhow::Result<()> {
         swu_path,
         update_url_base,
         zcks,
+        None,
+        false,
       )
       .await
     }
-    Command::PushDaemon { binary } => {
+    Command::PushDaemon {
+      binary,
+      patch_from,
+      compress,
+    } => {
       let binary_path = resolve_path(cli.fixture.as_deref(), &binary);
       ota::run_push_update(
         &cli.url,
@@ -172,6 +188,8 @@ async fn main() -> anyhow::Result<()> {
         binary_path,
         None,
         std::collections::HashMap::new(),
+        patch_from.map(|p| resolve_path(cli.fixture.as_deref(), &p)),
+        compress,
       )
       .await
     }
@@ -185,6 +203,8 @@ async fn main() -> anyhow::Result<()> {
         bundle_path,
         None,
         std::collections::HashMap::new(),
+        None,
+        false,
       )
       .await
     }

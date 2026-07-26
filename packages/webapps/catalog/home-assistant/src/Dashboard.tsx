@@ -1,6 +1,7 @@
 import type { Tile } from './App';
-import { controlKind, domainIcon, friendlyName, isActive, num } from './domains';
+import { controlKind, friendlyName, isActive, num } from './domains';
 import type { HaState, HaStatus } from './ha';
+import { DomainIcon } from './icons';
 
 type Props = {
   tiles: Tile[];
@@ -11,8 +12,18 @@ type Props = {
   onOpenPicker: () => void;
 };
 
+const TILE_MAX_REM = 16;
+const MAX_COLS_ON_SCREEN = 4;
+
+function gridShape(count: number): { cols: number; rows: number; fits: boolean } {
+  const rows = count <= 2 ? 1 : Math.min(3, Math.max(2, Math.ceil(count / MAX_COLS_ON_SCREEN)));
+  const cols = Math.ceil(count / rows);
+  return { cols, rows, fits: cols <= MAX_COLS_ON_SCREEN };
+}
+
 export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp, onOpenPicker }: Props) {
   const live = tiles.some(t => t.state);
+  const shape = gridShape(tiles.length);
   if (!live && status.kind === 'error') return <FullError message={status.message} />;
 
   return (
@@ -29,11 +40,25 @@ export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp,
         </button>
       </header>
 
-      <div className="grid flex-1 grid-flow-col grid-rows-3 auto-cols-[176px] gap-3 overflow-x-auto px-6 pb-5">
-        {tiles.map(t => (
-          <TileView key={t.entityId} tile={t} onActivate={onActivate} onSetTemp={onSetTemp} />
-        ))}
-      </div>
+      {shape.fits ? (
+        <div
+          className="mx-auto grid w-full flex-1 gap-3 px-6 pb-5"
+          style={{
+            gridTemplateColumns: `repeat(${shape.cols}, minmax(0,1fr))`,
+            gridTemplateRows: `repeat(${shape.rows}, minmax(0,1fr))`,
+            maxWidth: `${shape.cols * TILE_MAX_REM + (shape.cols - 1) * 0.75 + 3}rem`,
+          }}>
+          {tiles.map(t => (
+            <TileView key={t.entityId} tile={t} onActivate={onActivate} onSetTemp={onSetTemp} />
+          ))}
+        </div>
+      ) : (
+        <div className="grid flex-1 grid-flow-col grid-rows-3 auto-cols-[176px] gap-3 overflow-x-auto px-6 pb-5">
+          {tiles.map(t => (
+            <TileView key={t.entityId} tile={t} onActivate={onActivate} onSetTemp={onSetTemp} />
+          ))}
+        </div>
+      )}
 
       {toast && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
@@ -57,9 +82,11 @@ function TileView({
   if (!state || state.state === 'unavailable') {
     return (
       <div className="flex flex-col justify-between rounded-2xl bg-black/20 p-4 opacity-50">
-        <div className="text-2xl">{domainIcon(entityId)}</div>
-        <div className="truncate text-sm">{entityId}</div>
-        <div className="text-xs text-bt-soft-gray">unavailable</div>
+        <DomainIcon entityId={entityId} />
+        <div>
+          <div className="truncate text-sm">{entityId}</div>
+          <div className="text-xs text-bt-soft-gray">unavailable</div>
+        </div>
       </div>
     );
   }
@@ -87,10 +114,12 @@ function ActionTile({
       className={`flex flex-col justify-between rounded-2xl p-4 text-left transition-colors ${
         accent ? 'bg-bt-blue text-bt-charcoal' : 'bg-black/30 text-bt-off-white active:bg-black/50'
       }`}>
-      <div className="text-2xl">{domainIcon(state.entityId)}</div>
-      <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
-      <div className={`text-xs ${accent ? 'text-bt-charcoal/70' : 'text-bt-soft-gray'}`}>
-        {actionLabel(state, kind)}
+      <DomainIcon entityId={state.entityId} />
+      <div>
+        <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
+        <div className={`text-xs ${accent ? 'text-bt-charcoal/70' : 'text-bt-soft-gray'}`}>
+          {actionLabel(state, kind)}
+        </div>
       </div>
     </button>
   );
@@ -109,7 +138,7 @@ function ClimateTile({ tile, state, onSetTemp }: { tile: Tile; state: HaState; o
   return (
     <div className="flex flex-col justify-between rounded-2xl bg-black/30 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-2xl">{domainIcon(state.entityId)}</span>
+        <DomainIcon entityId={state.entityId} />
         <span className="text-xs text-bt-soft-gray">{state.state}</span>
       </div>
       <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
@@ -144,11 +173,13 @@ function ReadonlyTile({ state }: { state: HaState }) {
       : '';
   return (
     <div className="flex flex-col justify-between rounded-2xl bg-black/20 p-4">
-      <div className="text-2xl">{domainIcon(state.entityId)}</div>
-      <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
-      <div className="bt-wordmark text-lg">
-        {state.state}
-        {unit && <span className="ml-0.5 text-xs text-bt-soft-gray">{unit}</span>}
+      <DomainIcon entityId={state.entityId} />
+      <div>
+        <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
+        <div className="bt-wordmark text-lg">
+          {state.state}
+          {unit && <span className="ml-0.5 text-xs text-bt-soft-gray">{unit}</span>}
+        </div>
       </div>
     </div>
   );

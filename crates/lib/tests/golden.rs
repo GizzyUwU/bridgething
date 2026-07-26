@@ -186,6 +186,7 @@ fn bridge_meta() -> BridgeThingMeta {
     app_name: "bridgething".into(),
     nickname: Some("Joey's kitchen".into()),
     app_version: "0.1.0".into(),
+    daemon_sha256: Some("2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae".into()),
     os_name: "linux".into(),
     os_version: "6.19".into(),
     os_description: "bridgething wrynose".into(),

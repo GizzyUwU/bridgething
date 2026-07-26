@@ -1,4 +1,4 @@
-mod daemon_swap;
+pub(crate) mod daemon_swap;
 mod patch;
 mod range_proxy;
 mod slots;
@@ -36,7 +36,7 @@ use crate::{
   peer::{PeerSnapshot, PeerTracker},
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
-    sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
+    sinks::{ForwardStream, TransferEvent, TransferSinks},
   },
 };
 
@@ -118,9 +118,6 @@ impl OtaOrchestrator {
       state: OtaState::Idle,
       last_streaming_emit_at: None,
       last_streaming_percent: None,
-      last_drain_ack: 0,
-      last_drain_ack_at: None,
-      last_received: 0,
       staged: Vec::new(),
       staged_peer: None,
     };
@@ -169,7 +166,7 @@ enum OtaState {
     expected_size: u64,
     peer: Option<Address>,
     transfer_id: uuid::Uuid,
-    stream_rx: mpsc::Receiver<TransferEvent>,
+    stream_rx: ForwardStream,
     patch: Option<OtaPatch>,
     provenance: Option<String>,
   },
@@ -191,7 +188,6 @@ impl OtaState {
 }
 
 const STREAMING_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
-const DRAIN_ACK_MAX_INTERVAL: Duration = Duration::from_millis(300);
 
 struct OtaActor {
   transfers: ChunkedTransfer,
@@ -209,9 +205,6 @@ struct OtaActor {
   state: OtaState,
   last_streaming_emit_at: Option<Instant>,
   last_streaming_percent: Option<u8>,
-  last_drain_ack: u32,
-  last_drain_ack_at: Option<Instant>,
-  last_received: u32,
   staged: Vec<StagedPiece>,
   staged_peer: Option<Address>,
 }
@@ -225,18 +218,8 @@ impl OtaActor {
         Cmd(Option<Command>),
         Stream(Option<TransferEvent>),
         PeerLost,
-        AckFlush,
       }
       let step = {
-        let ack_flush_in = match &self.state {
-          OtaState::Streaming { .. } if self.last_received > self.last_drain_ack => Some(
-            self
-              .last_drain_ack_at
-              .map(|t| DRAIN_ACK_MAX_INTERVAL.saturating_sub(t.elapsed()))
-              .unwrap_or(Duration::ZERO),
-          ),
-          _ => None,
-        };
         let cmd_rx = &mut self.cmd_rx;
         let state = &mut self.state;
         let peer_watch = &mut self.peer_watch;
@@ -265,12 +248,6 @@ impl OtaActor {
               None => std::future::pending().await,
             }
           } => Step::PeerLost,
-          _ = async {
-            match ack_flush_in {
-              Some(d) => tokio::time::sleep(d).await,
-              None => std::future::pending().await,
-            }
-          } => Step::AckFlush,
         }
       };
       match step {
@@ -301,13 +278,6 @@ impl OtaActor {
             self.sinks.unbind(*transfer_id);
             self.state = OtaState::Idle;
             self.range_proxy.deactivate().await;
-          }
-        }
-        Step::AckFlush => {
-          if let OtaState::Streaming { peer, transfer_id, .. } = &self.state {
-            let (peer, transfer_id) = (*peer, *transfer_id);
-            let received = self.last_received;
-            self.force_drain_ack(peer, transfer_id, received).await;
           }
         }
       }
@@ -343,10 +313,24 @@ impl OtaActor {
     if let Some(pinned) = pinned
       && pinned != peer
     {
-      let _ = ack.send(Err(OtaBeginRejected {
-        reason: "ota in progress, pinned to a different companion".into(),
-      }));
-      return;
+      let orphaned = self.state.pinned_peer().is_none()
+        && !self.staged.is_empty()
+        && pinned.is_none_or(|addr| !Self::peer_link_alive(&self.peer_watch.borrow(), &addr));
+      if orphaned {
+        tracing::warn!(
+          pieces = self.staged.len(),
+          "staged batch's companion is gone; discarding it for the incoming push"
+        );
+        for piece in std::mem::take(&mut self.staged) {
+          staging::discard(&piece).await;
+        }
+        self.staged_peer = None;
+      } else {
+        let _ = ack.send(Err(OtaBeginRejected {
+          reason: "ota in progress, pinned to a different companion".into(),
+        }));
+        return;
+      }
     }
 
     if matches!(req.kind, OtaKind::Image) && !self.staged.is_empty() {
@@ -432,14 +416,12 @@ impl OtaActor {
         emit_progress(&self.events_tx, OtaPhase::Streaming, resume_percent, None).await;
         self.last_streaming_emit_at = Some(Instant::now());
         self.last_streaming_percent = Some(resume_percent);
-        self.last_drain_ack = resume_from_offset as u32;
-        self.last_received = resume_from_offset as u32;
-        self.last_drain_ack_at = Some(Instant::now());
         let update_id = req.update_id.clone();
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
         }
         let stream_rx = self.sinks.bind_forward(req.transfer.id);
+        self.sinks.seed_forward_ack(req.transfer.id, resume_from_offset as u32);
         self.state = OtaState::Streaming {
           kind,
           update_id,
@@ -462,17 +444,7 @@ impl OtaActor {
     }
   }
 
-  async fn drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u64) {
-    let received = received as u32;
-    self.last_received = received;
-    if received.saturating_sub(self.last_drain_ack) >= FORWARD_ACK_INTERVAL {
-      self.force_drain_ack(peer, transfer_id, received).await;
-    }
-  }
-
-  async fn force_drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u32) {
-    self.last_drain_ack = received;
-    self.last_drain_ack_at = Some(Instant::now());
+  async fn send_ack(&self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u32) {
     if let Some(address) = peer {
       self
         .gateway_man
@@ -525,7 +497,6 @@ impl OtaActor {
       .await;
     match outcome {
       Ok(ChunkOutcome::Continue { received }) => {
-        self.drain_ack(peer, transfer_id, received).await;
         let percent = phase_percent(received, expected_size);
         let changed = self.last_streaming_percent != Some(percent);
         let floor_ok = self
@@ -538,7 +509,7 @@ impl OtaActor {
         }
       }
       Ok(ChunkOutcome::Completed { path, .. }) => {
-        self.force_drain_ack(peer, transfer_id, expected_size as u32).await;
+        self.send_ack(peer, transfer_id, expected_size as u32).await;
         emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
         emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
         self.last_streaming_emit_at = None;
@@ -874,15 +845,15 @@ async fn run_stage(
   let piece = match kind {
     OtaKind::Daemon => {
       let reconstructed = match patch {
-        Some(spec) if crate::paths::is_on_device() => Some(
-          patch::apply(daemon_swap::current_binary_path(), payload.to_path_buf(), spec)
+        Some(spec) => Some(
+          patch::apply(daemon_swap::patch_source_path(), payload.to_path_buf(), spec)
             .await
             .map_err(|err| WriteError {
               code: OtaErrorCode::WriteFailed,
               msg: format!("daemon patch apply failed: {err}"),
             })?,
         ),
-        _ => None,
+        None => None,
       };
       let staged = reconstructed.as_deref().unwrap_or(payload);
       let result = daemon_swap::stage(staged, update_id).await.map_err(|err| WriteError {
@@ -1173,7 +1144,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn drain_acks_throttle_and_stream_is_not_abandoned() {
+  async fn receipt_acks_carry_the_stream_to_completion() {
     let h = boot().await;
     let (bytes, sha, size) = sized_fixture(40 * 1024);
     let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
@@ -1218,68 +1189,14 @@ mod tests {
       }
     })
     .await
-    .expect("stream completed and emitted a final drain-ack at received == size");
+    .expect("stream completed and emitted a final ack at received == size");
 
-    assert!(
-      acks.len() <= 4,
-      "drain-acks not throttled: {} acks for 10 fragments",
-      acks.len()
-    );
     assert_eq!(acks.last().unwrap().received, size);
     let mut prev = 0u32;
     for a in &acks {
       assert!(a.received > prev, "acks must be monotonically increasing");
-      if a.received != size {
-        assert!(
-          a.received - prev >= FORWARD_ACK_INTERVAL,
-          "intermediate acks must respect FORWARD_ACK_INTERVAL"
-        );
-      }
       prev = a.received;
     }
-  }
-
-  #[tokio::test]
-  async fn sub_interval_receipt_acks_on_the_flush_timer() {
-    let h = boot().await;
-    let (bytes, sha, size) = sized_fixture(40 * 1024);
-    let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
-    h.ota
-      .begin(
-        OtaBegin {
-          kind: OtaKind::Image,
-          update_id: sha.clone(),
-          update_url_base: None,
-          transfer: TransferRef {
-            id: tid_for(&sha),
-            total_size: size,
-            sha256: Some(sha.clone()),
-          },
-          patch: None,
-          provenance: None,
-        },
-        Some(peer),
-      )
-      .await
-      .expect("begin ok");
-
-    h.sinks
-      .fragment(tid_for(&sha), 0, Bytes::copy_from_slice(&bytes[0..4096]));
-
-    let flushed = timeout(Duration::from_secs(2), async {
-      loop {
-        let acked = h.captured_acks.lock().unwrap().last().map(|a| a.received);
-        if acked == Some(4096) {
-          return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-      }
-    })
-    .await;
-    assert!(
-      flushed.is_ok(),
-      "a 4 KiB receipt below FORWARD_ACK_INTERVAL must ack on the flush timer"
-    );
   }
 
   #[tokio::test]

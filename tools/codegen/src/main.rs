@@ -423,17 +423,13 @@ fn apply_swift_defaults(input: &str, wire_defaults: &defaults::DefaultsIndex) ->
       ));
       applied.insert((ty.clone(), field.clone()));
       pending_params.push((field.clone(), swift_ty.clone()));
-      Some(format!(
-        "\t@WireDefault<{provider}> public var {field}: {swift_ty}\n"
-      ))
+      Some(format!("\t@WireDefault<{provider}> public var {field}: {swift_ty}\n"))
     });
 
     out.push_str(patched.as_deref().unwrap_or(line));
   }
 
-  verify_defaults_applied(input, wire_defaults, &applied, |ty| {
-    format!("public struct {ty}:")
-  })?;
+  verify_defaults_applied(input, wire_defaults, &applied, |ty| format!("public struct {ty}:"))?;
 
   if !providers.is_empty() {
     out.push_str("\n// MARK: - wire defaults\n\n");

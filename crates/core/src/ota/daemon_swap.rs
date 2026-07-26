@@ -33,6 +33,13 @@ pub fn current_binary_path() -> PathBuf {
   PathBuf::from(DAEMON_DIR).join(CURRENT_NAME)
 }
 
+pub fn patch_source_path() -> PathBuf {
+  if is_on_device() {
+    return current_binary_path();
+  }
+  std::env::current_exe().unwrap_or_else(|_| current_binary_path())
+}
+
 pub async fn stage(staged_binary: &Path, update_id: String) -> Result<StagedPiece, SwapError> {
   if !is_on_device() {
     tracing::warn!("daemon stage requested but {ON_DEVICE_SENTINEL} is missing - no-op (off-device safety gate)");
@@ -44,7 +51,7 @@ pub async fn stage(staged_binary: &Path, update_id: String) -> Result<StagedPiec
   }
 
   let daemon_dir = PathBuf::from(DAEMON_DIR);
-  let current = daemon_dir.join(CURRENT_NAME);
+  let current = current_binary_path();
   let previous = daemon_dir.join(PREVIOUS_NAME);
   let incoming = daemon_dir.join(INCOMING_NAME);
 

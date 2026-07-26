@@ -1,5 +1,5 @@
 {
-  "version": "0.5.0",
+  "version": "0.5.2",
   "surfaces": [
     {
       "name": "asset",
@@ -1323,13 +1323,16 @@
         {
           "name": "nickname",
           "type": "string",
-          "optional": true,
-          "description": "User-set display name for this device. None when the user hasn't\nset one yet; consumers fall back to `model_name` / `serial_number`.\nSet via the gateway-side `system.device.setNickname` surface."
+          "optional": true
         },
         {
           "name": "appVersion",
+          "type": "string"
+        },
+        {
+          "name": "daemonSha256",
           "type": "string",
-          "description": "Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to\nthe manifest's daemon-component version for OTA hot-swap decisions."
+          "optional": true
         },
         {
           "name": "osName",
@@ -1365,18 +1368,15 @@
         },
         {
           "name": "channel",
-          "type": "string",
-          "description": "OTA channel the running image was cut on, e.g. `stable` or `dev`.\nThe companion's poll loop only auto-pushes when its configured\nchannel matches; a mismatch surfaces a \"channel switch needs full\nflash\" event rather than swapping channels in-band."
+          "type": "string"
         },
         {
           "name": "imageVariant",
-          "type": "string",
-          "description": "Image variant the running image was cut as, e.g. `prod` or `dev`.\nMaps to the yocto image recipe name `bridgething-<variant>-image`,\nwhich is what the companion uses to construct the OTA artifact URL\n`images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`."
+          "type": "string"
         },
         {
           "name": "imageVersion",
-          "type": "string",
-          "description": "Canonical image version (CalVer, e.g. `2026.05.0`). What the\ncompanion compares to the manifest's image-component version."
+          "type": "string"
         },
         {
           "name": "imageBuildId",

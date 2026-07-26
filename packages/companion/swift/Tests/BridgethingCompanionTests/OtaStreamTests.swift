@@ -13,7 +13,7 @@ final class OtaStreamTests: XCTestCase {
         let driver: WireDriver
     }
 
-    private static let fragmentBytes = TransferPacer.largeFragmentBytes
+    private static let fragmentBytes = TransferPacer.fragmentBytes
     private static let windowBytes = Int(TransferPacer.maxWindowBytes)
 
     private func boot() async throws -> Harness {
@@ -91,9 +91,17 @@ final class OtaStreamTests: XCTestCase {
         XCTAssertEqual(Int(first.offset), 0)
         XCTAssertLessThanOrEqual(first.bytes.count, Self.fragmentBytes, "ota fragments must stay within one frame")
         assembled.append(first.bytes)
+
+        let expectedInFlight = Int(TransferPacer.minWindowBytes) / Self.fragmentBytes
+        XCTAssertGreaterThanOrEqual(expectedInFlight, 4, "initial window must span several fragments")
+        for _ in 1 ..< expectedInFlight {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(Int(f.offset), assembled.count, "fragments must arrive contiguous in offset order")
+            assembled.append(f.bytes)
+        }
         do {
             _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
-            XCTFail("sender ran past the initial one-fragment window without an ack")
+            XCTFail("sender ran past its window without an ack")
         } catch is WireDriverError {
             // expected: window full, sender blocked on the ack.
         }
@@ -239,9 +247,17 @@ final class OtaStreamTests: XCTestCase {
         let first = try await nextFragment(h.driver, transferId)
         XCTAssertEqual(Int(first.offset), 0)
         assembled.append(first.bytes)
+
+        let expectedInFlight = Int(TransferPacer.minWindowBytes) / Self.fragmentBytes
+        XCTAssertGreaterThanOrEqual(expectedInFlight, 4, "initial window must span several fragments")
+        for _ in 1 ..< expectedInFlight {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(Int(f.offset), assembled.count, "range fragments must arrive contiguous in offset order")
+            assembled.append(f.bytes)
+        }
         do {
             _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
-            XCTFail("range sender ran past the initial one-fragment window without an ack")
+            XCTFail("range sender ran past its window without an ack")
         } catch is WireDriverError {
             // expected: window full, sender blocked on the ack.
         }
@@ -326,10 +342,14 @@ final class OtaStreamTests: XCTestCase {
         return url
     }
 
-    private func makeMeta(appVersion: String, imageVersion: String, channel: String, variant: String = "prod") -> BridgeThingMeta {
+    private func makeMeta(
+        appVersion: String, imageVersion: String, channel: String, variant: String = "prod",
+        daemonSha256: String? = nil
+    ) -> BridgeThingMeta {
         BridgeThingMeta(
             bridgethingVersion: appVersion, libbridgethingVersion: appVersion, appName: "bridgething",
-            nickname: nil, appVersion: appVersion, osName: "linux", osVersion: "1", osDescription: "",
+            nickname: nil, appVersion: appVersion, daemonSha256: daemonSha256,
+            osName: "linux", osVersion: "1", osDescription: "",
             btMac: "", serialNumber: "", fccId: "", icId: "", modelName: "Car Thing", channel: channel,
             imageVariant: variant, imageVersion: imageVersion, imageBuildId: "", imageBuildDate: "",
             imageDistro: "", imageMachine: "", discord: "", credits: ""

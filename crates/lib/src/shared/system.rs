@@ -18,13 +18,9 @@ pub struct BridgeThingMeta {
   pub bridgething_version: String,
   pub libbridgething_version: String,
   pub app_name: String,
-  /// User-set display name for this device. None when the user hasn't
-  /// set one yet; consumers fall back to `model_name` / `serial_number`.
-  /// Set via the gateway-side `system.device.setNickname` surface.
   pub nickname: Option<String>,
-  /// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
-  /// the manifest's daemon-component version for OTA hot-swap decisions.
   pub app_version: String,
+  pub daemon_sha256: Option<String>,
   pub os_name: String,
   pub os_version: String,
   pub os_description: String,
@@ -33,18 +29,8 @@ pub struct BridgeThingMeta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
-  /// OTA channel the running image was cut on, e.g. `stable` or `dev`.
-  /// The companion's poll loop only auto-pushes when its configured
-  /// channel matches; a mismatch surfaces a "channel switch needs full
-  /// flash" event rather than swapping channels in-band.
   pub channel: String,
-  /// Image variant the running image was cut as, e.g. `prod` or `dev`.
-  /// Maps to the yocto image recipe name `bridgething-<variant>-image`,
-  /// which is what the companion uses to construct the OTA artifact URL
-  /// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
   pub image_variant: String,
-  /// Canonical image version (CalVer, e.g. `2026.05.0`). What the
-  /// companion compares to the manifest's image-component version.
   pub image_version: String,
   pub image_build_id: String,
   pub image_build_date: String,

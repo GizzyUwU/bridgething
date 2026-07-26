@@ -1,6 +1,9 @@
 use std::{
   collections::HashMap,
-  sync::{Arc, Mutex},
+  sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+  },
   time::Duration,
 };
 
@@ -12,9 +15,8 @@ use tokio_util::bytes::{Bytes, BytesMut};
 use uuid::Uuid;
 
 pub const MEMORY_SINK_CAP: usize = 256 * 1024;
-const FORWARD_CONSUMER_CAPACITY: usize = 16;
-const FORWARD_INGEST_CAPACITY: usize = 16;
 pub(crate) const FORWARD_ACK_INTERVAL: u32 = 16 * 1024;
+pub(crate) const FORWARD_SPOOL_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum TransferEvent {
@@ -31,7 +33,30 @@ struct MemoryState {
 #[derive(Debug)]
 enum Binding {
   Memory(MemoryState),
-  Forward { tx: mpsc::Sender<TransferEvent> },
+  Forward(ForwardState),
+}
+
+#[derive(Debug)]
+struct ForwardState {
+  tx: mpsc::UnboundedSender<TransferEvent>,
+  queued: Arc<AtomicUsize>,
+  last_ack: u32,
+}
+
+#[derive(Debug)]
+pub struct ForwardStream {
+  rx: mpsc::UnboundedReceiver<TransferEvent>,
+  queued: Arc<AtomicUsize>,
+}
+
+impl ForwardStream {
+  pub async fn recv(&mut self) -> Option<TransferEvent> {
+    let event = self.rx.recv().await?;
+    if let TransferEvent::Fragment { bytes, .. } = &event {
+      self.queued.fetch_sub(bytes.len(), Ordering::AcqRel);
+    }
+    Some(event)
+  }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -55,25 +80,24 @@ impl TransferSinks {
       .insert(id, Binding::Memory(MemoryState::default()));
   }
 
-  pub fn bind_forward(&self, id: Uuid) -> mpsc::Receiver<TransferEvent> {
-    let (ingest_tx, mut ingest_rx) = mpsc::channel::<TransferEvent>(FORWARD_INGEST_CAPACITY);
-    let (consumer_tx, consumer_rx) = mpsc::channel(FORWARD_CONSUMER_CAPACITY);
-    self
-      .inner
-      .bindings
-      .lock()
-      .unwrap()
-      .insert(id, Binding::Forward { tx: ingest_tx });
-    let inner = self.inner.clone();
-    tokio::spawn(async move {
-      while let Some(event) = ingest_rx.recv().await {
-        if consumer_tx.send(event).await.is_err() {
-          break;
-        }
-      }
-      inner.bindings.lock().unwrap().remove(&id);
-    });
-    consumer_rx
+  pub fn bind_forward(&self, id: Uuid) -> ForwardStream {
+    let (tx, rx) = mpsc::unbounded_channel::<TransferEvent>();
+    let queued = Arc::new(AtomicUsize::new(0));
+    self.inner.bindings.lock().unwrap().insert(
+      id,
+      Binding::Forward(ForwardState {
+        tx,
+        queued: queued.clone(),
+        last_ack: 0,
+      }),
+    );
+    ForwardStream { rx, queued }
+  }
+
+  pub fn seed_forward_ack(&self, id: Uuid, received: u32) {
+    if let Some(Binding::Forward(state)) = self.inner.bindings.lock().unwrap().get_mut(&id) {
+      state.last_ack = received;
+    }
   }
 
   pub fn unbind(&self, id: Uuid) {
@@ -81,8 +105,6 @@ impl TransferSinks {
   }
 
   pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) -> Option<u32> {
-    use mpsc::error::TrySendError;
-
     let received = offset.saturating_add(bytes.len() as u32);
     let mut bindings = self.inner.bindings.lock().unwrap();
     match bindings.get_mut(&id) {
@@ -109,19 +131,25 @@ impl TransferSinks {
         self.inner.progress.notify_waiters();
         consumed.then_some(received)
       }
-      Some(Binding::Forward { tx }) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
-        Ok(()) => None,
-        Err(TrySendError::Full(_)) => {
-          tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
+      Some(Binding::Forward(state)) => {
+        let len = bytes.len();
+        if state.queued.load(Ordering::Acquire).saturating_add(len) > FORWARD_SPOOL_MAX_BYTES {
+          tracing::warn!(%id, queued = state.queued.load(Ordering::Acquire), "forward spool overrun; abandoning transfer");
           bindings.remove(&id);
-          None
+          return None;
         }
-        Err(TrySendError::Closed(_)) => {
+        state.queued.fetch_add(len, Ordering::AcqRel);
+        if state.tx.send(TransferEvent::Fragment { offset, bytes }).is_err() {
           tracing::debug!(%id, "transfer consumer gone; unbinding");
           bindings.remove(&id);
-          None
+          return None;
         }
-      },
+        if received.saturating_sub(state.last_ack) >= FORWARD_ACK_INTERVAL {
+          state.last_ack = received;
+          return Some(received);
+        }
+        None
+      }
     }
   }
 
@@ -135,11 +163,11 @@ impl TransferSinks {
         drop(bindings);
         self.inner.progress.notify_waiters();
       }
-      Some(Binding::Forward { .. }) => {
-        let Some(Binding::Forward { tx, .. }) = bindings.remove(&id) else {
+      Some(Binding::Forward(_)) => {
+        let Some(Binding::Forward(state)) = bindings.remove(&id) else {
           return;
         };
-        let _ = tx.try_send(TransferEvent::Abandon { reason });
+        let _ = state.tx.send(TransferEvent::Abandon { reason });
       }
     }
   }
@@ -173,7 +201,7 @@ impl TransferSinks {
               return Some(state.buf.freeze());
             }
             Some(Binding::Memory(_)) => {}
-            Some(Binding::Forward { .. }) | None => return None,
+            Some(Binding::Forward(_)) | None => return None,
           }
         }
         notified.await;
@@ -195,6 +223,94 @@ mod tests {
 
   fn frag(b: &[u8]) -> Bytes {
     Bytes::copy_from_slice(b)
+  }
+
+  #[tokio::test]
+  async fn forward_acks_on_receipt_without_the_consumer_draining() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let _stream = sinks.bind_forward(id);
+
+    let chunk = vec![0u8; FORWARD_ACK_INTERVAL as usize];
+    let mut acks = Vec::new();
+    let mut offset = 0u32;
+    for _ in 0..8 {
+      if let Some(received) = sinks.fragment(id, offset, frag(&chunk)) {
+        acks.push(received);
+      }
+      offset += chunk.len() as u32;
+    }
+
+    assert_eq!(acks.len(), 8, "every ack-interval of receipt must ack, undrained");
+    assert_eq!(acks.last().copied(), Some(offset));
+  }
+
+  #[tokio::test]
+  async fn forward_receipt_acks_respect_the_interval() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let _stream = sinks.bind_forward(id);
+
+    let step = (FORWARD_ACK_INTERVAL / 4) as usize;
+    let chunk = vec![0u8; step];
+    let mut acks = Vec::new();
+    let mut offset = 0u32;
+    for _ in 0..8 {
+      if let Some(received) = sinks.fragment(id, offset, frag(&chunk)) {
+        acks.push(received);
+      }
+      offset += step as u32;
+    }
+
+    assert_eq!(acks, vec![FORWARD_ACK_INTERVAL, 2 * FORWARD_ACK_INTERVAL]);
+  }
+
+  #[tokio::test]
+  async fn forward_resume_seeds_the_ack_baseline() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let _stream = sinks.bind_forward(id);
+    let resume = 30 * 1024 * 1024;
+    sinks.seed_forward_ack(id, resume);
+
+    let small = vec![0u8; 1024];
+    assert_eq!(sinks.fragment(id, resume, frag(&small)), None);
+
+    let rest = vec![0u8; FORWARD_ACK_INTERVAL as usize];
+    assert_eq!(
+      sinks.fragment(id, resume + 1024, frag(&rest)),
+      Some(resume + 1024 + FORWARD_ACK_INTERVAL)
+    );
+  }
+
+  #[tokio::test]
+  async fn forward_spool_is_bounded_in_bytes_not_messages() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let _stream = sinks.bind_forward(id);
+
+    let tiny = vec![0u8; 64];
+    let mut offset = 0u32;
+    let mut acks = 0usize;
+    for _ in 0..2_000 {
+      if sinks.fragment(id, offset, frag(&tiny)).is_some() {
+        acks += 1;
+      }
+      offset += tiny.len() as u32;
+    }
+    assert_eq!(
+      acks,
+      (offset / FORWARD_ACK_INTERVAL) as usize,
+      "2000 undrained messages must all be accepted and acked on the interval"
+    );
+
+    let huge = vec![0u8; FORWARD_SPOOL_MAX_BYTES];
+    assert_eq!(sinks.fragment(id, offset, frag(&huge)), None);
+    assert_eq!(
+      sinks.fragment(id, offset, frag(&tiny)),
+      None,
+      "overrun must have unbound the transfer"
+    );
   }
 
   #[tokio::test]
@@ -303,23 +419,21 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn forward_stall_past_buffer_abandons_off_the_bus() {
+  async fn undrained_consumer_is_not_abandoned() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     let _rx = sinks.bind_forward(id);
-    let mut abandoned = false;
-    for offset in 0..(FORWARD_INGEST_CAPACITY + FORWARD_CONSUMER_CAPACITY + 8) as u32 {
-      sinks.fragment(id, offset, frag(b"x"));
-      if sinks.inner.bindings.lock().unwrap().get(&id).is_none() {
-        abandoned = true;
-        break;
-      }
+    let chunk = vec![0u8; 16 * 1024];
+    let mut offset = 0u32;
+    for _ in 0..64 {
+      sinks.fragment(id, offset, frag(&chunk));
+      offset += chunk.len() as u32;
+      assert!(
+        sinks.inner.bindings.lock().unwrap().contains_key(&id),
+        "transfer abandoned at offset {offset} despite being far inside the spool bound"
+      );
       tokio::task::yield_now().await;
     }
-    assert!(
-      abandoned,
-      "a forward consumer that never drains is abandoned rather than blocking the caller"
-    );
   }
 
   #[tokio::test]

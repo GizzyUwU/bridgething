@@ -128,8 +128,10 @@ async function main(): Promise<void> {
     } else if (meta.appVersion !== composite.daemon) {
       ok = await runDaemonPush(driver, args, {
         fullUrl: urls.daemonBinary,
+        zstUrl: urls.daemonBinaryZst,
         toVersion: composite.daemon,
         fromVersion: meta.appVersion,
+        fromSha256: meta.daemonSha256 ?? null,
         channel: channelName,
         release,
       });
@@ -171,8 +173,10 @@ async function runDaemonPush(
   args: Args,
   opts: {
     fullUrl: string;
+    zstUrl: string;
     toVersion: string;
     fromVersion: string;
+    fromSha256: string | null;
     channel: string;
     release: OtaManifestRelease | undefined;
   },
@@ -181,7 +185,16 @@ async function runDaemonPush(
   const patchDigest = artifacts?.daemon_patches?.[opts.fromVersion];
   const daemonDigest = artifacts?.daemon;
 
-  if (patchDigest && daemonDigest) {
+  const sourceMatches =
+    !patchDigest?.source_sha256 || !opts.fromSha256 || patchDigest.source_sha256 === opts.fromSha256;
+  if (patchDigest && !sourceMatches) {
+    console.log(
+      `skipping daemon delta: device binary ${opts.fromSha256?.slice(0, 12)} is not the published ` +
+        `${opts.fromVersion} (${patchDigest.source_sha256?.slice(0, 12)}); full binary instead.`,
+    );
+  }
+
+  if (patchDigest && daemonDigest && sourceMatches) {
     console.log(`downloading daemon delta ${opts.fromVersion} -> ${opts.toVersion} ...`);
     const patchUrl = daemonPatchUrl({
       rootURL: args.root,
@@ -201,9 +214,26 @@ async function runDaemonPush(
       algorithm: 'zstdPatchFrom',
       resultSha256: daemonDigest.sha256,
       resultSize: daemonDigest.size,
+      sourceSha256: patchDigest.source_sha256 ?? null,
     });
     if (snapshot.phase !== 'failed') return reportOutcome(snapshot);
     console.log(`daemon delta failed (${snapshot.reason}); falling back to full binary ...`);
+  }
+
+  const zst = artifacts?.daemon_zst;
+  if (zst && daemonDigest) {
+    console.log(`downloading compressed daemon ${opts.toVersion} ...`);
+    const zstPath = await downloadIfNeeded(opts.zstUrl, args.cacheDir, `daemon-${opts.toVersion}.zst`);
+    const zstSource = await fileArtifactSource(zstPath);
+    console.log('pushing compressed daemon OTA ...');
+    const snapshot = await driver.pushDaemon(zstSource, logProgress, {
+      algorithm: 'zstd',
+      resultSha256: daemonDigest.sha256,
+      resultSize: daemonDigest.size,
+      sourceSha256: null,
+    });
+    if (snapshot.phase !== 'failed') return reportOutcome(snapshot);
+    console.log(`compressed daemon push failed (${snapshot.reason}); falling back to the raw binary ...`);
   }
 
   console.log(`downloading daemon ${opts.toVersion} ...`);

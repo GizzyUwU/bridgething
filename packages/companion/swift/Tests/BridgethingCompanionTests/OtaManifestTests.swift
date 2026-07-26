@@ -63,4 +63,29 @@ final class OtaManifestTests: XCTestCase {
     // a release entry with no builtin_webapps decodes as empty (backward compatible).
     XCTAssertEqual(manifest.releases["0.8.3+image.2026.04.0"]?.builtinWebapps, [:])
   }
+
+  func testDaemonPatchDigestDecodesSourceSha256() throws {
+    let json = """
+    {
+      "daemon": {"size": 100, "sha256": "aa"},
+      "daemon_patches": {
+        "0.8.3": {"size": 10, "sha256": "bb", "source_sha256": "cc"},
+        "0.8.2": {"size": 20, "sha256": "dd"}
+      }
+    }
+    """
+    let artifacts = try JSONDecoder().decode(OtaReleaseArtifacts.self, from: Data(json.utf8))
+    XCTAssertEqual(artifacts.daemonPatches["0.8.3"]?.sourceSha256, "cc")
+    XCTAssertEqual(artifacts.daemonPatches["0.8.3"]?.digest, OtaArtifactDigest(size: 10, sha256: "bb"))
+    XCTAssertNil(artifacts.daemonPatches["0.8.2"]?.sourceSha256)
+  }
+
+  func testPatchSourceMatchGate() {
+    XCTAssertTrue(OtaService.patchSourceMatches(declared: "abc", running: "abc"))
+    XCTAssertTrue(OtaService.patchSourceMatches(declared: "ABC", running: "abc"))
+    XCTAssertFalse(OtaService.patchSourceMatches(declared: "abc", running: "def"))
+    XCTAssertTrue(OtaService.patchSourceMatches(declared: nil, running: "abc"))
+    XCTAssertTrue(OtaService.patchSourceMatches(declared: "abc", running: nil))
+    XCTAssertTrue(OtaService.patchSourceMatches(declared: nil, running: nil))
+  }
 }

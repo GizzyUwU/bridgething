@@ -1,13 +1,32 @@
 # bridgething
 
-**the thing. fully open. all yours.**
-
 bridgething is the bridge layer that lets the thing remain itself while
 opening up to anything you build for it. It runs on a fully custom Linux
 distro designed specifically for the Car Thing and replaces Spotify's
 stock `qt-superbird-app` with a Rust daemon, a kiosk web runtime, and a
 phone-side gateway, so the Car Thing keeps being a Car Thing on your
 own terms.
+
+![the launcher](https://bridgething.com/screenshots/device-launcher.png)
+
+<p>
+  <img src="https://bridgething.com/screenshots/device-spotify.png" width="405" alt="stock spotify ui">
+  <img src="https://bridgething.com/screenshots/device-calendar.png" width="405" alt="calendar">
+  <img src="https://bridgething.com/screenshots/device-weather.png" width="405" alt="weather">
+  <img src="https://bridgething.com/screenshots/device-home-assistant.png" width="405" alt="home assistant">
+</p>
+
+## Install
+
+Install from [bridgething.com](https://bridgething.com) over USB. Updates
+after that come over the air through your phone, which is also where
+pairing, settings, and new apps live.
+
+<p>
+  <img src="https://bridgething.com/screenshots/companion-home.png" width="240" alt="companion home">
+  <img src="https://bridgething.com/screenshots/companion-update.png" width="240" alt="update available">
+  <img src="https://bridgething.com/screenshots/companion-settings.png" width="240" alt="companion settings">
+</p>
 
 ## What's in here
 

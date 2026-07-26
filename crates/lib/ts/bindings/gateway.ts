@@ -515,9 +515,14 @@ export type OtaBeginAck = { resumeFromOffset: number };
 
 export type OtaBeginRejected = { reason: string };
 
-export type OtaPatch = { algorithm: OtaPatchAlgorithm; resultSha256: string; resultSize: number };
+export type OtaPatch = {
+  algorithm: OtaPatchAlgorithm;
+  resultSha256: string;
+  resultSize: number;
+  sourceSha256: string | null;
+};
 
-export type OtaPatchAlgorithm = 'zstdPatchFrom';
+export type OtaPatchAlgorithm = 'zstdPatchFrom' | 'zstd';
 
 export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
 

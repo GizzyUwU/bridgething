@@ -11,13 +11,18 @@ export type ArtifactDigest = {
   sha256: string;
 };
 
+export type PatchDigest = ArtifactDigest & {
+  source_sha256?: string;
+};
+
 export type ReleaseArtifacts = {
   daemon?: ArtifactDigest;
+  daemon_zst?: ArtifactDigest;
   image_swu?: ArtifactDigest;
   image_zck?: ArtifactDigest;
   image_boot_zck?: ArtifactDigest;
   webapps?: Record<string, ArtifactDigest>;
-  daemon_patches?: Record<string, ArtifactDigest>;
+  daemon_patches?: Record<string, PatchDigest>;
 };
 
 export type OtaManifestRelease = {
@@ -117,6 +122,7 @@ export function parseCompositeVersion(raw: string): OtaCompositeVersion | null {
 
 export type OtaArtifactURLs = {
   daemonBinary: string;
+  daemonBinaryZst: string;
   imageSwu: string;
   imageZck: string;
   imageBootZck: string;
@@ -137,6 +143,7 @@ export function otaArtifactUrls(opts: {
   const imagesDir = `${opts.rootURL}/images/${opts.channel}/${opts.imageVersion}`;
   return {
     daemonBinary: `${opts.rootURL}/daemon/${opts.channel}/${opts.daemonVersion}/bridgething`,
+    daemonBinaryZst: `${opts.rootURL}/daemon/${opts.channel}/${opts.daemonVersion}/bridgething.zst`,
     imageSwu: `${imagesDir}/${imageName}.swu`,
     imageZck: `${imagesDir}/${imageName}.zck`,
     imageBootZck: `${imagesDir}/${imageName}-boot.zck`,

@@ -27,13 +27,23 @@ public data class OtaArtifactDigest(
 )
 
 @Serializable
+public data class OtaPatchDigest(
+    val size: Long,
+    val sha256: String,
+    @SerialName("source_sha256") val sourceSha256: String? = null,
+) {
+    public val digest: OtaArtifactDigest get() = OtaArtifactDigest(size, sha256)
+}
+
+@Serializable
 public data class OtaReleaseArtifacts(
     val daemon: OtaArtifactDigest? = null,
+    @SerialName("daemon_zst") val daemonZst: OtaArtifactDigest? = null,
     @SerialName("image_swu") val imageSwu: OtaArtifactDigest? = null,
     @SerialName("image_zck") val imageZck: OtaArtifactDigest? = null,
     @SerialName("image_boot_zck") val imageBootZck: OtaArtifactDigest? = null,
     val webapps: Map<String, OtaArtifactDigest> = emptyMap(),
-    @SerialName("daemon_patches") val daemonPatches: Map<String, OtaArtifactDigest> = emptyMap(),
+    @SerialName("daemon_patches") val daemonPatches: Map<String, OtaPatchDigest> = emptyMap(),
 )
 
 @Serializable
@@ -68,6 +78,7 @@ public data class OtaCompositeVersion(
 
 public data class OtaArtifactUrls(
     val daemonBinary: String,
+    val daemonBinaryZst: String,
     val imageSwu: String,
     val imageZck: String,
     val imageBootZck: String,
@@ -84,6 +95,7 @@ public data class OtaArtifactUrls(
             val imageName = "bridgething-$imageVariant-image"
             return OtaArtifactUrls(
                 daemonBinary = "$root/daemon/$channel/$daemonVersion/bridgething",
+                daemonBinaryZst = "$root/daemon/$channel/$daemonVersion/bridgething.zst",
                 imageSwu = "$root/images/$channel/$imageVersion/$imageName.swu",
                 imageZck = "$root/images/$channel/$imageVersion/$imageName.zck",
                 imageBootZck = "$root/images/$channel/$imageVersion/$imageName-boot.zck",

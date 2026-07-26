@@ -139,13 +139,9 @@ data class BridgeThingMeta (
 	val bridgethingVersion: String,
 	val libbridgethingVersion: String,
 	val appName: String,
-	/// User-set display name for this device. None when the user hasn't
-	/// set one yet; consumers fall back to `model_name` / `serial_number`.
-	/// Set via the gateway-side `system.device.setNickname` surface.
 	val nickname: String? = null,
-	/// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
-	/// the manifest's daemon-component version for OTA hot-swap decisions.
 	val appVersion: String,
+	val daemonSha256: String? = null,
 	val osName: String,
 	val osVersion: String,
 	val osDescription: String,
@@ -154,18 +150,8 @@ data class BridgeThingMeta (
 	val fccId: String,
 	val icId: String,
 	val modelName: String,
-	/// OTA channel the running image was cut on, e.g. `stable` or `dev`.
-	/// The companion's poll loop only auto-pushes when its configured
-	/// channel matches; a mismatch surfaces a "channel switch needs full
-	/// flash" event rather than swapping channels in-band.
 	val channel: String,
-	/// Image variant the running image was cut as, e.g. `prod` or `dev`.
-	/// Maps to the yocto image recipe name `bridgething-<variant>-image`,
-	/// which is what the companion uses to construct the OTA artifact URL
-	/// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
 	val imageVariant: String,
-	/// Canonical image version (CalVer, e.g. `2026.05.0`). What the
-	/// companion compares to the manifest's image-component version.
 	val imageVersion: String,
 	val imageBuildId: String,
 	val imageBuildDate: String,
@@ -1698,13 +1684,16 @@ data class TransferRef (
 enum class OtaPatchAlgorithm(val string: String) {
 	@SerialName("zstdPatchFrom")
 	ZstdPatchFrom("zstdPatchFrom"),
+	@SerialName("zstd")
+	Zstd("zstd"),
 }
 
 @Serializable
 data class OtaPatch (
 	val algorithm: OtaPatchAlgorithm,
 	val resultSha256: String,
-	val resultSize: UInt
+	val resultSize: UInt,
+	val sourceSha256: String? = null
 )
 
 @Serializable

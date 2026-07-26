@@ -70,38 +70,6 @@ export function friendlyName(s: HaState): string {
   return rest.replace(/_/g, ' ');
 }
 
-export function domainIcon(entityId: string): string {
-  switch (domainOf(entityId)) {
-    case 'light':
-      return '\u{1F4A1}';
-    case 'switch':
-      return '\u{1F50C}';
-    case 'fan':
-      return '\u{1F300}';
-    case 'climate':
-      return '\u{1F321}';
-    case 'scene':
-      return '\u{1F3AC}';
-    case 'script':
-      return '\u{1F4DC}';
-    case 'automation':
-      return '\u{2699}';
-    case 'lock':
-      return '\u{1F512}';
-    case 'cover':
-      return '\u{1FA9F}';
-    case 'binary_sensor':
-      return '\u{25D0}';
-    case 'input_boolean':
-      return '\u{1F39B}';
-    case 'button':
-    case 'input_button':
-      return '\u{1F518}';
-    default:
-      return '\u{1F4CA}';
-  }
-}
-
 export function num(attr: unknown): number | null {
   return typeof attr === 'number' && Number.isFinite(attr) ? attr : null;
 }

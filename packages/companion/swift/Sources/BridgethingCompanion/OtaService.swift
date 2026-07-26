@@ -146,8 +146,10 @@ public actor OtaService {
     private struct DaemonPatchPlan {
         let url: URL
         let digest: OtaArtifactDigest
+        let sourceSha256: String?
         let resultSha256: String
         let resultSize: UInt64
+        var algorithm: OtaPatchAlgorithm = .zstdPatchFrom
     }
 
     private struct BandaidPiece {
@@ -167,23 +169,51 @@ public actor OtaService {
         let patch: OtaPatch?
     }
 
+    static func patchSourceMatches(declared: String?, running: String?) -> Bool {
+        guard let declared, let running else { return true }
+        return declared.caseInsensitiveCompare(running) == .orderedSame
+    }
+
     private func daemonPiece(
         urls: OtaArtifactURLs,
         rootURL: URL,
         channel: String,
         toVersion: String,
         fromVersion: String,
+        fromSha256: String?,
         artifacts: OtaReleaseArtifacts?
     ) -> BandaidPiece {
         var plan: DaemonPatchPlan?
         if let daemon = artifacts?.daemon, let patchDigest = artifacts?.daemonPatches[fromVersion] {
-            plan = DaemonPatchPlan(
-                url: OtaArtifactURLs.daemonPatch(
-                    rootURL: rootURL, channel: channel, toVersion: toVersion, fromVersion: fromVersion
-                ),
-                digest: patchDigest,
-                resultSha256: daemon.sha256,
-                resultSize: daemon.size
+            if Self.patchSourceMatches(declared: patchDigest.sourceSha256, running: fromSha256) {
+                plan = DaemonPatchPlan(
+                    url: OtaArtifactURLs.daemonPatch(
+                        rootURL: rootURL, channel: channel, toVersion: toVersion, fromVersion: fromVersion
+                    ),
+                    digest: patchDigest.digest,
+                    sourceSha256: patchDigest.sourceSha256,
+                    resultSha256: daemon.sha256,
+                    resultSize: daemon.size,
+                    algorithm: .zstdPatchFrom
+                )
+            }
+        }
+        if plan == nil, let daemon = artifacts?.daemon, let zst = artifacts?.daemonZst {
+            return BandaidPiece(
+                kind: .daemon,
+                url: urls.daemonBinaryZst,
+                filename: "daemon-\(channel)-\(toVersion).zst",
+                version: toVersion,
+                assetLabel: "daemon",
+                expected: zst,
+                patch: DaemonPatchPlan(
+                    url: urls.daemonBinaryZst,
+                    digest: zst,
+                    sourceSha256: nil,
+                    resultSha256: daemon.sha256,
+                    resultSize: daemon.size,
+                    algorithm: .zstd
+                )
             )
         }
         return BandaidPiece(
@@ -575,7 +605,8 @@ public actor OtaService {
                 deviceId: deviceId,
                 pieces: [daemonPiece(
                     urls: urls, rootURL: config.rootURL, channel: channel,
-                    toVersion: composite.daemon, fromVersion: meta.appVersion, artifacts: artifacts
+                    toVersion: composite.daemon, fromVersion: meta.appVersion,
+                    fromSha256: meta.daemonSha256, artifacts: artifacts
                 )],
                 release: version, daemonVersion: composite.daemon, imageVersion: composite.image,
                 config: config, gateway: gateway
@@ -649,6 +680,7 @@ public actor OtaService {
             appName: meta.appName,
             nickname: nickname,
             appVersion: meta.appVersion,
+            daemonSha256: meta.daemonSha256,
             osName: meta.osName,
             osVersion: meta.osVersion,
             osDescription: meta.osDescription,
@@ -753,7 +785,8 @@ public actor OtaService {
         if daemonDrift {
             batch.append(daemonPiece(
                 urls: urls, rootURL: config.rootURL, channel: channel,
-                toVersion: latest.daemon, fromVersion: meta.appVersion, artifacts: release?.artifacts
+                toVersion: latest.daemon, fromVersion: meta.appVersion,
+                fromSha256: meta.daemonSha256, artifacts: release?.artifacts
             ))
         }
         for drift in webappDrift {
@@ -936,9 +969,10 @@ public actor OtaService {
                     artifacts.append(BandaidArtifact(
                         kind: piece.kind, path: cached, label: piece.assetLabel,
                         patch: OtaPatch(
-                            algorithm: .zstdPatchFrom,
+                            algorithm: plan.algorithm,
                             resultSha256: plan.resultSha256,
-                            resultSize: UInt32(plan.resultSize)
+                            resultSize: UInt32(plan.resultSize),
+                            sourceSha256: plan.sourceSha256
                         )
                     ))
                 } else {

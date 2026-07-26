@@ -30,8 +30,8 @@ struct VoiceControllerTests {
         let resolution = try await VoiceController(client: client).resolve(transcript: "play that girl in red song")
         #expect(resolution.stage == .model)
         #expect(resolution.resolved.intent == "PLAY")
-        #expect(resolution.resolved.slots?.artist == "girl in red")
-        #expect(resolution.resolved.slots?.track == "you stupid bitch")
+        #expect(resolution.resolved.slots.artist == "girl in red")
+        #expect(resolution.resolved.slots.track == "you stupid bitch")
     }
 
     @Test("an out-of-domain utterance resolves to NO_INTENT")

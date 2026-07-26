@@ -75,17 +75,9 @@ export type BridgeThingMeta = {
   bridgethingVersion: string;
   libbridgethingVersion: string;
   appName: string;
-  /**
-   * User-set display name for this device. None when the user hasn't
-   * set one yet; consumers fall back to `model_name` / `serial_number`.
-   * Set via the gateway-side `system.device.setNickname` surface.
-   */
   nickname: string | null;
-  /**
-   * Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
-   * the manifest's daemon-component version for OTA hot-swap decisions.
-   */
   appVersion: string;
+  daemonSha256: string | null;
   osName: string;
   osVersion: string;
   osDescription: string;
@@ -94,24 +86,8 @@ export type BridgeThingMeta = {
   fccId: string;
   icId: string;
   modelName: string;
-  /**
-   * OTA channel the running image was cut on, e.g. `stable` or `dev`.
-   * The companion's poll loop only auto-pushes when its configured
-   * channel matches; a mismatch surfaces a "channel switch needs full
-   * flash" event rather than swapping channels in-band.
-   */
   channel: string;
-  /**
-   * Image variant the running image was cut as, e.g. `prod` or `dev`.
-   * Maps to the yocto image recipe name `bridgething-<variant>-image`,
-   * which is what the companion uses to construct the OTA artifact URL
-   * `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
-   */
   imageVariant: string;
-  /**
-   * Canonical image version (CalVer, e.g. `2026.05.0`). What the
-   * companion compares to the manifest's image-component version.
-   */
   imageVersion: string;
   imageBuildId: string;
   imageBuildDate: string;

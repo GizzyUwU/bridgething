@@ -28,6 +28,11 @@ use crate::conn::OutboundFrame;
 
 const OTA_WINDOW_BYTES: u64 = 512 * 1024;
 const OTA_ACK_TIMEOUT: Duration = Duration::from_secs(30);
+const OTA_WINDOW_MAX_FRAMES: u64 = 16;
+
+fn window_bytes(chunk_size: usize) -> u64 {
+  OTA_WINDOW_BYTES.min(OTA_WINDOW_MAX_FRAMES * chunk_size as u64)
+}
 
 pub struct AckWindow {
   acked: AtomicU64,
@@ -62,14 +67,14 @@ impl AckWindow {
     self.acked.load(Ordering::Acquire)
   }
 
-  async fn wait_for_room(&self, offset: u64) -> bool {
+  async fn wait_for_room(&self, offset: u64, window: u64) -> bool {
     loop {
-      if offset < self.acked().saturating_add(OTA_WINDOW_BYTES) {
+      if offset < self.acked().saturating_add(window) {
         return true;
       }
       let prior = self.acked();
       let notified = self.progress.notified();
-      if offset < self.acked().saturating_add(OTA_WINDOW_BYTES) {
+      if offset < self.acked().saturating_add(window) {
         return true;
       }
       match tokio::time::timeout(OTA_ACK_TIMEOUT, notified).await {
@@ -141,7 +146,7 @@ pub async fn stream_file_fragments(
   let mut buf = vec![0u8; chunk_size];
   let mut offset = start_offset;
   while offset < total_size {
-    if !window.wait_for_room(offset).await {
+    if !window.wait_for_room(offset, window_bytes(chunk_size)).await {
       return Err(anyhow!(
         "transfer stalled: no drain-ack progress at offset {offset}/{total_size}"
       ));
@@ -182,7 +187,10 @@ pub async fn stream_range_fragments(
     file.seek(std::io::SeekFrom::Start(*start as u64)).await?;
     let mut produced: u32 = 0;
     while produced < *length {
-      if !window.wait_for_room(stream_offset as u64).await {
+      if !window
+        .wait_for_room(stream_offset as u64, window_bytes(chunk_size))
+        .await
+      {
         return Err(anyhow!(
           "range stream stalled: no drain-ack progress at offset {stream_offset}"
         ));

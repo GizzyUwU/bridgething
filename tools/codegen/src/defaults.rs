@@ -35,13 +35,22 @@ pub enum NumKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DefaultValue {
   Bool(bool),
-  Num { text: String, kind: NumKind },
+  Num {
+    text: String,
+    kind: NumKind,
+  },
   Str(String),
   Null,
   EmptyList,
   EmptyMap,
-  EnumVariant { ty: String, variant: String },
-  Struct { ty: String, fields: Vec<(String, DefaultValue)> },
+  EnumVariant {
+    ty: String,
+    variant: String,
+  },
+  Struct {
+    ty: String,
+    fields: Vec<(String, DefaultValue)>,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -192,7 +201,13 @@ impl SourceIndex {
     }
   }
 
-  fn resolve(&self, spec: &DefaultSpec, ty: &Type, self_ty: Option<&str>, stack: &mut Vec<String>) -> Result<DefaultValue> {
+  fn resolve(
+    &self,
+    spec: &DefaultSpec,
+    ty: &Type,
+    self_ty: Option<&str>,
+    stack: &mut Vec<String>,
+  ) -> Result<DefaultValue> {
     match spec {
       DefaultSpec::Derived => self.default_for_type(ty, stack),
       DefaultSpec::Path(path) => {
@@ -208,7 +223,10 @@ impl SourceIndex {
 
   fn default_for_type(&self, ty: &Type, stack: &mut Vec<String>) -> Result<DefaultValue> {
     let Type::Path(path) = ty else {
-      bail!("codegen cannot derive a default for the non-path type `{}`", type_text(ty));
+      bail!(
+        "codegen cannot derive a default for the non-path type `{}`",
+        type_text(ty)
+      );
     };
     let Some(segment) = path.path.segments.last() else {
       bail!("empty type path");
@@ -399,14 +417,16 @@ impl SourceIndex {
         };
         self.default_for_named(&ty, stack)
       }
-      _ => bail!(
-        "codegen cannot evaluate the default call `{}`",
-        quote::quote!(#callee)
-      ),
+      _ => bail!("codegen cannot evaluate the default call `{}`", quote::quote!(#callee)),
     }
   }
 
-  fn eval_struct(&self, structure: &syn::ExprStruct, self_ty: Option<&str>, stack: &mut Vec<String>) -> Result<DefaultValue> {
+  fn eval_struct(
+    &self,
+    structure: &syn::ExprStruct,
+    self_ty: Option<&str>,
+    stack: &mut Vec<String>,
+  ) -> Result<DefaultValue> {
     let named = structure
       .path
       .segments
@@ -485,13 +505,20 @@ fn literal_value(lit: &Lit) -> Result<DefaultValue> {
       }
     }
     Lit::Float(f) => {
-      let kind = if f.suffix() == "f32" { NumKind::F32 } else { NumKind::F64 };
+      let kind = if f.suffix() == "f32" {
+        NumKind::F32
+      } else {
+        NumKind::F64
+      };
       DefaultValue::Num {
         text: f.base10_digits().to_string(),
         kind,
       }
     }
-    other => bail!("codegen cannot materialize the literal default `{}`", quote::quote!(#other)),
+    other => bail!(
+      "codegen cannot materialize the literal default `{}`",
+      quote::quote!(#other)
+    ),
   })
 }
 
@@ -607,12 +634,7 @@ fn named_fields(item: &ItemStruct) -> impl Iterator<Item = &syn::Field> {
 
 fn is_option(ty: &Type) -> bool {
   let Type::Path(path) = ty else { return false };
-  path
-    .path
-    .segments
-    .last()
-    .map(|s| s.ident == "Option")
-    .unwrap_or(false)
+  path.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
 }
 
 fn tail_expr(block: &syn::Block) -> Result<Expr> {
@@ -711,7 +733,10 @@ mod tests {
         kind: NumKind::Unsigned
       }
     );
-    assert_eq!(resolve_field(src, "A", "name").unwrap(), DefaultValue::Str(String::new()));
+    assert_eq!(
+      resolve_field(src, "A", "name").unwrap(),
+      DefaultValue::Str(String::new())
+    );
     assert_eq!(resolve_field(src, "A", "items").unwrap(), DefaultValue::EmptyList);
   }
 

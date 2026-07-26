@@ -1,7 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+  io::{self, Read},
+  path::{Path, PathBuf},
+  sync::Arc,
+};
 
 use libbridgething::BridgeThingMeta;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
 use super::{KvStore, StateResult};
@@ -73,6 +78,7 @@ struct Inner {
   static_meta: SuperbirdMeta,
   kv: KvStore,
   nickname_tx: watch::Sender<Option<String>>,
+  daemon_sha_tx: watch::Sender<Option<String>>,
 }
 
 impl DeviceMeta {
@@ -82,13 +88,39 @@ impl DeviceMeta {
       None
     });
     let (nickname_tx, _rx) = watch::channel(initial);
-    Self {
+    let (daemon_sha_tx, _sha_rx) = watch::channel(None);
+    let me = Self {
       inner: Arc::new(Inner {
         static_meta,
         kv,
         nickname_tx,
+        daemon_sha_tx,
       }),
-    }
+    };
+    me.spawn_daemon_sha();
+    me
+  }
+
+  fn spawn_daemon_sha(&self) {
+    let tx = self.inner.daemon_sha_tx.clone();
+    tokio::spawn(async move {
+      let path = crate::ota::daemon_swap::patch_source_path();
+      let job_path = path.clone();
+      match tokio::task::spawn_blocking(move || hash_file(&job_path)).await {
+        Ok(Ok(digest)) => {
+          tracing::info!(path = %path.display(), sha256 = %digest, "daemon binary digest computed");
+          tx.send_replace(Some(digest));
+        }
+        Ok(Err(err)) => {
+          tracing::warn!(path = %path.display(), %err, "could not hash daemon binary; patch sources go unverified")
+        }
+        Err(err) => tracing::warn!(%err, "daemon binary hash task failed; patch sources go unverified"),
+      }
+    });
+  }
+
+  pub fn daemon_sha256(&self) -> Option<String> {
+    self.inner.daemon_sha_tx.borrow().clone()
   }
 
   pub fn static_meta(&self) -> &SuperbirdMeta {
@@ -113,17 +145,32 @@ impl DeviceMeta {
   }
 
   pub fn snapshot(&self) -> BridgeThingMeta {
-    build_meta(&self.inner.static_meta, self.nickname())
+    build_meta(&self.inner.static_meta, self.nickname(), self.daemon_sha256())
   }
 }
 
-fn build_meta(meta: &SuperbirdMeta, nickname: Option<String>) -> BridgeThingMeta {
+fn hash_file(path: &Path) -> io::Result<String> {
+  let mut file = std::fs::File::open(path)?;
+  let mut hasher = Sha256::new();
+  let mut buf = vec![0u8; 64 * 1024];
+  loop {
+    let n = file.read(&mut buf)?;
+    if n == 0 {
+      break;
+    }
+    hasher.update(&buf[..n]);
+  }
+  Ok(hex::encode(hasher.finalize()))
+}
+
+fn build_meta(meta: &SuperbirdMeta, nickname: Option<String>, daemon_sha256: Option<String>) -> BridgeThingMeta {
   BridgeThingMeta {
     bridgething_version: format!("v{}", BRIDGETHING_VERSION),
     libbridgething_version: BridgeThingMeta::libbridgething_version(),
     app_name: BRIDGETHING_APP_NAME.to_string(),
     nickname,
     app_version: BRIDGETHING_VERSION.to_string(),
+    daemon_sha256,
     os_name: meta.name.clone(),
     os_version: meta.version.clone(),
     os_description: meta.description.clone(),

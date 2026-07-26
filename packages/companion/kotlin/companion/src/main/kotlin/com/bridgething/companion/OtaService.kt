@@ -513,7 +513,8 @@ public class OtaService(
                 listOf(
                     daemonPiece(
                         urls = urls, rootUrl = rootUrl, channel = channel,
-                        toVersion = composite.daemon, fromVersion = meta.appVersion, artifacts = artifacts,
+                        toVersion = composite.daemon, fromVersion = meta.appVersion,
+                        fromSha256 = meta.daemonSha256, artifacts = artifacts,
                     ),
                 ),
                 version,
@@ -660,7 +661,8 @@ public class OtaService(
             batch.add(
                 daemonPiece(
                     urls = urls, rootUrl = config.rootUrl, channel = channel,
-                    toVersion = latest.daemon, fromVersion = meta.appVersion, artifacts = release?.artifacts,
+                    toVersion = latest.daemon, fromVersion = meta.appVersion,
+                    fromSha256 = meta.daemonSha256, artifacts = release?.artifacts,
                 ),
             )
         }
@@ -676,8 +678,10 @@ public class OtaService(
     private data class DaemonPatchPlan(
         val url: String,
         val digest: OtaArtifactDigest,
+        val sourceSha256: String?,
         val resultSha256: String,
         val resultSize: Long,
+        val algorithm: OtaPatchAlgorithm = OtaPatchAlgorithm.ZstdPatchFrom,
     )
 
     private data class BandaidPiece(
@@ -703,21 +707,44 @@ public class OtaService(
         channel: String,
         toVersion: String,
         fromVersion: String,
+        fromSha256: String?,
         artifacts: OtaReleaseArtifacts?,
     ): BandaidPiece {
         val daemon = artifacts?.daemon
         val patchDigest = artifacts?.daemonPatches?.get(fromVersion)
         val plan =
-            if (daemon != null && patchDigest != null) {
+            if (daemon != null && patchDigest != null &&
+                patchSourceMatches(patchDigest.sourceSha256, fromSha256)
+            ) {
                 DaemonPatchPlan(
                     url = OtaArtifactUrls.daemonPatch(rootUrl, channel, toVersion, fromVersion),
-                    digest = patchDigest,
+                    digest = patchDigest.digest,
+                    sourceSha256 = patchDigest.sourceSha256,
                     resultSha256 = daemon.sha256,
                     resultSize = daemon.size,
                 )
             } else {
                 null
             }
+        val zst = artifacts?.daemonZst
+        if (plan == null && daemon != null && zst != null) {
+            return BandaidPiece(
+                kind = OtaKind.Daemon,
+                url = urls.daemonBinaryZst,
+                filename = "daemon-$channel-$toVersion.zst",
+                version = toVersion,
+                assetLabel = "daemon",
+                expected = zst,
+                patch = DaemonPatchPlan(
+                    url = urls.daemonBinaryZst,
+                    digest = zst,
+                    sourceSha256 = null,
+                    resultSha256 = daemon.sha256,
+                    resultSize = daemon.size,
+                    algorithm = OtaPatchAlgorithm.Zstd,
+                ),
+            )
+        }
         return BandaidPiece(
             kind = OtaKind.Daemon,
             url = urls.daemonBinary,
@@ -869,9 +896,10 @@ public class OtaService(
                             BandaidArtifact(
                                 piece.kind, cached, piece.assetLabel,
                                 patch = OtaPatch(
-                                    algorithm = OtaPatchAlgorithm.ZstdPatchFrom,
+                                    algorithm = pplan.algorithm,
                                     resultSha256 = pplan.resultSha256,
                                     resultSize = pplan.resultSize.toUInt(),
+                                    sourceSha256 = pplan.sourceSha256,
                                 ),
                             )
                         } else {
@@ -1468,4 +1496,9 @@ public class OtaService(
             isLenient = true
         }
     }
+}
+
+internal fun patchSourceMatches(declared: String?, running: String?): Boolean {
+    if (declared == null || running == null) return true
+    return declared.equals(running, ignoreCase = true)
 }

@@ -2,7 +2,9 @@ package com.bridgething.companion
 
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class OtaManifestTest {
@@ -71,7 +73,33 @@ class OtaManifestTest {
             mapOf("hub" to "0.1.0", "stock" to "8.9.2"),
             manifest.releases["0.8.4+image.2026.05.0"]?.builtinWebapps,
         )
-        // a release entry with no builtin_webapps decodes as empty (backward compatible).
         assertEquals(emptyMap<String, String>(), manifest.releases["0.8.3+image.2026.04.0"]?.builtinWebapps)
+    }
+
+    @Test
+    fun `daemon patch digest decodes source sha256`() {
+        val raw = """
+        {
+          "daemon": {"size": 100, "sha256": "aa"},
+          "daemon_patches": {
+            "0.8.3": {"size": 10, "sha256": "bb", "source_sha256": "cc"},
+            "0.8.2": {"size": 20, "sha256": "dd"}
+          }
+        }
+        """.trimIndent()
+        val artifacts = json.decodeFromString(OtaReleaseArtifacts.serializer(), raw)
+        assertEquals("cc", artifacts.daemonPatches["0.8.3"]?.sourceSha256)
+        assertEquals(OtaArtifactDigest(10, "bb"), artifacts.daemonPatches["0.8.3"]?.digest)
+        assertNull(artifacts.daemonPatches["0.8.2"]?.sourceSha256)
+    }
+
+    @Test
+    fun `patch source match gate`() {
+        assertTrue(patchSourceMatches("abc", "abc"))
+        assertTrue(patchSourceMatches("ABC", "abc"))
+        assertFalse(patchSourceMatches("abc", "def"))
+        assertTrue(patchSourceMatches(null, "abc"))
+        assertTrue(patchSourceMatches("abc", null))
+        assertTrue(patchSourceMatches(null, null))
     }
 }

@@ -7,13 +7,12 @@ use axum::{
   http::{HeaderMap, HeaderValue, Response, StatusCode, header},
   routing::get,
 };
-use bluer::Address;
 use libbridgething::{
   RangePart, RangeSpec,
-  gateway::{BridgeToGatewayTransferMsgEvent, OtaAssetRange, OtaAssetRangeReply, TransferAck, TransferBody},
+  gateway::{OtaAssetRange, OtaAssetRangeReply, TransferBody},
   wire::RequestError,
 };
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
+use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_util::{bytes::Bytes, sync::CancellationToken};
 use uuid::Uuid;
 
@@ -23,12 +22,11 @@ use super::{
   spool::{self, SpoolReader, SpoolWriter},
 };
 use crate::{
-  bluetooth::{BluetoothMan, GatewayMan},
-  transfer::sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
+  bluetooth::BluetoothMan,
+  transfer::sinks::{ForwardStream, TransferEvent, TransferSinks},
 };
 
 const INGEST_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
-const RANGE_ACK_MAX_INTERVAL: Duration = Duration::from_millis(300);
 const SPOOL_READ_MAX: usize = 64 * 1024;
 
 #[derive(Clone)]
@@ -125,7 +123,7 @@ async fn handle_fresh(
   begin: super::RangeBegin,
   asset: String,
   ranges: Vec<RangeSpec>,
-  body_rx: mpsc::Receiver<TransferEvent>,
+  body_rx: ForwardStream,
 ) -> Response<Body> {
   let reply = match request_companion(&state, request_id, &begin, &asset, ranges).await {
     Ok(reply) => reply,
@@ -152,7 +150,7 @@ async fn handle_fresh(
     resume_offset: 0,
     total: reply.total_size,
   };
-  finish_response(state, request_id, begin, plan, meta, reply.body, body_rx).await
+  finish_response(state, request_id, plan, meta, reply.body, body_rx).await
 }
 
 async fn handle_resume(
@@ -161,7 +159,7 @@ async fn handle_resume(
   begin: super::RangeBegin,
   asset: String,
   offset: u64,
-  body_rx: mpsc::Receiver<TransferEvent>,
+  body_rx: ForwardStream,
 ) -> Response<Body> {
   let (parts, total) = match state.proxy.load_ranges(asset.clone()).await {
     Some(stored) => stored,
@@ -202,7 +200,7 @@ async fn handle_resume(
       return resp;
     }
   };
-  finish_response(state, request_id, begin, plan, meta, reply.body, body_rx).await
+  finish_response(state, request_id, plan, meta, reply.body, body_rx).await
 }
 
 struct ResponseMeta {
@@ -248,14 +246,12 @@ async fn request_companion(
 async fn finish_response(
   state: AxumState,
   request_id: Uuid,
-  begin: super::RangeBegin,
   plan: layout::EmitPlan,
   meta: ResponseMeta,
   reply_body: TransferBody,
-  body_rx: mpsc::Receiver<TransferEvent>,
+  body_rx: ForwardStream,
 ) -> Response<Body> {
   let expected = plan.companion_bytes;
-  let gateway_man = state.bluetooth.gateway_man.clone();
   let tally = state.proxy.tally();
 
   let body = match reply_body {
@@ -295,15 +291,7 @@ async fn finish_response(
         }
       };
       tally.add_expected(expected);
-      tokio::spawn(ingest_pump(
-        body_rx,
-        writer,
-        expected,
-        gateway_man,
-        begin.peer,
-        request_id,
-        tally,
-      ));
+      tokio::spawn(ingest_pump(body_rx, writer, expected, request_id, tally));
       Body::from_stream(emit_stream(plan.steps, reader, state.proxy, request_id))
     }
   };
@@ -312,42 +300,17 @@ async fn finish_response(
 }
 
 async fn ingest_pump(
-  mut rx: mpsc::Receiver<TransferEvent>,
+  mut rx: ForwardStream,
   mut writer: SpoolWriter,
   expected: u64,
-  gateway_man: GatewayMan,
-  peer: Option<Address>,
   request_id: Uuid,
   tally: Arc<RangeTally>,
 ) {
   let mut received: u64 = 0;
-  let mut last_acked: u64 = 0;
-  let mut last_ack_at = std::time::Instant::now();
   loop {
-    let event = loop {
-      let flush_in = (received > last_acked)
-        .then(|| RANGE_ACK_MAX_INTERVAL.saturating_sub(last_ack_at.elapsed()))
-        .unwrap_or(INGEST_IDLE_TIMEOUT);
-      match tokio::time::timeout(flush_in.min(INGEST_IDLE_TIMEOUT), rx.recv()).await {
-        Ok(ev) => break Ok(ev),
-        Err(_) if received > last_acked => {
-          last_acked = received;
-          last_ack_at = std::time::Instant::now();
-          tracing::trace!(%request_id, received, expected, "range receipt ack (timer flush)");
-          if let Some(addr) = peer {
-            gateway_man
-              .send_event(
-                addr,
-                BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
-                  transfer_id: request_id,
-                  received: received as u32,
-                }),
-              )
-              .await;
-          }
-        }
-        Err(_) => break Err(()),
-      }
+    let event = match tokio::time::timeout(INGEST_IDLE_TIMEOUT, rx.recv()).await {
+      Ok(ev) => Ok(ev),
+      Err(_) => Err(()),
     };
     let (offset, bytes) = match event {
       Err(()) => {
@@ -383,22 +346,6 @@ async fn ingest_pump(
     }
     received += bytes.len() as u64;
     tally.add_served(bytes.len() as u64);
-    if received - last_acked >= FORWARD_ACK_INTERVAL as u64 || received == expected {
-      last_acked = received;
-      last_ack_at = std::time::Instant::now();
-      tracing::trace!(%request_id, received, expected, "range receipt ack");
-      if let Some(addr) = peer {
-        gateway_man
-          .send_event(
-            addr,
-            BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
-              transfer_id: request_id,
-              received: received as u32,
-            }),
-          )
-          .await;
-      }
-    }
     if received == expected {
       writer.finish();
       return;
@@ -540,36 +487,19 @@ mod tests {
   async fn acks_flow_on_receipt_while_reader_stalls() {
     let sinks = TransferSinks::default();
     let request_id = Uuid::now_v7();
-    let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
     let body_rx = sinks.bind_forward(request_id);
-
-    let (gateway_man, mut gw_rx) = GatewayMan::capturing();
-    let acks: Arc<std::sync::Mutex<Vec<TransferAck>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let acks_sink = acks.clone();
-    tokio::spawn(async move {
-      while let Some(out) = gw_rx.recv().await {
-        if let BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(ack)) = &out.msg.data {
-          acks_sink.lock().unwrap().push(ack.clone());
-        }
-      }
-    });
 
     let expected: u64 = 64 * 1024;
     let (writer, mut reader) = spool::create(&spool_temp_dir(), "ack-test").await.unwrap();
     let tally = Arc::new(RangeTally::default());
-    let pump = tokio::spawn(ingest_pump(
-      body_rx,
-      writer,
-      expected,
-      gateway_man,
-      Some(peer),
-      request_id,
-      tally.clone(),
-    ));
+    let pump = tokio::spawn(ingest_pump(body_rx, writer, expected, request_id, tally.clone()));
 
     let body: Vec<u8> = (0..expected).map(|i| (i % 251) as u8).collect();
+    let mut acks = Vec::new();
     for (i, chunk) in body.chunks(4096).enumerate() {
-      sinks.fragment(request_id, (i * 4096) as u32, Bytes::copy_from_slice(chunk));
+      if let Some(received) = sinks.fragment(request_id, (i * 4096) as u32, Bytes::copy_from_slice(chunk)) {
+        acks.push(received);
+      }
       tokio::task::yield_now().await;
     }
     tokio::time::timeout(Duration::from_secs(5), pump)
@@ -577,9 +507,8 @@ mod tests {
       .expect("pump completes without any reader draining the spool")
       .unwrap();
 
-    let got = acks.lock().unwrap().clone();
-    assert!(!got.is_empty(), "receipt acks must flow while the reader stalls");
-    assert_eq!(got.last().unwrap().received as u64, expected);
+    assert!(!acks.is_empty(), "receipt acks must flow while the reader stalls");
+    assert_eq!(acks.last().copied(), Some(expected as u32));
     assert_eq!(tally.snapshot().0, expected);
 
     let mut drained = Vec::new();
@@ -631,15 +560,12 @@ mod tests {
     let sinks = TransferSinks::default();
     let request_id = Uuid::now_v7();
     let body_rx = sinks.bind_forward(request_id);
-    let (gateway_man, _gw_rx) = GatewayMan::capturing();
 
     let (writer, reader) = spool::create(&spool_temp_dir(), "abandon-test").await.unwrap();
     tokio::spawn(ingest_pump(
       body_rx,
       writer,
       1024,
-      gateway_man,
-      None,
       request_id,
       Arc::new(RangeTally::default()),
     ));
