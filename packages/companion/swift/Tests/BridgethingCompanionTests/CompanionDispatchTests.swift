@@ -118,7 +118,8 @@ final class CompanionDispatchTests: XCTestCase {
         let ota = await h.companion.ota
         let deviceId = await h.driver.deviceId
 
-        XCTAssertNil(await ota.meta(deviceId: deviceId), "precondition: meta must not be cached yet")
+        let cachedBefore = await ota.meta(deviceId: deviceId)
+        XCTAssertNil(cachedBefore, "precondition: meta must not be cached yet")
 
         async let pending = ota.awaitMeta(deviceId: deviceId)
         try await h.driver.send(.version(Self.testMeta(nickname: nil)), meta: .event)
