@@ -51,7 +51,7 @@ struct DeviceVoiceEndToEndTests {
         print("alternatives : \(transcription.alternatives)")
         print("confidence   : \(String(describing: transcription.confidence))")
 
-        let controller = VoiceController(client: NluOpenRouterClient(), config: .init(grammarSchema: nil))
+        let controller = VoiceController(client: FakeNluInference(logits: ["SEARCH": 9]))
         let resolution = try await controller.resolve(transcript: transcription.text)
         print("stage        : \(resolution.stage.rawValue)")
         print("intent       : \(resolution.resolved.intent)")
