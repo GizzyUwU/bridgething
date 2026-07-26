@@ -106,6 +106,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: checkout the stock webapp source
         uses: actions/checkout@v4

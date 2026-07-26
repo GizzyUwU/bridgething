@@ -259,28 +259,19 @@ jobs:
           umask 077
           printf '%s\n' "$ASC_PRIVATE_KEY" >"$RUNNER_TEMP/asc-key.p8"
 
-      - name: import the distribution certificate
-        env:
-          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+      - name: prepare a signing keychain
         run: |
           set -euo pipefail
-          [[ -n "$CERT_P12" ]] || { echo "IOS_DIST_CERT_P12 is unset" >&2; exit 1; }
           keychain="$RUNNER_TEMP/build.keychain-db"
           password=$(uuidgen)
-          printf '%s' "$CERT_P12" | base64 --decode >"$RUNNER_TEMP/dist.p12"
 
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
-          security import "$RUNNER_TEMP/dist.p12" -k "$keychain" -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
           # prepend rather than replace: dropping the runner's existing keychains off the search
           # list breaks anything else that reads from them.
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           security default-keychain -s "$keychain"
-          rm -f "$RUNNER_TEMP/dist.p12"
 
       - name: write ios/Local.xcconfig
         env:
