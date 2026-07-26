@@ -7,7 +7,7 @@ use zbus::{
 };
 
 const ADV_OBJECT_PATH: &str = "/dev/bridgething/le/adv0";
-const ADV_LOCAL_NAME_PREFIX: &str = "Car Thing";
+const ADV_LOCAL_NAME_PREFIX: &str = "Car Thing (SN: ";
 static ADV_LOCAL_NAME: OnceLock<&'static str> = OnceLock::new();
 
 const ADV_MIN_INTERVAL_MS: u32 = 100;
@@ -50,8 +50,6 @@ impl LeAdvertisementImpl {
   fn local_name(&self) -> &str {
     ADV_LOCAL_NAME.get_or_init(|| {
       let mut name = String::from(ADV_LOCAL_NAME_PREFIX);
-      name.push(' ');
-      name.push('(');
       name.push(self.serial_suffix[0]);
       name.push(self.serial_suffix[1]);
       name.push(self.serial_suffix[2]);
