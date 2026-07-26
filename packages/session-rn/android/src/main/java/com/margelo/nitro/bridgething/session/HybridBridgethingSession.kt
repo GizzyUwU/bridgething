@@ -19,7 +19,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingPeerDisconnected: ((String) -> Unit)? = null
         private var pendingPeerLinkFailed: ((BridgethingSessionPeer) -> Unit)? = null
         private var pendingNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
-        private var pendingAncsAuthStatusChanged: ((BridgethingAncsAuthStatus) -> Unit)? = null
+        private var pendingAncsAuthStatusChanged: ((String, BridgethingAncsAuthStatus) -> Unit)? = null
         private var pendingLog: ((String, String) -> Unit)? = null
         private var pendingWebappsChanged: ((String) -> Unit)? = null
         private var pendingWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
@@ -87,7 +87,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val peerDisconnected: ((String) -> Unit)?,
         val peerLinkFailed: ((BridgethingSessionPeer) -> Unit)?,
         val nowPlaying: ((BridgethingNowPlaying?) -> Unit)?,
-        val ancs: ((BridgethingAncsAuthStatus) -> Unit)?,
+        val ancs: ((String, BridgethingAncsAuthStatus) -> Unit)?,
         val log: ((String, String) -> Unit)?,
         val webapps: ((String) -> Unit)?,
         val webappDoc: ((String, String, String, String?) -> Unit)?,
@@ -141,16 +141,16 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun clearPersistedLogs(): Promise<Unit> = Promise.async { backend?.clearPersistedLogs() }
 
-    override fun enableAncsNotifications(): Promise<BridgethingAncsSetupResult> = Promise.async {
-        backend?.enableAncsNotifications() ?: BridgethingAncsSetupResult(
+    override fun enableAncsNotifications(deviceId: String): Promise<BridgethingAncsSetupResult> = Promise.async {
+        backend?.enableAncsNotifications(deviceId) ?: BridgethingAncsSetupResult(
             kind = BridgethingAncsSetupKind.UNSUPPORTED,
             authStatus = BridgethingAncsAuthStatus.UNKNOWN,
             message = null,
         )
     }
 
-    override fun ancsAuthStatus(): Promise<BridgethingAncsAuthStatus> = Promise.async {
-        backend?.ancsAuthStatus() ?: BridgethingAncsAuthStatus.UNKNOWN
+    override fun ancsAuthStatus(deviceId: String): Promise<BridgethingAncsAuthStatus> = Promise.async {
+        backend?.ancsAuthStatus(deviceId) ?: BridgethingAncsAuthStatus.UNKNOWN
     }
 
     override fun listWebapps(deviceId: String): Promise<Array<BridgethingWebappInfo>> = Promise.async {
@@ -334,7 +334,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         forwardOrBuffer(wrapped, BridgethingSessionBackend::setOnNowPlayingChanged) { pendingNowPlayingChanged = it }
     }
 
-    override fun setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) -> Unit) {
+    override fun setOnAncsAuthStatusChanged(callback: (deviceId: String, status: BridgethingAncsAuthStatus) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnAncsAuthStatusChanged) { pendingAncsAuthStatusChanged = it }
     }
 

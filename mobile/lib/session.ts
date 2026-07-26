@@ -44,7 +44,7 @@ type SessionState = {
   providerPriority: string[];
   libraryProvider: string | null;
   peers: BridgethingSessionPeer[];
-  ancsAuthStatus: BridgethingAncsAuthStatus;
+  ancsAuthStatus: Record<string, BridgethingAncsAuthStatus>;
   nowPlaying: BridgethingNowPlaying | null;
   deviceMeta: Record<string, BridgethingDeviceMeta>;
   hostInfo: BridgethingHostInfo | null;
@@ -63,7 +63,7 @@ const initial: Omit<SessionState, 'apply' | 'reconcile' | 'reset'> = {
   providerPriority: [],
   libraryProvider: null,
   peers: [],
-  ancsAuthStatus: 'unknown',
+  ancsAuthStatus: {},
   nowPlaying: null,
   deviceMeta: {},
   hostInfo: null,
@@ -103,7 +103,9 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
         }));
         return;
       case 'ancsAuthStatusChanged':
-        set({ ancsAuthStatus: event.status });
+        set(s => ({
+          ancsAuthStatus: { ...s.ancsAuthStatus, [event.deviceId]: event.status },
+        }));
         return;
       case 'nowPlayingChanged':
         set({ nowPlaying: event.nowPlaying });
@@ -140,7 +142,9 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       providerPriority: snapshot.providerPriority,
       libraryProvider: snapshot.libraryProvider ?? null,
       peers: snapshot.peers,
-      ancsAuthStatus: snapshot.ancsAuthStatus,
+      ancsAuthStatus: Object.fromEntries(
+        snapshot.ancsAuthStatuses.map(e => [e.deviceId, e.status]),
+      ),
       nowPlaying: snapshot.nowPlaying ?? null,
       deviceMeta: Object.fromEntries(
         snapshot.deviceMeta.map(e => [e.deviceId, e.meta]),
@@ -257,7 +261,11 @@ export async function runPairFlow(): Promise<PairOutcome> {
     }
     if (!(await presentPairWithGuidance())) return { kind: 'cancelled' };
     if (!(await waitForPeer(20000))) return { kind: 'timeout' };
-    const ancs = await getSession().enableAncsNotifications();
+    const paired = useSessionStore
+      .getState()
+      .peers.find(p => p.status === 'connected');
+    if (paired == null) return { kind: 'timeout' };
+    const ancs = await getSession().enableAncsNotifications(paired.id);
     if (ancs.kind === 'failed') {
       return {
         kind: 'notificationsFailed',

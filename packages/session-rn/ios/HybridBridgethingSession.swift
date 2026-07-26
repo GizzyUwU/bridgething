@@ -22,8 +22,8 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func deleteLogArchive(archiveId: String) async
     func clearPersistedLogs() async
 
-    func enableAncsNotifications() async -> BridgethingAncsSetupResult
-    func ancsAuthStatus() async -> BridgethingAncsAuthStatus
+    func enableAncsNotifications(deviceId: String) async -> BridgethingAncsSetupResult
+    func ancsAuthStatus(deviceId: String) async -> BridgethingAncsAuthStatus
 
     func listWebapps(deviceId: String) async throws -> [BridgethingWebappInfo]
     func currentWebapp(deviceId: String) async throws -> BridgethingActiveWebapp?
@@ -83,7 +83,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnPeerDisconnected(_ callback: @escaping @Sendable (String) -> Void)
     func setOnPeerLinkFailed(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnNowPlayingChanged(_ callback: @escaping @Sendable (BridgethingNowPlaying?) -> Void)
-    func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (BridgethingAncsAuthStatus) -> Void)
+    func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (String, BridgethingAncsAuthStatus) -> Void)
     func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void)
     func setLogStreamingEnabled(_ enabled: Bool)
     func setLocalLogStreamingEnabled(_ enabled: Bool)
@@ -103,7 +103,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingPeerDisconnected: (@Sendable (String) -> Void)?
     private static var pendingPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
-    private static var pendingAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
+    private static var pendingAncsAuthStatusChanged: (@Sendable (String, BridgethingAncsAuthStatus) -> Void)?
     private static var pendingLog: (@Sendable (String, String) -> Void)?
     private static var pendingWebappsChanged: (@Sendable (String) -> Void)?
     private static var pendingWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
@@ -271,15 +271,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     // MARK: - ANCS
 
-    public func enableAncsNotifications() throws -> Promise<BridgethingAncsSetupResult> {
+    public func enableAncsNotifications(deviceId: String) throws -> Promise<BridgethingAncsSetupResult> {
         Promise.async {
-            await (try Self.backend()).enableAncsNotifications()
+            await (try Self.backend()).enableAncsNotifications(deviceId: deviceId)
         }
     }
 
-    public func ancsAuthStatus() throws -> Promise<BridgethingAncsAuthStatus> {
+    public func ancsAuthStatus(deviceId: String) throws -> Promise<BridgethingAncsAuthStatus> {
         Promise.async {
-            await (try Self.backend()).ancsAuthStatus()
+            await (try Self.backend()).ancsAuthStatus(deviceId: deviceId)
         }
     }
 
@@ -558,8 +558,10 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         backend?.setOnNowPlayingChanged(wrapped)
     }
 
-    public func setOnAncsAuthStatusChanged(callback: @escaping (BridgethingAncsAuthStatus) -> Void) throws {
-        let wrapped: @Sendable (BridgethingAncsAuthStatus) -> Void = { status in callback(status) }
+    public func setOnAncsAuthStatusChanged(callback: @escaping (String, BridgethingAncsAuthStatus) -> Void) throws {
+        let wrapped: @Sendable (String, BridgethingAncsAuthStatus) -> Void = { deviceId, status in
+            callback(deviceId, status)
+        }
         Self.stateLock.lock()
         let backend = Self._backend
         if backend == nil { Self.pendingAncsAuthStatusChanged = wrapped }

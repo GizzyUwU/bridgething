@@ -79,7 +79,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onPeerDisconnected: (@Sendable (String) -> Void)?
     private var onPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
     private var onNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
-    private var onAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
+    private var onAncsAuthStatusChanged: (@Sendable (String, BridgethingAncsAuthStatus) -> Void)?
     private var onLog: (@Sendable (String, String) -> Void)?
     private var onWebappsChanged: (@Sendable (String) -> Void)?
     private var onWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
@@ -152,8 +152,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         await companion.setNowPlayingObserver { [weak self] np in
             self?.handleNowPlaying(np)
         }
-        await companion.setAncsAuthStateObserver { [weak self] state in
-            self?.emitAncsAuthStatus(toRNAncsAuthStatus(state))
+        await companion.setAncsAuthStateObserver { [weak self] deviceId, state in
+            self?.emitAncsAuthStatus(deviceId, toRNAncsAuthStatus(state))
         }
         let (deviceDesired, localDesired) = stateLock.withLock { (logStreamingDesired, localLogStreamingDesired) }
         await reconcileLogObserver(companion)
@@ -332,9 +332,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public func snapshot() async -> BridgethingSessionSnapshot {
         let companion = stateLock.withLock { self.companion }
         let libraryProvider = await companion?.libraryGlue().map { type(of: $0).name }
-        let ancs: BridgethingAncsAuthStatus =
-            if let companion { toRNAncsAuthStatus(await companion.currentAncsAuthState()) } else { .unknown }
-
+        var ancsStatuses: [BridgethingAncsAuthStatusEntry] = []
         var deviceMetaEntries: [BridgethingDeviceMetaEntry] = []
         if let companion {
             let ota = await companion.ota
@@ -345,6 +343,12 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                         BridgethingDeviceMetaEntry(deviceId: id, meta: Self.toRNDeviceMeta(meta))
                     )
                 }
+                ancsStatuses.append(
+                    BridgethingAncsAuthStatusEntry(
+                        deviceId: id,
+                        status: toRNAncsAuthStatus(await companion.currentAncsAuthState(deviceId: id))
+                    )
+                )
             }
         }
 
@@ -358,7 +362,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             providerPriority: order,
             libraryProvider: libraryProvider,
             peers: peerList,
-            ancsAuthStatus: ancs,
+            ancsAuthStatuses: ancsStatuses,
             nowPlaying: nowPlaying,
             deviceMeta: deviceMetaEntries,
             capabilityFlags: Self.loadCapabilityFlags(),
@@ -394,18 +398,15 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             if glue == nil { glue = await companion.libraryGlue() }
         }
         let debug = await glue?.debugState() ?? GlueDebugState()
-        let ancs: BridgethingAncsAuthStatus =
-            if let companion { toRNAncsAuthStatus(await companion.currentAncsAuthState()) } else { .unknown }
         return BridgethingCompanionDebug(
             authorityPlaybackHeld: debug.authorityPlaybackHeld,
-            authorityMetadataHeld: debug.authorityMetadataHeld,
-            ancsAuthStatus: ancs
+            authorityMetadataHeld: debug.authorityMetadataHeld
         )
     }
 
     // MARK: - ANCS
 
-    public func enableAncsNotifications() async -> BridgethingAncsSetupResult {
+    public func enableAncsNotifications(deviceId: String) async -> BridgethingAncsSetupResult {
         let companion = stateLock.withLock { self.companion }
         guard let companion else {
             return BridgethingAncsSetupResult(
@@ -414,14 +415,14 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 message: "session not started"
             )
         }
-        let result = await companion.enableAncsNotifications()
+        let result = await companion.enableAncsNotifications(deviceId: deviceId)
         return toRNAncsSetupResult(result)
     }
 
-    public func ancsAuthStatus() async -> BridgethingAncsAuthStatus {
+    public func ancsAuthStatus(deviceId: String) async -> BridgethingAncsAuthStatus {
         let companion = stateLock.withLock { self.companion }
         guard let companion else { return .unknown }
-        return toRNAncsAuthStatus(await companion.currentAncsAuthState())
+        return toRNAncsAuthStatus(await companion.currentAncsAuthState(deviceId: deviceId))
     }
 
     // MARK: - Webapps (per-device)
@@ -853,7 +854,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onNowPlayingChanged = callback }
     }
 
-    public func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (BridgethingAncsAuthStatus) -> Void) {
+    public func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (String, BridgethingAncsAuthStatus) -> Void) {
         stateLock.withLock { onAncsAuthStatusChanged = callback }
     }
 
@@ -1084,8 +1085,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { foreground ? onNowPlayingChanged : nil }?(np)
     }
 
-    private func emitAncsAuthStatus(_ status: BridgethingAncsAuthStatus) {
-        stateLock.withLock { foreground ? onAncsAuthStatusChanged : nil }?(status)
+    private func emitAncsAuthStatus(_ deviceId: String, _ status: BridgethingAncsAuthStatus) {
+        stateLock.withLock { foreground ? onAncsAuthStatusChanged : nil }?(deviceId, status)
     }
 
     private func emitLog(_ level: String, _ message: String) {

@@ -81,8 +81,8 @@ public actor BridgethingCompanion {
     private var tasks: [Task<Void, Never>] = []
     private var started = false
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
-    private var ancsAuthStateObserver: (@Sendable (AncsAuthState) -> Void)?
-    private var ancsAuthState: AncsAuthState = .unknown
+    private var ancsAuthStateObserver: (@Sendable (String, AncsAuthState) -> Void)?
+    private var ancsAuthStates: [String: AncsAuthState] = [:]
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
     private var deviceLogStreaming = false
 
@@ -298,7 +298,7 @@ public actor BridgethingCompanion {
         }
     }
 
-    public func setAncsAuthStateObserver(_ observer: (@Sendable (AncsAuthState) -> Void)?) {
+    public func setAncsAuthStateObserver(_ observer: (@Sendable (String, AncsAuthState) -> Void)?) {
         ancsAuthStateObserver = observer
     }
 
@@ -395,20 +395,23 @@ public actor BridgethingCompanion {
         observer?(level, message)
     }
 
-    public func currentAncsAuthState() -> AncsAuthState {
-        ancsAuthState
+    public func currentAncsAuthState(deviceId: String) -> AncsAuthState {
+        ancsAuthStates[deviceId] ?? .unknown
     }
 
-    public func enableAncsNotifications() async -> AncsSetupResult {
+    public func enableAncsNotifications(deviceId: String) async -> AncsSetupResult {
         #if os(iOS)
+            guard let serial = await ota.meta(deviceId: deviceId)?.serialNumber else {
+                return AncsSetupResult(kind: .failed("no metadata for device \(deviceId)"), authState: .unknown)
+            }
             log(.info, "enableAncsNotifications: acquiring coordinator")
             let coordinator = await makeOrReuseCoordinator()
-            await coordinator.setLastAuthState(ancsAuthState)
-            let result = await coordinator.pair()
+            await coordinator.setAuthState(serial: serial, currentAncsAuthState(deviceId: deviceId))
+            let result = await coordinator.pair(serial: serial)
             log(.info, "enableAncsNotifications: result \(String(describing: result.kind))")
             return result
         #else
-            return AncsSetupResult(kind: .unsupported, authState: ancsAuthState)
+            return AncsSetupResult(kind: .unsupported, authState: currentAncsAuthState(deviceId: deviceId))
         #endif
     }
 
@@ -423,25 +426,24 @@ public actor BridgethingCompanion {
             return coordinator
         }
 
-        private func reestablishAncsLink() async {
-            let coordinator = await makeOrReuseCoordinator()
-            await coordinator.setLastAuthState(ancsAuthState)
-            await coordinator.reconnectIfPaired()
-        }
-
         private func ensureAncsPairing() async {
-            guard !connectedDeviceIds.isEmpty else { return }
             guard !ancsPromotionInFlight else { return }
             ancsPromotionInFlight = true
             defer { ancsPromotionInFlight = false }
             let coordinator = await makeOrReuseCoordinator()
-            await coordinator.setLastAuthState(ancsAuthState)
-            if await coordinator.hasPairedAccessory() {
-                await coordinator.reconnectIfPaired()
-                return
+            for id in connectedDeviceIds {
+                guard let serial = await ota.meta(deviceId: id)?.serialNumber else { continue }
+                await coordinator.setAuthState(serial: serial, currentAncsAuthState(deviceId: id))
+                if await coordinator.hasPairedAccessory(serial: serial) {
+                    await coordinator.reconnectIfPaired(serial: serial)
+                    continue
+                }
+                let result = await coordinator.pair(serial: serial)
+                log(
+                    .info,
+                    "ancs promotion \(serial): \(String(describing: result.kind)) (auth \(String(describing: result.authState)))"
+                )
             }
-            let result = await coordinator.pair()
-            log(.info, "ancs promotion: \(String(describing: result.kind)) (auth \(String(describing: result.authState)))")
         }
     #endif
 
@@ -461,7 +463,7 @@ public actor BridgethingCompanion {
                     EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: nil) { error in
                         guard let error else {
                             osLog.info("EA picker completed")
-                            cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.advertisedNamePrefix))
+                            cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.productLabel))
                             return
                         }
                         let ns = error as NSError
@@ -471,7 +473,7 @@ public actor BridgethingCompanion {
                             switch code {
                             case .alreadyConnected:
                                 osLog.info("EA picker: accessory already connected")
-                                cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.advertisedNamePrefix))
+                                cont.resume(returning: AccessoryPickResult(id: "", name: AncsBluetooth.productLabel))
                                 return
                             case .resultNotFound:
                                 osLog.warning("EA picker: no accessory found")
@@ -1026,20 +1028,22 @@ public actor BridgethingCompanion {
 
     private func runAncsAuthDispatch() async {
         for await update in gateway.notifications.ancsAuthStateChanged {
-            await handleAncsAuthState(update.msg)
+            await handleAncsAuthState(deviceId: update.deviceId, update.msg)
         }
     }
 
-    private func handleAncsAuthState(_ next: AncsAuthState) async {
-        guard ancsAuthState != next else { return }
-        ancsAuthState = next
-        log(.info, "ancs auth state -> \(String(describing: next))")
+    private func handleAncsAuthState(deviceId: String, _ next: AncsAuthState) async {
+        guard ancsAuthStates[deviceId] != next else { return }
+        ancsAuthStates[deviceId] = next
+        log(.info, "ancs auth state \(deviceId) -> \(String(describing: next))")
         #if os(iOS)
-            if let coordinator = ancsCoordinator {
-                await coordinator.setLastAuthState(next)
+            if let coordinator = ancsCoordinator,
+                let serial = await ota.meta(deviceId: deviceId)?.serialNumber
+            {
+                await coordinator.setAuthState(serial: serial, next)
             }
         #endif
-        ancsAuthStateObserver?(next)
+        ancsAuthStateObserver?(deviceId, next)
     }
 
     private func handleLyrics(handle: LyricsRequestHandle, req: LyricsRequest) async {

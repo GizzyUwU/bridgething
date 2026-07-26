@@ -3,6 +3,7 @@ import {
   type BridgethingDeviceMeta,
   type BridgethingOtaPollConfig,
   type BridgethingProviderInfo,
+  type BridgethingSessionPeer,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -440,7 +441,7 @@ export function SettingsScreen({ navigation }: Props) {
                 }
               />
             ) : null}
-            {Platform.OS === 'ios' ? <AncsPairingRow /> : null}
+            {Platform.OS === 'ios' ? <AncsPairingRows /> : null}
             {Platform.OS === 'android' ? (
               <NotificationListenerRow
                 value={flags.notifications}
@@ -893,25 +894,48 @@ function BackgroundLocationRow() {
   );
 }
 
-function AncsPairingRow() {
-  const status = useSession(s => s.ancsAuthStatus);
+function AncsPairingRows() {
   const peers = useSession(s => s.peers);
-  const connected = peers.some(p => p.status === 'connected');
+  const connected = peers.filter(p => p.status === 'connected');
+
+  if (connected.length === 0) {
+    return (
+      <ListRow
+        icon={Bluetooth}
+        title="notification pairing"
+        subtitle="connect your Car Thing first"
+      />
+    );
+  }
+
+  return (
+    <>
+      {connected.map(peer => (
+        <AncsPairingRow key={peer.id} peer={peer} />
+      ))}
+    </>
+  );
+}
+
+function AncsPairingRow({ peer }: { peer: BridgethingSessionPeer }) {
+  const peerId = peer.id;
+  const status = useSession(s => s.ancsAuthStatus[peerId] ?? 'unknown');
+  const ledger = useSession(s => s.ledger);
+  const meta = useSession(s => s.deviceMeta[peerId]);
   const [busy, setBusy] = useState(false);
 
-  const subtitle = !connected
-    ? 'connect your Car Thing first'
-    : status === 'authorized'
+  const subtitle =
+    status === 'authorized'
       ? 'paired and authorized'
       : status === 'unauthorized'
         ? 'paired but not authorized - tap to fix'
         : 'tap to pair for notifications and volume';
 
   const run = async () => {
-    if (busy || !connected) return;
+    if (busy) return;
     setBusy(true);
     try {
-      const result = await getSession().enableAncsNotifications();
+      const result = await getSession().enableAncsNotifications(peerId);
       if (result.kind === 'failed') {
         Alert.alert(
           'LE pairing failed',
@@ -932,9 +956,9 @@ function AncsPairingRow() {
     <ListRow
       icon={Bluetooth}
       iconTint={status === 'authorized' ? 'primary' : 'default'}
-      title="notification pairing"
+      title={`notification pairing - ${peerDisplayName(peer, ledger, meta)}`}
       subtitle={subtitle}
-      onPress={connected && status !== 'authorized' && !busy ? run : undefined}
+      onPress={status !== 'authorized' && !busy ? run : undefined}
     />
   );
 }

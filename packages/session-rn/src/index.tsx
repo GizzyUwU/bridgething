@@ -71,7 +71,11 @@ export type SessionEvent =
   | { type: 'peerDisconnected'; peerId: string }
   | { type: 'peerLinkFailed'; peer: BridgethingSessionPeer }
   | { type: 'nowPlayingChanged'; nowPlaying: BridgethingNowPlaying | null }
-  | { type: 'ancsAuthStatusChanged'; status: BridgethingAncsAuthStatus }
+  | {
+      type: 'ancsAuthStatusChanged';
+      deviceId: string;
+      status: BridgethingAncsAuthStatus;
+    }
   | { type: 'webappsChanged'; deviceId: string }
   | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
@@ -172,12 +176,12 @@ export class BridgethingSession {
     return this.native.clearPersistedLogs();
   }
 
-  async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
-    return this.native.enableAncsNotifications();
+  async enableAncsNotifications(deviceId: string): Promise<BridgethingAncsSetupResult> {
+    return this.native.enableAncsNotifications(deviceId);
   }
 
-  async ancsAuthStatus(): Promise<BridgethingAncsAuthStatus> {
-    return this.native.ancsAuthStatus();
+  async ancsAuthStatus(deviceId: string): Promise<BridgethingAncsAuthStatus> {
+    return this.native.ancsAuthStatus(deviceId);
   }
 
   async listWebapps(deviceId: string): Promise<BridgethingWebappInfo[]> {
@@ -357,8 +361,8 @@ export class BridgethingSession {
     this.native.setOnNowPlayingChanged(nowPlaying => {
       this.dispatch({ type: 'nowPlayingChanged', nowPlaying });
     });
-    this.native.setOnAncsAuthStatusChanged(status => {
-      this.dispatch({ type: 'ancsAuthStatusChanged', status });
+    this.native.setOnAncsAuthStatusChanged((deviceId, status) => {
+      this.dispatch({ type: 'ancsAuthStatusChanged', deviceId, status });
     });
     this.native.setOnWebappsChanged(deviceId => {
       this.dispatch({ type: 'webappsChanged', deviceId });

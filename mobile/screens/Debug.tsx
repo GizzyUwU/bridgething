@@ -126,7 +126,9 @@ function StateDump({
               }`}
             />
           ))}
-          <Row label="ANCS" value={snapshot.ancsAuthStatus} />
+          {snapshot.ancsAuthStatuses.map(a => (
+            <Row key={a.deviceId} label={`ANCS · ${a.deviceId}`} value={a.status} />
+          ))}
           {snapshot.libraryProvider ? (
             <Row label="library" value={snapshot.libraryProvider} />
           ) : null}
@@ -143,7 +145,6 @@ function StateDump({
             label="authority · metadata"
             value={yesno(companion.authorityMetadataHeld)}
           />
-          <Row label="ANCS auth" value={companion.ancsAuthStatus} />
         </Section>
       ) : null}
 

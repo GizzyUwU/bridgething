@@ -44,8 +44,8 @@ public interface BridgethingSessionBackend {
     public suspend fun deleteLogArchive(archiveId: String)
     public suspend fun clearPersistedLogs()
 
-    public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult
-    public suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus
+    public suspend fun enableAncsNotifications(deviceId: String): BridgethingAncsSetupResult
+    public suspend fun ancsAuthStatus(deviceId: String): BridgethingAncsAuthStatus
 
     public suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo>
     public suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp?
@@ -105,7 +105,7 @@ public interface BridgethingSessionBackend {
     public fun setOnPeerDisconnected(callback: (String) -> Unit)
     public fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit)
     public fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit)
-    public fun setOnAncsAuthStatusChanged(callback: (BridgethingAncsAuthStatus) -> Unit)
+    public fun setOnAncsAuthStatusChanged(callback: (String, BridgethingAncsAuthStatus) -> Unit)
     public fun setOnLog(callback: (String, String) -> Unit)
     public fun setLogStreamingEnabled(enabled: Boolean)
     public fun setLocalLogStreamingEnabled(enabled: Boolean)

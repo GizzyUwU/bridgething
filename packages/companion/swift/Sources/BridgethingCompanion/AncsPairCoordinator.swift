@@ -32,7 +32,12 @@ public struct AncsSetupResult: Sendable {
             CBUUID(string: "B12BE732-C1D0-4001-8001-BB1D6E7A1C01")
         nonisolated(unsafe) public static let pairTriggerChar =
             CBUUID(string: "B12BE732-C1D0-4001-8001-BB1D6E7A1C02")
-        public static let advertisedNamePrefix = "Car Thing"
+
+        public static let productLabel = "Car Thing"
+
+        public static func advertisedName(serial: String) -> String {
+            "\(productLabel) (SN: \(serial.suffix(4)))"
+        }
     }
 
     @available(iOS 18.0, *)
@@ -43,50 +48,50 @@ public struct AncsSetupResult: Sendable {
         private var centralDelegate: CentralDelegate?
         private var sessionActivated = false
         private var activationContinuation: CheckedContinuation<Void, Never>?
-        private var pendingPairs: [CheckedContinuation<AncsSetupResult, Never>] = []
-        private var lastAuthState: AncsAuthState = .unknown
+        private var pendingPairs: [String: [CheckedContinuation<AncsSetupResult, Never>]] = [:]
+        private var authStates: [String: AncsAuthState] = [:]
 
         override init() {
             super.init()
         }
 
-        func setLastAuthState(_ state: AncsAuthState) {
-            lastAuthState = state
+        func setAuthState(serial: String, _ state: AncsAuthState) {
+            authStates[AncsBluetooth.advertisedName(serial: serial)] = state
         }
 
-        func pair() async -> AncsSetupResult {
-            askLog.info("pair() begin")
+        func pair(serial: String) async -> AncsSetupResult {
+            let name = AncsBluetooth.advertisedName(serial: serial)
+            askLog.info("pair() begin for \(name)")
             await activateIfNeeded()
             guard sessionActivated else {
                 askLog.error("pair() aborting: session never activated")
-                return AncsSetupResult(kind: .failed("accessory session failed to activate"), authState: lastAuthState)
-            }
-            askLog.info("pair() activated; existingAccessory=\(self.hasMatchingExistingAccessory())")
-
-            if hasMatchingExistingAccessory() {
-                let accessory = currentAccessory()
-                if let accessory {
-                    triggerConnect(for: accessory, requiresAncs: true)
-                }
-                return AncsSetupResult(kind: .alreadyPaired, authState: lastAuthState)
+                return AncsSetupResult(kind: .failed("accessory session failed to activate"), authState: authState(name))
             }
 
-            let alreadyShowing = !pendingPairs.isEmpty
+            if let accessory = currentAccessory(name: name) {
+                askLog.info("pair() already holds \(name)")
+                triggerConnect(for: accessory, requiresAncs: true)
+                return AncsSetupResult(kind: .alreadyPaired, authState: authState(name))
+            }
+
+            let alreadyShowing = pendingPairs[name] != nil
             return await withCheckedContinuation { (continuation: CheckedContinuation<AncsSetupResult, Never>) in
-                pendingPairs.append(continuation)
-                if !alreadyShowing { showPicker() }
+                pendingPairs[name, default: []].append(continuation)
+                if !alreadyShowing { showPicker(name: name) }
             }
         }
 
-        func reconnectIfPaired() async {
+        func reconnectIfPaired(serial: String) async {
             await activateIfNeeded()
-            guard sessionActivated, let accessory = currentAccessory() else { return }
+            let name = AncsBluetooth.advertisedName(serial: serial)
+            guard sessionActivated, let accessory = currentAccessory(name: name) else { return }
             triggerConnect(for: accessory, requiresAncs: false)
         }
 
-        func hasPairedAccessory() async -> Bool {
+        func hasPairedAccessory(serial: String) async -> Bool {
             await activateIfNeeded()
-            return sessionActivated && hasMatchingExistingAccessory()
+            let name = AncsBluetooth.advertisedName(serial: serial)
+            return sessionActivated && currentAccessory(name: name) != nil
         }
 
         // MARK: - ASK plumbing
@@ -126,34 +131,37 @@ public struct AncsSetupResult: Sendable {
             case .accessoryAdded:
                 if let accessory = event.accessory {
                     triggerConnect(for: accessory, requiresAncs: true)
-                    completePending(.paired)
+                    completePending(pendingKey(for: accessory) ?? accessory.displayName, .paired)
                 }
             case .accessoryRemoved:
-                lastAuthState = .unknown
+                if let accessory = event.accessory {
+                    authStates[accessory.displayName] = nil
+                    if let key = accessory.descriptor.bluetoothNameSubstring { authStates[key] = nil }
+                }
             case .pickerDidDismiss:
-                completePendingIfNeeded(.cancelled)
+                completeAllPending(.cancelled)
             default:
                 break
             }
         }
 
-        private func showPicker() {
+        private func showPicker(name: String) {
             let descriptor = ASDiscoveryDescriptor()
             descriptor.bluetoothServiceUUID = AncsBluetooth.pairTriggerService
-            descriptor.bluetoothNameSubstring = AncsBluetooth.advertisedNamePrefix
+            descriptor.bluetoothNameSubstring = name
 
             let item = ASPickerDisplayItem(
-                name: AncsBluetooth.advertisedNamePrefix,
+                name: name,
                 productImage: Self.pickerImage(),
                 descriptor: descriptor
             )
-            askLog.info("showPicker presenting")
+            askLog.info("showPicker presenting for \(name)")
             session.showPicker(for: [item]) { [weak self] error in
                 guard let self else { return }
                 if let error {
                     askLog.error("showPicker error: \(String(describing: error))")
                     MainActor.assumeIsolated {
-                        self.completePending(.failed(String(describing: error)))
+                        self.completePending(name, .failed(String(describing: error)))
                     }
                 } else {
                     askLog.info("showPicker completion: no error")
@@ -172,29 +180,38 @@ public struct AncsSetupResult: Sendable {
             }
         }
 
-        private func hasMatchingExistingAccessory() -> Bool {
-            currentAccessory() != nil
-        }
-
-        private func currentAccessory() -> ASAccessory? {
+        private func currentAccessory(name: String) -> ASAccessory? {
             session.accessories.first {
-                $0.descriptor.bluetoothServiceUUID == AncsBluetooth.pairTriggerService
+                guard $0.descriptor.bluetoothServiceUUID == AncsBluetooth.pairTriggerService else { return false }
+                return $0.descriptor.bluetoothNameSubstring == name || $0.displayName == name
             }
         }
 
-        private func completePending(_ kind: AncsSetupKind) {
-            guard !pendingPairs.isEmpty else { return }
-            let pending = pendingPairs
-            pendingPairs = []
-            let result = AncsSetupResult(kind: kind, authState: lastAuthState)
+        private func pendingKey(for accessory: ASAccessory) -> String? {
+            pendingPairs.keys.first {
+                accessory.descriptor.bluetoothNameSubstring == $0 || accessory.displayName == $0
+            }
+        }
+
+        private func authState(_ name: String) -> AncsAuthState {
+            authStates[name] ?? .unknown
+        }
+
+        private func completePending(_ name: String, _ kind: AncsSetupKind) {
+            guard let pending = pendingPairs.removeValue(forKey: name) else { return }
+            let result = AncsSetupResult(kind: kind, authState: authState(name))
             for continuation in pending {
                 continuation.resume(returning: result)
             }
         }
 
-        private func completePendingIfNeeded(_ kind: AncsSetupKind) {
-            guard !pendingPairs.isEmpty else { return }
-            completePending(kind)
+        private func completeAllPending(_ kind: AncsSetupKind) {
+            let pending = pendingPairs
+            pendingPairs = [:]
+            for (name, continuations) in pending {
+                let result = AncsSetupResult(kind: kind, authState: authState(name))
+                for continuation in continuations { continuation.resume(returning: result) }
+            }
         }
 
         // MARK: - CoreBluetooth: bring the LE link up; RequiresANCS only for the explicit pair flow

@@ -185,7 +185,7 @@ public class BridgethingCompanion(
     private var dispatchers: MutableList<Job> = mutableListOf()
     private var started: Boolean = false
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
-    private var ancsAuthStateObserver: ((AncsAuthState) -> Unit)? = null
+    private var ancsAuthStateObserver: ((String, AncsAuthState) -> Unit)? = null
     private var logObserver: ((CompanionLogLevel, String) -> Unit)? = null
     private val deviceLogMutex = Mutex()
     private var deviceLogStreaming: Boolean = false
@@ -413,7 +413,7 @@ public class BridgethingCompanion(
         for (g in attached) g.setNowPlayingObserver(observer ?: { _ -> })
     }
 
-    public fun setAncsAuthStateObserver(observer: ((AncsAuthState) -> Unit)?) {
+    public fun setAncsAuthStateObserver(observer: ((String, AncsAuthState) -> Unit)?) {
         ancsAuthStateObserver = observer
     }
 
@@ -788,8 +788,8 @@ public class BridgethingCompanion(
     }
 
     private suspend fun runAncsAuthDispatch() {
-        gateway.notifications.ancsAuthStateChanged.collect { (_, state) ->
-            ancsAuthStateObserver?.invoke(state)
+        gateway.notifications.ancsAuthStateChanged.collect { (deviceId, state) ->
+            ancsAuthStateObserver?.invoke(deviceId, state)
         }
     }
 

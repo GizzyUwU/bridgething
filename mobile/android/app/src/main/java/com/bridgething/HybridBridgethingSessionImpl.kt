@@ -7,6 +7,7 @@ import android.provider.Settings
 import com.bridgething.session.BridgethingSessionBackend
 import com.margelo.nitro.bridgething.session.BridgethingActiveWebapp
 import com.margelo.nitro.bridgething.session.BridgethingAncsAuthStatus
+import com.margelo.nitro.bridgething.session.BridgethingAncsAuthStatusEntry
 import com.margelo.nitro.bridgething.session.BridgethingAncsSetupKind
 import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
@@ -183,7 +184,7 @@ public class HybridBridgethingSessionImpl(
     private var onNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
 
     @Volatile
-    private var onAncsAuthStatusChanged: ((BridgethingAncsAuthStatus) -> Unit)? = null
+    private var onAncsAuthStatusChanged: ((String, BridgethingAncsAuthStatus) -> Unit)? = null
 
     @Volatile
     private var onLog: ((String, String) -> Unit)? = null
@@ -218,7 +219,7 @@ public class HybridBridgethingSessionImpl(
         if (!firstAttach) return
 
         c.setNowPlayingObserver { np -> safeEmit { handleNowPlaying(np) } }
-        c.setAncsAuthStateObserver { state -> safeEmit { emitAncsAuthStatus(toRnAncsAuthStatus(state)) } }
+        c.setAncsAuthStateObserver { deviceId, state -> safeEmit { emitAncsAuthStatus(deviceId, toRnAncsAuthStatus(state)) } }
         reconcileLogObserver(c)
         if (logStreamingDesired) scope.launch { c.setDeviceLogStreaming(true) }
         if (localLogStreamingDesired) c.setLocalLogStreaming(true)
@@ -383,10 +384,16 @@ public class HybridBridgethingSessionImpl(
     override suspend fun snapshot(): BridgethingSessionSnapshot {
         val c = stateLock.withLock { companion }
         val libraryProvider = c?.libraryGlue()?.name
-        val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
+        val ancsStatuses = mutableListOf<BridgethingAncsAuthStatusEntry>()
         val deviceMetaEntries = mutableListOf<BridgethingDeviceMetaEntry>()
         if (c != null) {
             for (id in peers.keys) {
+                ancsStatuses.add(
+                    BridgethingAncsAuthStatusEntry(
+                        deviceId = id,
+                        status = toRnAncsAuthStatus(c.currentAncsAuthState()),
+                    )
+                )
                 val meta = c.ota.meta(id) ?: continue
                 deviceMetaEntries.add(BridgethingDeviceMetaEntry(deviceId = id, meta = toRnDeviceMeta(meta)))
             }
@@ -397,7 +404,7 @@ public class HybridBridgethingSessionImpl(
             providerPriority = priority.toTypedArray(),
             libraryProvider = libraryProvider,
             peers = peers.values.toTypedArray(),
-            ancsAuthStatus = ancs,
+            ancsAuthStatuses = ancsStatuses.toTypedArray(),
             nowPlaying = lastNowPlaying,
             deviceMeta = deviceMetaEntries.toTypedArray(),
             capabilityFlags = loadCapabilityFlags(),
@@ -448,15 +455,13 @@ public class HybridBridgethingSessionImpl(
     override suspend fun companionDebug(): BridgethingCompanionDebug {
         val c = stateLock.withLock { companion }
         val debug = (c?.audibleGlue() ?: c?.libraryGlue())?.debugState() ?: GlueDebugState()
-        val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
         return BridgethingCompanionDebug(
             authorityPlaybackHeld = debug.authorityPlaybackHeld,
             authorityMetadataHeld = debug.authorityMetadataHeld,
-            ancsAuthStatus = ancs,
         )
     }
 
-    override suspend fun enableAncsNotifications(): BridgethingAncsSetupResult {
+    override suspend fun enableAncsNotifications(deviceId: String): BridgethingAncsSetupResult {
         val result = stateLock.withLock { companion }?.enableAncsNotifications()
             ?: return BridgethingAncsSetupResult(
                 kind = BridgethingAncsSetupKind.UNSUPPORTED,
@@ -476,7 +481,7 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
-    override suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus =
+    override suspend fun ancsAuthStatus(deviceId: String): BridgethingAncsAuthStatus =
         toRnAncsAuthStatus(stateLock.withLock { companion }?.currentAncsAuthState() ?: AncsAuthState.Unknown)
 
     override suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo> {
@@ -918,7 +923,7 @@ public class HybridBridgethingSessionImpl(
     override fun setOnPeerDisconnected(callback: (String) -> Unit) { onPeerDisconnected = callback }
     override fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit) { onPeerLinkFailed = callback }
     override fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit) { onNowPlayingChanged = callback }
-    override fun setOnAncsAuthStatusChanged(callback: (BridgethingAncsAuthStatus) -> Unit) { onAncsAuthStatusChanged = callback }
+    override fun setOnAncsAuthStatusChanged(callback: (String, BridgethingAncsAuthStatus) -> Unit) { onAncsAuthStatusChanged = callback }
     override fun setOnLog(callback: (String, String) -> Unit) { onLog = callback }
 
     override fun setLogStreamingEnabled(enabled: Boolean) {
@@ -1142,7 +1147,7 @@ public class HybridBridgethingSessionImpl(
         is GlueServiceHealth.Unreachable -> BridgethingServiceHealth(BridgethingServiceHealthKind.UNREACHABLE, null)
     }
     private fun emitNowPlaying(np: BridgethingNowPlaying?) { if (CompanionHolder.foreground) onNowPlayingChanged?.invoke(np) }
-    private fun emitAncsAuthStatus(status: BridgethingAncsAuthStatus) { if (CompanionHolder.foreground) onAncsAuthStatusChanged?.invoke(status) }
+    private fun emitAncsAuthStatus(deviceId: String, status: BridgethingAncsAuthStatus) { if (CompanionHolder.foreground) onAncsAuthStatusChanged?.invoke(deviceId, status) }
 
     private fun idleState() = authState(BridgethingAuthKind.IDLE)
 

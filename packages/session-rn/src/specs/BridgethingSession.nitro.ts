@@ -251,13 +251,18 @@ export type BridgethingDeviceMetaEntry = {
   meta: BridgethingDeviceMeta;
 };
 
+export type BridgethingAncsAuthStatusEntry = {
+  deviceId: string;
+  status: BridgethingAncsAuthStatus;
+};
+
 export type BridgethingSessionSnapshot = {
   hostInfo: BridgethingHostInfo;
   providers: BridgethingProviderInfo[];
   providerPriority: string[];
   libraryProvider?: string;
   peers: BridgethingSessionPeer[];
-  ancsAuthStatus: BridgethingAncsAuthStatus;
+  ancsAuthStatuses: BridgethingAncsAuthStatusEntry[];
   nowPlaying?: BridgethingNowPlaying;
   deviceMeta: BridgethingDeviceMetaEntry[];
   capabilityFlags: BridgethingCapabilityFlags;
@@ -282,7 +287,6 @@ export type BridgethingLogArchive = {
 export type BridgethingCompanionDebug = {
   authorityPlaybackHeld: boolean;
   authorityMetadataHeld: boolean;
-  ancsAuthStatus: BridgethingAncsAuthStatus;
 };
 
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
@@ -307,8 +311,8 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   deleteLogArchive(archiveId: string): Promise<void>;
   clearPersistedLogs(): Promise<void>;
 
-  enableAncsNotifications(): Promise<BridgethingAncsSetupResult>;
-  ancsAuthStatus(): Promise<BridgethingAncsAuthStatus>;
+  enableAncsNotifications(deviceId: string): Promise<BridgethingAncsSetupResult>;
+  ancsAuthStatus(deviceId: string): Promise<BridgethingAncsAuthStatus>;
 
   listWebapps(deviceId: string): Promise<BridgethingWebappInfo[]>;
   currentWebapp(deviceId: string): Promise<BridgethingActiveWebapp | null>;
@@ -368,7 +372,9 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnPeerDisconnected(callback: (peerId: string) => void): void;
   setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
-  setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
+  setOnAncsAuthStatusChanged(
+    callback: (deviceId: string, status: BridgethingAncsAuthStatus) => void,
+  ): void;
   setOnLog(callback: (level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
   setLocalLogStreamingEnabled(enabled: boolean): void;
