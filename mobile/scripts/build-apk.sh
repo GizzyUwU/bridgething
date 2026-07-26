@@ -26,8 +26,9 @@ echo "== nitro:codegen (session-rn) =="
 
 echo "== gradle assembleRelease (jdk: $GRADLE_JAVA) =="
 ( cd android && JAVA_HOME="$GRADLE_JAVA" ./gradlew assembleRelease \
+    --no-daemon --console=plain --stacktrace \
     -Porg.gradle.java.installations.paths="$INSTALLS" \
-    -Porg.gradle.java.installations.auto-download=false )
+    -Porg.gradle.java.installations.auto-download=false </dev/null )
 
 APK="android/app/build/outputs/apk/release/app-release.apk"
 [ -f "$APK" ] || { echo "apk not found at $APK" >&2; exit 1; }

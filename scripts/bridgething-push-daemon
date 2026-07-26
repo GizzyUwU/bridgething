@@ -68,6 +68,6 @@ ssh_dev "
 "
 
 echo "[push-daemon] restarting bridgething"
-ssh_dev "systemctl start bridgething.service"
+ssh_dev "systemctl restart bridgething.service"
 
 echo "[push-daemon] done."

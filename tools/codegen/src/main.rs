@@ -7,6 +7,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use syn::{Item, Meta};
 
+mod defaults;
 mod dispatch;
 
 const TS_BINDINGS_DIR: &str = "crates/lib/ts/bindings";
@@ -233,8 +234,14 @@ fn gen_swift() -> Result<()> {
   run("typeshare", &["--lang=swift", "--output-file", SWIFT_OUTPUT, LIB_SRC])?;
 
   let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  let wire_defaults = defaults::discover(LIB_SRC).context("resolve #[serde(default)] wire defaults")?;
+  println!(
+    "    resolved {} defaulted field(s) across {} type(s)",
+    wire_defaults.field_count(),
+    wire_defaults.by_type.len()
+  );
   let content = std::fs::read_to_string(SWIFT_OUTPUT).context("read swift output")?;
-  let patched = patch_swift(&content, &inv.uuid_field_names)?;
+  let patched = patch_swift(&content, &inv.uuid_field_names, &wire_defaults)?;
   std::fs::write(SWIFT_OUTPUT, patched).context("write swift output")?;
 
   println!("    emitting swift dispatch helpers");
@@ -270,8 +277,14 @@ fn gen_kotlin() -> Result<()> {
   );
 
   let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  let wire_defaults = defaults::discover(LIB_SRC).context("resolve #[serde(default)] wire defaults")?;
+  println!(
+    "    resolved {} defaulted field(s) across {} type(s)",
+    wire_defaults.field_count(),
+    wire_defaults.by_type.len()
+  );
   let content = std::fs::read_to_string(KOTLIN_OUTPUT).context("read kotlin output")?;
-  let patched = patch_kotlin(&content, &adjacent_tagged, &inv.uuid_field_names)?;
+  let patched = patch_kotlin(&content, &adjacent_tagged, &inv.uuid_field_names, &wire_defaults)?;
   std::fs::write(KOTLIN_OUTPUT, patched).context("write kotlin output")?;
 
   emit_kotlin_serializers(&adjacent_tagged).context("emit kotlin serializers")?;
@@ -303,7 +316,11 @@ fn emit_kotlin_serializers(enums: &[AdjacentTaggedEnum]) -> Result<()> {
   Ok(())
 }
 
-fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> Result<String> {
+fn patch_swift(
+  input: &str,
+  uuid_field_names: &BTreeSet<String>,
+  wire_defaults: &defaults::DefaultsIndex,
+) -> Result<String> {
   // typeshare emits one definition per Rust struct, even when two
   // structs in different modules share an identical name and body
   // (deliberate when a shared payload is wired to two surfaces). Drop
@@ -343,7 +360,116 @@ fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> Result<Strin
       .into_owned();
   }
 
+  // Runs last so the emitted provider types see the final (uuid- and
+  // Data-rewritten) Swift type of each field.
+  out = apply_swift_defaults(&out, wire_defaults)?;
+
   Ok(out)
+}
+
+/// Wrap every `#[serde(default)]` field in `@WireDefault<...>` and emit the
+/// provider type each wrapper reads its value from.
+///
+/// typeshare renders a defaulted field as optional; the wrapper lets it go
+/// back to non-optional, which is what serde actually guarantees, so the
+/// trailing `?` is dropped from both the stored property and the memberwise
+/// initializer.
+///
+/// A field the index knows about but that is present-and-unpatched in the
+/// output is a hard error: silently leaving it required is the exact failure
+/// this pass exists to prevent.
+fn apply_swift_defaults(input: &str, wire_defaults: &defaults::DefaultsIndex) -> Result<String> {
+  let struct_header = regex::Regex::new(r"^public struct (\w+):").expect("swift struct header regex");
+  let field_line = regex::Regex::new(r"^\tpublic let (\w+): (.+)$").expect("swift field regex");
+
+  let mut out = String::with_capacity(input.len());
+  let mut providers: Vec<String> = Vec::new();
+  let mut applied: BTreeSet<(String, String)> = BTreeSet::new();
+  let mut current: Option<String> = None;
+  // Parameter rewrites owed to the current struct's memberwise init.
+  let mut pending_params: Vec<(String, String)> = Vec::new();
+
+  for line in input.split_inclusive('\n') {
+    let body = line.trim_end_matches('\n');
+    if let Some(cap) = struct_header.captures(body) {
+      current = Some(cap[1].to_string());
+      pending_params.clear();
+    } else if body == "}" {
+      current = None;
+      pending_params.clear();
+    }
+
+    if body.starts_with("\tpublic init(") && !pending_params.is_empty() {
+      let mut init_line = line.to_string();
+      for (field, swift_ty) in &pending_params {
+        init_line = init_line.replace(&format!("{field}: {swift_ty}?"), &format!("{field}: {swift_ty}"));
+      }
+      out.push_str(&init_line);
+      continue;
+    }
+
+    let patched = current.as_ref().and_then(|ty| {
+      let cap = field_line.captures(body)?;
+      let field = cap[1].to_string();
+      let value = wire_defaults
+        .get(ty)?
+        .iter()
+        .find(|candidate| candidate.field == field)?;
+      let swift_ty = cap[2].trim_end_matches('?').to_string();
+      let provider = format!("WireDefault{ty}{}", defaults::pascal(&field));
+      providers.push(format!(
+        "public enum {provider}: WireDefaultProvider {{\n\tpublic static var wireDefault: {swift_ty} {{ {} }}\n}}\n",
+        defaults::swift_expr(&value.value)
+      ));
+      applied.insert((ty.clone(), field.clone()));
+      pending_params.push((field.clone(), swift_ty.clone()));
+      Some(format!(
+        "\t@WireDefault<{provider}> public var {field}: {swift_ty}\n"
+      ))
+    });
+
+    out.push_str(patched.as_deref().unwrap_or(line));
+  }
+
+  verify_defaults_applied(input, wire_defaults, &applied, |ty| {
+    format!("public struct {ty}:")
+  })?;
+
+  if !providers.is_empty() {
+    out.push_str("\n// MARK: - wire defaults\n\n");
+    out.push_str(&providers.join("\n"));
+  }
+  Ok(out)
+}
+
+/// Cross-check the patch against the index. Types typeshare never emitted are
+/// a warning; a type that IS in the output with an unpatched defaulted field
+/// is a build failure.
+fn verify_defaults_applied(
+  output: &str,
+  wire_defaults: &defaults::DefaultsIndex,
+  applied: &BTreeSet<(String, String)>,
+  header_for: impl Fn(&str) -> String,
+) -> Result<()> {
+  let mut missing: Vec<String> = Vec::new();
+  for (ty, fields) in &wire_defaults.by_type {
+    if !output.contains(&header_for(ty)) {
+      eprintln!("    warning: `{ty}` has defaulted fields but was not emitted by typeshare");
+      continue;
+    }
+    for field in fields {
+      if !applied.contains(&(ty.clone(), field.field.clone())) {
+        missing.push(format!("{ty}.{}", field.field));
+      }
+    }
+  }
+  if !missing.is_empty() {
+    bail!(
+      "these `#[serde(default)]` fields were emitted as required keys and would break cross-version decode: {}",
+      missing.join(", ")
+    );
+  }
+  Ok(())
 }
 
 fn patch_kotlin_uuid_imports(input: &str) -> String {
@@ -359,6 +485,7 @@ fn patch_kotlin(
   input: &str,
   adjacent_tagged: &[AdjacentTaggedEnum],
   uuid_field_names: &BTreeSet<String>,
+  wire_defaults: &defaults::DefaultsIndex,
 ) -> Result<String> {
   // typeshare emits one definition per Rust struct, even when two
   // structs in different modules share an identical name and body
@@ -443,6 +570,58 @@ fn patch_kotlin(
     })
     .into_owned();
 
+  out = apply_kotlin_defaults(&out, wire_defaults)?;
+
+  Ok(out)
+}
+
+/// Give every `#[serde(default)]` property its real Kotlin default value.
+/// kotlinx-serialization only falls back for properties that have one, and
+/// typeshare's `T? = null` loses the value serde guarantees, so the property
+/// goes back to non-nullable with the resolved default.
+fn apply_kotlin_defaults(input: &str, wire_defaults: &defaults::DefaultsIndex) -> Result<String> {
+  let class_header = regex::Regex::new(r"^data class (\w+) \(").expect("kotlin class header regex");
+  let field_line = regex::Regex::new(r"^\tval (\w+): (.+)$").expect("kotlin field regex");
+
+  let mut out = String::with_capacity(input.len());
+  let mut applied: BTreeSet<(String, String)> = BTreeSet::new();
+  let mut current: Option<String> = None;
+
+  for line in input.split_inclusive('\n') {
+    let body = line.trim_end_matches('\n');
+    if let Some(cap) = class_header.captures(body) {
+      current = Some(cap[1].to_string());
+    } else if body == ")" {
+      current = None;
+    }
+
+    let patched = current.as_ref().and_then(|ty| {
+      let cap = field_line.captures(body)?;
+      let field = cap[1].to_string();
+      let value = wire_defaults
+        .get(ty)?
+        .iter()
+        .find(|candidate| candidate.field == field)?;
+      let rest = &cap[2];
+      let (declared, comma) = match rest.strip_suffix(',') {
+        Some(stripped) => (stripped, ","),
+        None => (rest.as_ref(), ""),
+      };
+      let kotlin_ty = declared
+        .split_once(" = ")
+        .map_or(declared, |(ty, _)| ty)
+        .trim_end_matches('?');
+      applied.insert((ty.clone(), field.clone()));
+      Some(format!(
+        "\tval {field}: {kotlin_ty} = {}{comma}\n",
+        defaults::kotlin_expr(&value.value)
+      ))
+    });
+
+    out.push_str(patched.as_deref().unwrap_or(line));
+  }
+
+  verify_defaults_applied(input, wire_defaults, &applied, |ty| format!("data class {ty} ("))?;
   Ok(out)
 }
 

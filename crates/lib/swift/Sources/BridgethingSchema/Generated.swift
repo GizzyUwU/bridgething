@@ -712,9 +712,9 @@ public struct SurfaceAvailability: Codable, Sendable {
 	public let netWs: Bool
 	public let audioTts: Bool
 	public let lyrics: Bool
-	public let playbackTargets: Bool?
+	@WireDefault<WireDefaultSurfaceAvailabilityPlaybackTargets> public var playbackTargets: Bool
 
-	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool, playbackTargets: Bool?) {
+	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool, playbackTargets: Bool) {
 		self.geo = geo
 		self.notifications = notifications
 		self.netFetch = netFetch
@@ -2476,12 +2476,12 @@ public struct NluConfidence: Codable, Sendable {
 
 public struct NluResolvedIntent: Codable, Sendable {
 	public let intent: String
-	public let slots: NluSlots?
+	@WireDefault<WireDefaultNluResolvedIntentSlots> public var slots: NluSlots
 	public let transcript: String
 	public let confidence: NluConfidence?
 	public let alternates: [NluAlternate]?
 
-	public init(intent: String, slots: NluSlots?, transcript: String, confidence: NluConfidence?, alternates: [NluAlternate]?) {
+	public init(intent: String, slots: NluSlots, transcript: String, confidence: NluConfidence?, alternates: [NluAlternate]?) {
 		self.intent = intent
 		self.slots = slots
 		self.transcript = transcript
@@ -2957,16 +2957,16 @@ public struct OtaProgress: Codable, Sendable {
 /// receives are unchanged either way; this only gates the injected UI.
 public struct OverlayProfile: Codable, Sendable {
 	/// Notification toasts.
-	public let notifications: Bool
+	@WireDefault<WireDefaultOverlayProfileNotifications> public var notifications: Bool
 	/// Incoming / active call banner.
-	public let call: Bool
+	@WireDefault<WireDefaultOverlayProfileCall> public var call: Bool
 	/// Bluetooth pairing PIN modal.
-	public let pairing: Bool
+	@WireDefault<WireDefaultOverlayProfilePairing> public var pairing: Bool
 	/// Companion-disconnected banner, shown only while a paired phone has
 	/// no useful link.
-	public let connection: Bool
+	@WireDefault<WireDefaultOverlayProfileConnection> public var connection: Bool
 	/// Transient volume level indicator.
-	public let volume: Bool
+	@WireDefault<WireDefaultOverlayProfileVolume> public var volume: Bool
 
 	public init(notifications: Bool, call: Bool, pairing: Bool, connection: Bool, volume: Bool) {
 		self.notifications = notifications
@@ -3484,9 +3484,9 @@ public struct QueueItem: Codable, Sendable {
 	public let artworkId: String?
 	public let durationMs: UInt32?
 	public let persistentId: String?
-	public let queued: Bool?
+	@WireDefault<WireDefaultQueueItemQueued> public var queued: Bool
 
-	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool?) {
+	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool) {
 		self.uri = uri
 		self.title = title
 		self.artist = artist
@@ -4512,7 +4512,7 @@ public struct WebappInfo: Codable, Sendable {
 	public let settingsHash: String?
 	public let config: [ConfigField]
 	public let permissions: [String]
-	public let rendersVoiceDisplay: Bool
+	@WireDefault<WireDefaultWebappInfoRendersVoiceDisplay> public var rendersVoiceDisplay: Bool
 	public let art: ArtProfile?
 	public let provenance: String?
 
@@ -4551,14 +4551,14 @@ public struct WebappManifest: Codable, Sendable {
 	public let description: String?
 	public let icon: String?
 	public let settings: String?
-	public let role: WebappRole?
-	public let config: [ConfigField]?
-	public let permissions: [String]?
-	public let rendersVoiceDisplay: Bool?
+	@WireDefault<WireDefaultWebappManifestRole> public var role: WebappRole
+	@WireDefault<WireDefaultWebappManifestConfig> public var config: [ConfigField]
+	@WireDefault<WireDefaultWebappManifestPermissions> public var permissions: [String]
+	@WireDefault<WireDefaultWebappManifestRendersVoiceDisplay> public var rendersVoiceDisplay: Bool
 	public let art: ArtProfile?
-	public let overlays: OverlayProfile?
+	@WireDefault<WireDefaultWebappManifestOverlays> public var overlays: OverlayProfile
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, rendersVoiceDisplay: Bool?, art: ArtProfile?, overlays: OverlayProfile?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, overlays: OverlayProfile) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -7939,4 +7939,62 @@ public enum WireError: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		}
 	}
+}
+
+// MARK: - wire defaults
+
+public enum WireDefaultSurfaceAvailabilityPlaybackTargets: WireDefaultProvider {
+	public static var wireDefault: Bool { false }
+}
+
+public enum WireDefaultNluResolvedIntentSlots: WireDefaultProvider {
+	public static var wireDefault: NluSlots { NluSlots(artist: nil, track: nil, album: nil, playlist: nil, podcast: nil, episode: nil, mood: nil, genre: nil, era: nil, popularityFilter: nil, entityType: nil, query: nil, webappName: nil, preset: nil, enabled: nil, repeatMode: nil, seconds: nil, speed: nil, direction: nil, amount: nil, level: nil, brightnessMode: nil, view: nil, phoneAction: nil, systemAction: nil, uri: nil) }
+}
+
+public enum WireDefaultOverlayProfileNotifications: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
+public enum WireDefaultOverlayProfileCall: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
+public enum WireDefaultOverlayProfilePairing: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
+public enum WireDefaultOverlayProfileConnection: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
+public enum WireDefaultOverlayProfileVolume: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
+public enum WireDefaultQueueItemQueued: WireDefaultProvider {
+	public static var wireDefault: Bool { false }
+}
+
+public enum WireDefaultWebappInfoRendersVoiceDisplay: WireDefaultProvider {
+	public static var wireDefault: Bool { false }
+}
+
+public enum WireDefaultWebappManifestRole: WireDefaultProvider {
+	public static var wireDefault: WebappRole { .standard }
+}
+
+public enum WireDefaultWebappManifestConfig: WireDefaultProvider {
+	public static var wireDefault: [ConfigField] { [] }
+}
+
+public enum WireDefaultWebappManifestPermissions: WireDefaultProvider {
+	public static var wireDefault: [String] { [] }
+}
+
+public enum WireDefaultWebappManifestRendersVoiceDisplay: WireDefaultProvider {
+	public static var wireDefault: Bool { false }
+}
+
+public enum WireDefaultWebappManifestOverlays: WireDefaultProvider {
+	public static var wireDefault: OverlayProfile { OverlayProfile(notifications: true, call: true, pairing: true, connection: true, volume: true) }
 }

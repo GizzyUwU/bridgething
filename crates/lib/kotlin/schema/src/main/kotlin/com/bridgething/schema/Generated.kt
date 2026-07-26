@@ -356,7 +356,7 @@ data class SurfaceAvailability (
 	val netWs: Boolean,
 	val audioTts: Boolean,
 	val lyrics: Boolean,
-	val playbackTargets: Boolean? = null
+	val playbackTargets: Boolean = false
 )
 
 @Serializable
@@ -1423,7 +1423,7 @@ data class NluConfidence (
 @Serializable
 data class NluResolvedIntent (
 	val intent: String,
-	val slots: NluSlots? = null,
+	val slots: NluSlots = NluSlots(artist = null, track = null, album = null, playlist = null, podcast = null, episode = null, mood = null, genre = null, era = null, popularityFilter = null, entityType = null, query = null, webappName = null, preset = null, enabled = null, repeatMode = null, seconds = null, speed = null, direction = null, amount = null, level = null, brightnessMode = null, view = null, phoneAction = null, systemAction = null, uri = null),
 	val transcript: String,
 	val confidence: NluConfidence? = null,
 	val alternates: List<NluAlternate>? = null
@@ -1817,16 +1817,16 @@ data class OtaProgress (
 @Serializable
 data class OverlayProfile (
 	/// Notification toasts.
-	val notifications: Boolean,
+	val notifications: Boolean = true,
 	/// Incoming / active call banner.
-	val call: Boolean,
+	val call: Boolean = true,
 	/// Bluetooth pairing PIN modal.
-	val pairing: Boolean,
+	val pairing: Boolean = true,
 	/// Companion-disconnected banner, shown only while a paired phone has
 	/// no useful link.
-	val connection: Boolean,
+	val connection: Boolean = true,
 	/// Transient volume level indicator.
-	val volume: Boolean
+	val volume: Boolean = true
 )
 
 @Serializable
@@ -2213,7 +2213,7 @@ data class QueueItem (
 	val artworkId: String? = null,
 	val durationMs: UInt? = null,
 	val persistentId: String? = null,
-	val queued: Boolean? = null
+	val queued: Boolean = false
 )
 
 /// Full player snapshot the daemon broadcasts to webapps. Initial value
@@ -2838,7 +2838,7 @@ data class WebappInfo (
 	val settingsHash: String? = null,
 	val config: List<ConfigField>,
 	val permissions: List<String>,
-	val rendersVoiceDisplay: Boolean,
+	val rendersVoiceDisplay: Boolean = false,
 	val art: ArtProfile? = null,
 	val provenance: String? = null
 )
@@ -2859,12 +2859,12 @@ data class WebappManifest (
 	val description: String? = null,
 	val icon: String? = null,
 	val settings: String? = null,
-	val role: WebappRole? = null,
-	val config: List<ConfigField>? = null,
-	val permissions: List<String>? = null,
-	val rendersVoiceDisplay: Boolean? = null,
+	val role: WebappRole = WebappRole.Standard,
+	val config: List<ConfigField> = emptyList(),
+	val permissions: List<String> = emptyList(),
+	val rendersVoiceDisplay: Boolean = false,
 	val art: ArtProfile? = null,
-	val overlays: OverlayProfile? = null
+	val overlays: OverlayProfile = OverlayProfile(notifications = true, call = true, pairing = true, connection = true, volume = true)
 )
 
 @Serializable

@@ -2,7 +2,10 @@ package com.bridgething.gateway
 
 import com.bridgething.schema.BridgeToGatewayMsg
 import com.bridgething.schema.BridgeToGatewayMsgData
+import com.bridgething.schema.BridgeToGatewayWebappMsg
 import com.bridgething.schema.ForwardMessage
+import com.bridgething.schema.OverlayProfile
+import com.bridgething.schema.WebappRole
 import com.bridgething.schema.MsgMeta
 import com.bridgething.schema.GatewayToBridgeMsg
 import com.bridgething.schema.GatewayToBridgeMsgData
@@ -74,22 +77,6 @@ class GoldenTests {
     }
   }
 
-  /**
-   * The Rust golden (`rmp_serde::to_vec_named`) is the canonical wire encoding.
-   * Kotlin's encode should reproduce it byte-for-byte; anything else risks the
-   * daemon failing to decode what we emit. This is the assertion the suite was
-   * missing: re-decode round-trips were symmetric about Kotlin's own quirks (an
-   * over-counted msgpack map header decodes back fine on our side) and so never
-   * noticed bytes a strict decoder like rmp-serde would reject.
-   *
-   * One tolerated divergence: Rust's `#[serde(skip_serializing_none)]` omits
-   * `None` fields, while kotlinx-serialization-msgpack writes them as explicit
-   * `nil` (it sizes maps eagerly from the descriptor, so it cannot skip an
-   * element without lying about the count). rmp-serde accepts explicit `nil`
-   * for `Option<T>` on decode, so this is wire-safe. When the bytes diverge we
-   * fall back to requiring the payload to strictly decode as well-formed msgpack
-   * - which a dishonest map header (the unit-variant over-count bug) fails.
-   */
   private fun assertGoldenBytes(golden: ByteArray, encoded: ByteArray, name: String) {
     if (golden.contentEquals(encoded)) return
     val body = encoded.copyOfRange(FrameHeader.LENGTH, encoded.size)
@@ -147,7 +134,6 @@ class GoldenTests {
     assertTrue(forward is ForwardMessage.Json, "expected ForwardMessage.Json, got $forward")
     val json = (forward as ForwardMessage.Json).data.jsonObject
 
-    // fixture content: {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
     assertEquals("playback-changed", json["kind"]!!.jsonPrimitive.content)
     val payload = json["payload"]!!.jsonObject
     assertEquals(true, payload["playing"]!!.jsonPrimitive.content.toBoolean())
@@ -175,9 +161,37 @@ class GoldenTests {
     assertTrue(decoded.data is BridgeToGatewayMsgData.Ack)
   }
 
+  @Test
+  fun `frame from a daemon predating a field decodes to the rust default`() {
+    val frame = hexToBytes(
+      "dead02000000000000000000000000f283a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64" +
+        "a56576656e74a46461746182a474797065a6776562617070a46461746182a56576656e74af776562617070496e7374616c" +
+        "6c6564a46461746188a26964c4100192f2a0bbb07c00a000000000000101a46e616d65a444656d6fa6736f75726365a969" +
+        "6e7374616c6c6564a4726f6c65a87374616e64617264a776657273696f6ea5302e312e30a6636f6e66696790ab7065726d" +
+        "697373696f6e7390aa70726f76656e616e6365d92968747470733a2f2f617070732e6272696467657468696e672e636f6d" +
+        "2f636174616c6f672e6a736f6e",
+    )
+
+    val msg = codec.decode(BridgeToGatewayMsg.serializer(), frame)
+    val webapp = msg.data as? BridgeToGatewayMsgData.Webapp ?: fail("expected a webapp message, got ${msg.data}")
+    val installed = webapp.data as? BridgeToGatewayWebappMsg.WebappInstalled
+      ?: fail("expected a webappInstalled event, got ${webapp.data}")
+    assertEquals("Demo", installed.data.name)
+    assertEquals(WebappRole.Standard, installed.data.role)
+    assertEquals(false, installed.data.rendersVoiceDisplay, "an absent defaulted field must fall back")
+  }
+
+  @Test
+  fun `an absent key takes a non-false default`() {
+    val profile = MsgPack.Default.decodeFromByteArray(OverlayProfile.serializer(), byteArrayOf(0x80.toByte()))
+    assertTrue(profile.notifications)
+    assertTrue(profile.call)
+    assertTrue(profile.pairing)
+    assertTrue(profile.connection)
+    assertTrue(profile.volume)
+  }
+
   private fun loadGoldens(): GoldenFile {
-    // user.dir is the Gradle invocation cwd; try candidate relative paths so the
-    // test passes from the repo root or the gateway module dir.
     val here = Paths.get(System.getProperty("user.dir"))
     val candidates = listOf(
       here.resolve("crates/lib/fixtures/golden.json"),

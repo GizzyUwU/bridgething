@@ -213,7 +213,7 @@ pub enum StockInterAppSendPayload {
     is_paused_bool: bool,
     playback_options: StockPlaybackOptions,
     playback_position: usize,
-    playback_restrictions: PlaybackRestrictions,
+    playback_restrictions: StockPlaybackRestrictions,
     playback_speed: f64,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
@@ -224,7 +224,7 @@ pub enum StockInterAppSendPayload {
     is_paused_bool: bool,
     playback_options: StockPlaybackOptions,
     playback_position: usize,
-    playback_restrictions: PlaybackRestrictions,
+    playback_restrictions: StockPlaybackRestrictions,
     playback_speed: f64,
     track: StockTrack,
   },
@@ -283,6 +283,35 @@ pub struct StockTip {
 pub struct StockPlaybackOptions {
   pub repeat: u32,
   pub shuffle: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StockPlaybackRestrictions {
+  pub can_repeat_context: bool,
+  pub can_repeat_track: bool,
+  pub can_seek: bool,
+  pub can_skip_next: bool,
+  pub can_skip_prev: bool,
+  pub can_toggle_shuffle: bool,
+  pub can_like: bool,
+  pub can_change_volume: bool,
+  pub can_set_output: bool,
+}
+
+impl From<PlaybackRestrictions> for StockPlaybackRestrictions {
+  fn from(restrictions: PlaybackRestrictions) -> Self {
+    Self {
+      can_repeat_context: restrictions.can_repeat_context,
+      can_repeat_track: restrictions.can_repeat_track,
+      can_seek: restrictions.can_seek,
+      can_skip_next: restrictions.can_skip_next,
+      can_skip_prev: restrictions.can_skip_prev,
+      can_toggle_shuffle: restrictions.can_toggle_shuffle,
+      can_like: restrictions.can_like,
+      can_change_volume: restrictions.can_change_volume,
+      can_set_output: restrictions.can_set_output,
+    }
+  }
 }
 
 impl From<PlaybackOptions> for StockPlaybackOptions {
@@ -387,7 +416,7 @@ pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayloa
         .or_else(|| track.as_ref().and_then(|t| t.uri.clone()))
         .unwrap_or_default(),
       context.and_then(|c| c.name).unwrap_or_default(),
-      PlaybackRestrictions::all_true(),
+      PlaybackRestrictions::all_true().into(),
     )
   };
 
@@ -404,8 +433,8 @@ pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayloa
   }
 }
 
-fn other_media_restrictions(playback: &Playback) -> PlaybackRestrictions {
-  PlaybackRestrictions {
+fn other_media_restrictions(playback: &Playback) -> StockPlaybackRestrictions {
+  StockPlaybackRestrictions {
     can_repeat_context: false,
     can_repeat_track: false,
     can_seek: playback.set_elapsed_time_available.unwrap_or(false),
@@ -1454,6 +1483,45 @@ mod test {
         assert_eq!(track.uri, "iap2:track:y");
       }
       other => panic!("expected SpotifyPlayerState, got {other:?}"),
+    }
+  }
+
+  /// The stock webapp reads `playback_restrictions.can_skip_next` and friends off
+  /// the raw payload, so a camelCase key reads as undefined and greys the control
+  /// out. Assert the serialized key names, not the rust field names.
+  #[test]
+  fn player_state_restrictions_serialize_as_snake_case() {
+    let reply = reply_with(
+      None,
+      libbridgething::MediaItem {
+        uri: Some("spotify:track:a".to_string()),
+        title: Some("Song".to_string()),
+        ..Default::default()
+      },
+    );
+    let json = serde_json::to_value(super::player_state_to_stock(reply)).expect("serialize");
+    let restrictions = json
+      .pointer("/payload/playback_restrictions")
+      .and_then(serde_json::Value::as_object)
+      .expect("payload carries playback_restrictions");
+
+    for key in [
+      "can_repeat_context",
+      "can_repeat_track",
+      "can_seek",
+      "can_skip_next",
+      "can_skip_prev",
+      "can_toggle_shuffle",
+      "can_like",
+      "can_change_volume",
+      "can_set_output",
+    ] {
+      assert_eq!(
+        restrictions.get(key).and_then(serde_json::Value::as_bool),
+        Some(true),
+        "stock expects `{key}`; got keys {:?}",
+        restrictions.keys().collect::<Vec<_>>()
+      );
     }
   }
 

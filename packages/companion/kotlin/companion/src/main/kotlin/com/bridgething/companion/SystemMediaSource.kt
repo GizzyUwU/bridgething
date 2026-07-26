@@ -114,7 +114,7 @@ internal class SystemMediaSource(
                 artworkId = entry.artToken?.let { "$ASSET_ID_PREFIX$it" },
                 durationMs = null,
                 persistentId = uri,
-                queued = null,
+                queued = false,
             )
         }
         return QueueSnapshot(order = items.map { it.uri }, items = items)

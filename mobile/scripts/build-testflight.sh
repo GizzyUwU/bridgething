@@ -45,6 +45,27 @@ if [ -n "${BUILD_NUMBER:-}" ]; then
   echo "== build number: $BUILD_NUMBER =="
 fi
 
+if [ -z "${ASC_PRIVATE_KEY_PATH:-}" ] && [ -n "${ASC_OP_ITEM:-}" ] && command -v op >/dev/null 2>&1; then
+  op_read() {
+    if [ -n "${ASC_OP_ACCOUNT:-}" ]; then op read "$ASC_OP_ITEM/$1" --account "$ASC_OP_ACCOUNT" 2>/dev/null
+    else op read "$ASC_OP_ITEM/$1" 2>/dev/null; fi
+  }
+
+  ASC_KEY_ID="${ASC_KEY_ID:-$(op_read keyId)}"
+  ASC_ISSUER_ID="${ASC_ISSUER_ID:-$(op_read issuerId)}"
+  [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] \
+    || { echo "could not read keyId / issuerId from \$ASC_OP_ITEM" >&2; exit 1; }
+
+  ASC_PRIVATE_KEY_PATH="/private/tmp/carthing-asc-$ASC_KEY_ID.p8"
+  if [ ! -s "$ASC_PRIVATE_KEY_PATH" ]; then
+    ( umask 077; op_read "AuthKey_$ASC_KEY_ID.p8" >"$ASC_PRIVATE_KEY_PATH" ) || true
+    [ -s "$ASC_PRIVATE_KEY_PATH" ] \
+      || { rm -f "$ASC_PRIVATE_KEY_PATH"; echo "op read of AuthKey_$ASC_KEY_ID.p8 failed" >&2; exit 1; }
+    echo "== cached the asc key -> $ASC_PRIVATE_KEY_PATH (mode 0600, until reboot) =="
+  fi
+  export ASC_PRIVATE_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID
+fi
+
 AUTH_FLAGS=()
 if [ -n "${ASC_PRIVATE_KEY_PATH:-}" ]; then
   AUTH_FLAGS=(

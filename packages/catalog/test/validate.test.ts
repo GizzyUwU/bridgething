@@ -12,7 +12,7 @@ function version(v: string, releasedAt: string) {
     released_at: releasedAt,
     download: { url: 'https://apps.bridgething.com/r/x.zip', size: 1, sha256: SHA },
     permissions: ['net.fetch'],
-    min_libbridgething_version: '12.0.0',
+    min_libbridgething_version: '0.5.0',
     changelog: null,
   };
 }

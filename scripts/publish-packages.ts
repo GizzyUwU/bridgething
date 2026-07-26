@@ -13,6 +13,7 @@ const PACKAGES: Pkg[] = [
   { name: '@bridgething/adapter-network', dir: 'packages/adapter-network', scoped: true },
   { name: '@bridgething/updater', dir: 'packages/updater', scoped: true },
   { name: '@bridgething/client', dir: 'packages/client-ts', scoped: true },
+  // { name: '@bridgething/catalog', dir: 'packages/catalog', scoped: true },
   { name: 'create-bridgething', dir: 'packages/create-bridgething', scoped: false },
 ];
 

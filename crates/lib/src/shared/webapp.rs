@@ -159,6 +159,7 @@ pub struct WebappInfo {
   pub settings_hash: Option<String>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
+  #[serde(default)]
   pub renders_voice_display: bool,
   pub art: Option<ArtProfile>,
   pub provenance: Option<String>,

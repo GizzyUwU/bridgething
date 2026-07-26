@@ -35,7 +35,7 @@ public struct NluPrediction: Sendable {
     public static func fromWire(_ r: NluResolvedIntent) -> NluPrediction {
         NluPrediction(
             intent: r.intent,
-            slots: r.slots.map(NluMutableSlots.fromWire) ?? NluMutableSlots(),
+            slots: NluMutableSlots.fromWire(r.slots),
             transcript: r.transcript,
             confidence: r.confidence,
             alternates: r.alternates
