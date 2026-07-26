@@ -2464,6 +2464,16 @@ public struct NluAlternate: Codable, Sendable {
 	}
 }
 
+public struct NluConfidence: Codable, Sendable {
+	public let intent: String
+	public let slots: String?
+
+	public init(intent: String, slots: String?) {
+		self.intent = intent
+		self.slots = slots
+	}
+}
+
 public struct NluResolvedIntent: Codable, Sendable {
 	public let intent: String
 	public let slots: NluSlots?

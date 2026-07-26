@@ -635,7 +635,7 @@ public class BridgethingCompanion(
             tzIana = tz.id,
             locale = java.util.Locale.getDefault().toLanguageTag(),
             wallClockUnixS = (nowMs / 1000L).coerceIn(0L, UInt.MAX_VALUE.toLong()).toUInt(),
-            utcOffsetMinutes = (tz.getOffset(nowMs) / 60000).toShort(),
+            utcOffsetMinutes = (tz.rawOffset / 60000).toShort(),
             dstOffsetMinutes = (dstMs / 60000).toByte(),
         )
     }

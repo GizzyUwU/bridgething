@@ -1,6 +1,6 @@
 use std::{
   sync::Arc,
-  time::{SystemTime, UNIX_EPOCH},
+  time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use libbridgething::{
@@ -23,6 +23,7 @@ pub struct TimeManager {
 #[derive(Debug, Default)]
 struct Inner {
   state: TimeInfo,
+  clock_anchor: Option<Instant>,
   last_applied_zone: Option<String>,
 }
 
@@ -41,7 +42,13 @@ impl TimeManager {
   }
 
   pub async fn snapshot(&self) -> TimeInfo {
-    self.inner.read().await.state.clone()
+    let guard = self.inner.read().await;
+    let mut info = guard.state.clone();
+    if let (Some(clock), Some(anchor)) = (info.wall_clock_unix_s, guard.clock_anchor) {
+      let elapsed = u32::try_from(Instant::now().saturating_duration_since(anchor).as_secs()).unwrap_or(u32::MAX);
+      info.wall_clock_unix_s = Some(clock.saturating_add(elapsed));
+    }
+    info
   }
 
   pub async fn apply_iap2_update(
@@ -54,6 +61,7 @@ impl TimeManager {
     let zone_to_apply = {
       let mut guard = self.inner.write().await;
       guard.state.wall_clock_unix_s = u32::try_from(seconds_since_reference_date).ok();
+      guard.clock_anchor = Some(Instant::now());
       guard.state.utc_offset_minutes = Some(tz_offset_minutes);
       guard.state.dst_offset_minutes = Some(dst_offset_minutes);
 
@@ -80,6 +88,7 @@ impl TimeManager {
     let (clock_unix_s, zone_to_apply) = {
       let mut guard = self.inner.write().await;
       guard.state = info.clone();
+      guard.clock_anchor = info.wall_clock_unix_s.map(|_| Instant::now());
       let clock = info.wall_clock_unix_s.map(i64::from);
       let zone = info
         .tz_iana
@@ -141,5 +150,64 @@ impl TimeManager {
       return Err(TimeError::Broadcast(errors.len()));
     }
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn manager() -> TimeManager {
+    let (client_man, _listener) = crate::net::create_client_manager();
+    TimeManager::new(WireEventBus::new(client_man))
+  }
+
+  fn info_at(unix_s: u32) -> TimeInfo {
+    TimeInfo {
+      tz_iana: Some("America/New_York".into()),
+      locale: Some("en_US".into()),
+      wall_clock_unix_s: Some(unix_s),
+      utc_offset_minutes: Some(-300),
+      dst_offset_minutes: Some(60),
+    }
+  }
+
+  #[tokio::test]
+  async fn a_read_carries_the_wall_clock_forward() {
+    let time = manager();
+    let _ = time.apply_companion_snapshot(info_at(1_785_000_000)).await;
+
+    {
+      let mut guard = time.inner.write().await;
+      guard.clock_anchor = Instant::now().checked_sub(Duration::from_secs(90));
+    }
+
+    let snapshot = time.snapshot().await;
+    let clock = snapshot.wall_clock_unix_s.expect("clock");
+    assert!(
+      (1_785_000_089..=1_785_000_092).contains(&clock),
+      "ninety quiet seconds should advance the clock, got {clock}"
+    );
+  }
+
+  #[tokio::test]
+  async fn an_absent_wall_clock_stays_absent() {
+    let time = manager();
+    let mut info = info_at(0);
+    info.wall_clock_unix_s = None;
+    let _ = time.apply_companion_snapshot(info).await;
+
+    assert!(time.snapshot().await.wall_clock_unix_s.is_none());
+  }
+
+  #[tokio::test]
+  async fn the_zone_is_untouched_by_the_carry() {
+    let time = manager();
+    let _ = time.apply_companion_snapshot(info_at(1_785_000_000)).await;
+
+    let snapshot = time.snapshot().await;
+    assert_eq!(snapshot.tz_iana.as_deref(), Some("America/New_York"));
+    assert_eq!(snapshot.utc_offset_minutes, Some(-300));
+    assert_eq!(snapshot.dst_offset_minutes, Some(60));
   }
 }

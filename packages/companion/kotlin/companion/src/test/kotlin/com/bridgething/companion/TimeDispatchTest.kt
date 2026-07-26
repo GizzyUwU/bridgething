@@ -6,12 +6,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.time.Duration.Companion.seconds
 
-/** time dispatch: companion seeds wall-clock/tz on connect because the device has no battery RTC. */
 class TimeDispatchTest {
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -41,6 +41,16 @@ class TimeDispatchTest {
         assertNotNull(info.tzIana)
         assertNotNull(info.locale)
         assertTrue((info.wallClockUnixS?.toLong() ?: 0L) > 1_700_000_000L, "wall clock should be after 2023-11")
+
+        val nowMs = System.currentTimeMillis()
+        val tz = java.util.TimeZone.getDefault()
+        val dstMinutes = (if (tz.inDaylightTime(java.util.Date(nowMs))) tz.dstSavings else 0) / 60000
+        assertEquals(dstMinutes, (info.dstOffsetMinutes ?: 0).toInt())
+        assertEquals(
+            tz.getOffset(nowMs) / 60000,
+            (info.utcOffsetMinutes ?: 0).toInt() + (info.dstOffsetMinutes ?: 0).toInt(),
+            "utcOffsetMinutes + dstOffsetMinutes must be the offset from GMT",
+        )
         companion.stop()
     }
 }

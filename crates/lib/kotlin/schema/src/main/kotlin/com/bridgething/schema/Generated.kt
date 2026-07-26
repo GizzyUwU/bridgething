@@ -1415,6 +1415,12 @@ data class NluAlternate (
 )
 
 @Serializable
+data class NluConfidence (
+	val intent: String,
+	val slots: String? = null
+)
+
+@Serializable
 data class NluResolvedIntent (
 	val intent: String,
 	val slots: NluSlots? = null,

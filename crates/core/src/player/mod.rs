@@ -23,6 +23,7 @@ pub(crate) fn is_synthetic_uri(uri: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct PlayerSnapshot {
   pub state_reply: PlayerStateReply,
+  pub position: PositionAnchor,
   pub queue_reply: PlayerQueueReply,
   pub iap2_shuffle: Option<bool>,
   pub iap2_repeat_mode: Option<RepeatMode>,
@@ -108,11 +109,14 @@ impl Player {
   }
 
   pub fn state_reply(&self) -> PlayerStateReply {
-    self.snapshot_rx.borrow().state_reply.clone()
+    let snapshot = self.snapshot_rx.borrow();
+    let mut reply = snapshot.state_reply.clone();
+    reply.state.playback.position_ms = u32::try_from(snapshot.position.position_now_ms()).unwrap_or(u32::MAX);
+    reply
   }
 
   pub fn position_ms(&self) -> u32 {
-    self.snapshot_rx.borrow().state_reply.state.playback.position_ms
+    u32::try_from(self.snapshot_rx.borrow().position.position_now_ms()).unwrap_or(u32::MAX)
   }
 
   pub fn queue_reply(&self) -> PlayerQueueReply {
@@ -160,6 +164,7 @@ fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {
   let (state_reply, queue_reply) = state.replies();
   PlayerSnapshot {
     state_reply,
+    position: state.position_anchor(),
     queue_reply,
     iap2_shuffle: state.iap2_shuffle(),
     iap2_repeat_mode: state.iap2_repeat_mode(),

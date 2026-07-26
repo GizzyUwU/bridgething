@@ -1087,12 +1087,14 @@ public actor BridgethingCompanion {
     private static func currentTimeInfo() -> TimeInfo {
         let now = Date()
         let tz = TimeZone.current
+        let daylight = Int(tz.daylightSavingTimeOffset(for: now))
+        let standard = tz.secondsFromGMT(for: now) - daylight
         return TimeInfo(
             tzIana: tz.identifier,
             locale: Locale.current.identifier,
             wallClockUnixS: UInt32(clamping: Int(now.timeIntervalSince1970)),
-            utcOffsetMinutes: Int16(clamping: tz.secondsFromGMT(for: now) / 60),
-            dstOffsetMinutes: Int8(clamping: Int(tz.daylightSavingTimeOffset(for: now)) / 60)
+            utcOffsetMinutes: Int16(clamping: standard / 60),
+            dstOffsetMinutes: Int8(clamping: daylight / 60)
         )
     }
 

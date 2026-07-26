@@ -29,6 +29,16 @@ final class TimeDispatchTests: XCTestCase {
         XCTAssertNotNil(info.tzIana)
         XCTAssertNotNil(info.locale)
         XCTAssertGreaterThan(info.wallClockUnixS ?? 0, 1_700_000_000) // after 2023-11
+
+        let now = Date()
+        let tz = TimeZone.current
+        let daylight = Int(tz.daylightSavingTimeOffset(for: now)) / 60
+        XCTAssertEqual(Int(info.dstOffsetMinutes ?? 0), daylight)
+        XCTAssertEqual(
+            Int(info.utcOffsetMinutes ?? 0) + Int(info.dstOffsetMinutes ?? 0),
+            tz.secondsFromGMT(for: now) / 60,
+            "utcOffsetMinutes + dstOffsetMinutes must be the offset from GMT"
+        )
         await companion.stop()
     }
 }

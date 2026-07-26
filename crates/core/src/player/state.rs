@@ -60,6 +60,28 @@ pub struct PlayerState {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct PositionAnchor {
+  base_ms: usize,
+  at: Option<Instant>,
+  playing: bool,
+  duration_ms: Option<u32>,
+}
+
+impl PositionAnchor {
+  pub fn position_now_ms(&self) -> usize {
+    let Some(at) = self.at.filter(|_| self.playing) else {
+      return self.base_ms;
+    };
+    let elapsed = Instant::now().saturating_duration_since(at).as_millis() as usize;
+    let advanced = self.base_ms.saturating_add(elapsed);
+    match self.duration_ms.filter(|d| *d > 0) {
+      Some(duration) => advanced.min(duration as usize),
+      None => advanced,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
 struct TransportIntent {
   playing: bool,
   expires: Instant,
@@ -240,6 +262,15 @@ impl PlayerState {
     self.seek_intent = Some(SeekIntent {
       expires: Instant::now() + SEEK_INTENT_WINDOW,
     });
+  }
+
+  pub(crate) fn position_anchor(&self) -> PositionAnchor {
+    PositionAnchor {
+      base_ms: self.position_ms,
+      at: self.position_anchor,
+      playing: self.playing,
+      duration_ms: self.track.as_ref().map(|t| t.duration_ms),
+    }
   }
 
   pub(crate) fn current_position_ms(&self) -> usize {
@@ -1043,6 +1074,54 @@ fn accumulate_playback(target: &mut PlaybackUpdate, src: PlaybackUpdate) {
 
 #[cfg(test)]
 mod tests {
+  fn anchored(base_ms: usize, ago: Duration, playing: bool, duration_ms: Option<u32>) -> PositionAnchor {
+    PositionAnchor {
+      base_ms,
+      at: Instant::now().checked_sub(ago),
+      playing,
+      duration_ms,
+    }
+  }
+
+  #[test]
+  fn a_read_between_pushes_advances_the_playhead() {
+    let anchor = anchored(30_000, Duration::from_secs(40), true, Some(300_000));
+    let position = anchor.position_now_ms();
+    assert!(
+      (69_000..=71_000).contains(&position),
+      "forty quiet seconds should carry 30s to about 70s, got {position}"
+    );
+  }
+
+  #[test]
+  fn a_paused_playhead_does_not_run() {
+    let anchor = anchored(30_000, Duration::from_secs(40), false, Some(300_000));
+    assert_eq!(anchor.position_now_ms(), 30_000);
+  }
+
+  #[test]
+  fn the_playhead_never_runs_past_the_track() {
+    let anchor = anchored(30_000, Duration::from_secs(600), true, Some(180_000));
+    assert_eq!(anchor.position_now_ms(), 180_000);
+  }
+
+  #[test]
+  fn an_unknown_duration_still_advances() {
+    let anchor = anchored(1_000, Duration::from_secs(10), true, None);
+    assert!(anchor.position_now_ms() >= 10_500);
+  }
+
+  #[test]
+  fn a_playhead_with_no_anchor_stands_still() {
+    let anchor = PositionAnchor {
+      base_ms: 4_242,
+      at: None,
+      playing: true,
+      duration_ms: Some(300_000),
+    };
+    assert_eq!(anchor.position_now_ms(), 4_242);
+  }
+
   use libbridgething::CompanionAuthorityScope;
 
   use super::*;
