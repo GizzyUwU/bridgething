@@ -51,13 +51,15 @@ impl CaptureFormat {
 pub struct MicConfig {
   pub format: CaptureFormat,
   pub device: String,
+  pub capture_channels: u16,
 }
 
 impl Default for MicConfig {
   fn default() -> Self {
     Self {
       format: CaptureFormat::default(),
-      device: "default".to_string(),
+      device: "hw:0,0".to_string(),
+      capture_channels: 4,
     }
   }
 }

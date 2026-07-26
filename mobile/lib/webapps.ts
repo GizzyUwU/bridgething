@@ -27,7 +27,7 @@ type WebappsState = {
   clearDevice(deviceId: string): void;
 };
 
-const useWebappsStore = create<WebappsState>(set => ({
+export const useWebappsStore = create<WebappsState>(set => ({
   byDevice: {},
   patch: (deviceId, next) =>
     set(s => ({

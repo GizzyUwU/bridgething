@@ -9,15 +9,8 @@ export type BridgethingSessionPeer = {
   linkError?: string;
 };
 
-export type BridgethingProviderInfo = {
-  id: string;
-  displayName: string;
-  available: boolean;
-};
-
 export type BridgethingAuthKind = 'idle' | 'pending' | 'authenticated' | 'failed';
 
-// flat instead of a discriminated union because Nitro's C++ codegen can't represent anonymous tagged unions.
 export type BridgethingAuthState = {
   kind: BridgethingAuthKind;
   userCode?: string;
@@ -26,13 +19,20 @@ export type BridgethingAuthState = {
   message?: string;
 };
 
-// signed-in but degraded: the provider's API is throttling or unreachable.
-// distinct from auth (tokens are still valid), so the UI keeps "signed in".
 export type BridgethingServiceHealthKind = 'ok' | 'rateLimited' | 'unreachable';
 
 export type BridgethingServiceHealth = {
   kind: BridgethingServiceHealthKind;
   retryAfterSeconds?: number;
+};
+
+export type BridgethingProviderInfo = {
+  id: string;
+  displayName: string;
+  available: boolean;
+  connected: boolean;
+  authState: BridgethingAuthState;
+  serviceHealth: BridgethingServiceHealth;
 };
 
 export type BridgethingRepeatMode = 'off' | 'one' | 'all';
@@ -78,6 +78,7 @@ export type BridgethingWebappInfo = {
   source: BridgethingWebappSource;
   role: BridgethingWebappRole;
   version: string;
+  provenance?: string;
   description?: string;
   iconHash?: string;
   settingsHash?: string;
@@ -158,10 +159,6 @@ export type BridgethingOtaEventKind =
   | 'updated'
   | 'failed';
 
-// one leg of the whole update: a companion-side R2 download, a BT stream to the
-// device, the on-device write, or the reboot. `bytes` is the payload size for
-// download/stream legs and the write payload proxy for apply; 0 when the leg has
-// no meaningful byte count (reboot). the RN store turns these into time weights.
 export type BridgethingOtaStepKind = 'download' | 'stream' | 'apply' | 'reboot';
 
 export type BridgethingOtaStep = {
@@ -179,18 +176,13 @@ export type BridgethingOtaEvent = {
   otaKind?: BridgethingOtaKind;
   fromVersion?: string;
   toVersion?: string;
-  // the composite release an updateAvailable/planned run targets, broken out.
   releaseVersion?: string;
   daemonVersion?: string;
   imageVersion?: string;
-  // full ordered leg list, present on `planned` so the store can weight the run.
   steps?: BridgethingOtaStep[];
-  // which leg a `progress` event belongs to, indexing into the plan's steps.
   stepId?: number;
   phase?: BridgethingOtaPhase;
   percent?: number;
-  // during the apply leg: how far swupdate is through pulling zck deltas over BT (0-100).
-  // 100 (or absent) means the pull is done and the eMMC write is underway.
   dwlPercent?: number;
   stageAsset?: string;
   stageReceived?: number;
@@ -221,36 +213,8 @@ export type BridgethingOtaManifest = {
   channels: BridgethingOtaChannelInfo[];
 };
 
-export type BridgethingCatalogPollConfig = {
-  intervalSeconds: number;
-  autoInstall: boolean;
-};
-
-export type BridgethingCatalogEventKind =
-  | 'refreshed'
-  | 'sourceFailed'
-  | 'updateAvailable'
-  | 'installed'
-  | 'installFailed';
-
-// flat for the same reason as BridgethingOtaEvent: Nitro can't represent a tagged union.
-export type BridgethingCatalogEvent = {
-  kind: BridgethingCatalogEventKind;
-  sourceCount?: number;
-  appCount?: number;
-  url?: string;
-  reason?: string;
-  deviceId?: string;
-  appId?: string;
-  name?: string;
-  fromVersion?: string;
-  toVersion?: string;
-  version?: string;
-};
-
 export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
 
-// `address` is a BT MAC on Android and an opaque identifier on iOS.
 export type BridgethingBtDevice = {
   address: string;
   name?: string;
@@ -260,6 +224,7 @@ export type BridgethingBtDevice = {
 
 export type BridgethingDeviceMeta = {
   daemonVersion: string;
+  libbridgethingVersion: string;
   imageVersion: string;
   appName: string;
   osName: string;
@@ -288,9 +253,9 @@ export type BridgethingDeviceMetaEntry = {
 
 export type BridgethingSessionSnapshot = {
   hostInfo: BridgethingHostInfo;
-  provider?: BridgethingProviderInfo;
-  authState: BridgethingAuthState;
-  serviceHealth: BridgethingServiceHealth;
+  providers: BridgethingProviderInfo[];
+  providerPriority: string[];
+  libraryProvider?: string;
   peers: BridgethingSessionPeer[];
   ancsAuthStatus: BridgethingAncsAuthStatus;
   nowPlaying?: BridgethingNowPlaying;
@@ -325,10 +290,10 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   stop(): Promise<void>;
 
   availableProviders(): Promise<BridgethingProviderInfo[]>;
-  setActiveProvider(id: string | null): Promise<void>;
-  currentProvider(): Promise<BridgethingProviderInfo | null>;
-  cancelAuth(): Promise<void>;
-  signOut(): Promise<void>;
+  connectProvider(id: string): Promise<void>;
+  disconnectProvider(id: string): Promise<void>;
+  cancelAuth(id: string): Promise<void>;
+  setProviderPriority(ids: string[]): Promise<void>;
 
   snapshot(): Promise<BridgethingSessionSnapshot>;
 
@@ -370,23 +335,16 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   fetchOtaManifest(rootUrl: string | null): Promise<BridgethingOtaManifest>;
   applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string | null): Promise<void>;
 
-  catalogSources(): Promise<string[]>;
-  addCatalogSource(url: string): Promise<void>;
-  removeCatalogSource(url: string): Promise<void>;
-  refreshCatalog(): Promise<void>;
-  availableCatalogApps(deviceId: string): Promise<string>;
-  checkForCatalogUpdates(deviceId: string): Promise<string>;
-  installCatalogApp(
+  installWebappFromUrl(
     deviceId: string,
-    appId: string,
-    version: string,
-    sourceUrl: string,
+    url: string,
+    sha256: string,
+    size: number,
+    provenance: string | null,
   ): Promise<BridgethingWebappInfo>;
-  setCatalogPollConfig(config: BridgethingCatalogPollConfig | null): Promise<void>;
 
   reconnectPeer(deviceId: string): Promise<void>;
 
-  // empty string clears; the daemon broadcasts the change back as a deviceMetaChanged update
   deviceSetNickname(deviceId: string, nickname: string): Promise<void>;
 
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
@@ -405,9 +363,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
   killApp(): Promise<void>;
 
-  setOnProviderChanged(callback: (info: BridgethingProviderInfo | null) => void): void;
-  setOnAuthStateChanged(callback: (state: BridgethingAuthState) => void): void;
-  setOnServiceHealthChanged(callback: (health: BridgethingServiceHealth) => void): void;
+  setOnProvidersChanged(callback: (providers: BridgethingProviderInfo[]) => void): void;
   setOnPeerConnected(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnPeerDisconnected(callback: (peerId: string) => void): void;
   setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) => void): void;
@@ -423,5 +379,4 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   ): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
-  setOnCatalogEvent(callback: (event: BridgethingCatalogEvent) => void): void;
 }

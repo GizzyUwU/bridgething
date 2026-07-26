@@ -23,7 +23,7 @@ final class OtaStreamTests: XCTestCase {
             lyricsResolver: FakeLyricsResolver(),
             host: HostInfo(appName: "test-companion", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(FakeGlue())
+        try await companion.attach(FakeGlue())
         try await companion.start()
         let driver = WireDriver(adapter: adapter)
         await driver.start()

@@ -50,13 +50,20 @@ fn open_pcm(config: &MicConfig) -> alsa::Result<PCM> {
   let pcm = PCM::new(&config.device, Direction::Capture, false)?;
   {
     let hwp = HwParams::any(&pcm)?;
-    hwp.set_channels(config.format.channels.into())?;
+    hwp.set_channels(config.capture_channels.into())?;
     hwp.set_rate(config.format.sample_rate_hz, ValueOr::Nearest)?;
-    hwp.set_format(Format::s16())?;
+    hwp.set_format(Format::s32())?;
     hwp.set_access(Access::RWInterleaved)?;
     pcm.hw_params(&hwp)?;
   }
   Ok(pcm)
+}
+
+fn collapse_array(period: &[i32], capture_channels: usize, out: &mut BytesMut) {
+  for mics in period.chunks_exact(capture_channels) {
+    let sum: i64 = mics.iter().map(|sample| i64::from(*sample)).sum();
+    out.put_i16_le(((sum / capture_channels as i64) >> 16) as i16);
+  }
 }
 
 fn run(
@@ -66,11 +73,11 @@ fn run(
   frames: mpsc::Sender<CapturedFrame>,
   cancel: Arc<AtomicBool>,
 ) -> alsa::Result<()> {
-  let io = pcm.io_i16()?;
-  let channels = config.format.channels as usize;
-  let frame_samples = (config.format.frame_samples as usize) * channels;
+  let io = pcm.io_i32()?;
+  let capture_channels = config.capture_channels as usize;
+  let frame_samples = config.format.frame_samples as usize;
   let frame_byte_len = frame_samples * 2;
-  let mut samples = vec![0i16; frame_samples];
+  let mut samples = vec![0i32; frame_samples * capture_channels];
   let mut bytes_buf = BytesMut::with_capacity(frame_byte_len);
   let mut seq: u32 = 0;
 
@@ -81,11 +88,8 @@ fn run(
     }
     bytes_buf.reserve(frame_byte_len);
     match io.readi(&mut samples) {
-      Ok(read) if read == config.format.frame_samples as usize => {
-        let take = read * channels;
-        for sample in &samples[..take] {
-          bytes_buf.put_i16_le(*sample);
-        }
+      Ok(read) if read == frame_samples => {
+        collapse_array(&samples[..read * capture_channels], capture_channels, &mut bytes_buf);
         let frame = CapturedFrame {
           stream_id,
           seq,

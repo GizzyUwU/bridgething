@@ -343,7 +343,10 @@ impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
       BridgeToClientPlayerMsg::QueueChanged(reply) | BridgeToClientPlayerMsg::QueueReply(reply) => {
         player_queue_to_stock(reply)
       }
-      BridgeToClientPlayerMsg::Delta(_) | BridgeToClientPlayerMsg::ErrorReply(_) => Self::Ack {},
+      BridgeToClientPlayerMsg::Delta(_)
+      | BridgeToClientPlayerMsg::ErrorReply(_)
+      | BridgeToClientPlayerMsg::TargetsChanged(_)
+      | BridgeToClientPlayerMsg::TargetsReply(_) => Self::Ack {},
     }
   }
 }
@@ -790,10 +793,7 @@ impl RecvMsgData {
         let play = match skip_to_uri {
           Some(track) => ClientPlayUri {
             uri: track,
-            context: Some(PlayContext {
-              context_uri: uri,
-              position: None,
-            }),
+            context: Some(PlayContext { context_uri: uri }),
           },
           None => ClientPlayUri { uri, context: None },
         };

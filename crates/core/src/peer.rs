@@ -20,7 +20,7 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   player::Player,
-  state::{AudioManager, LogTap, RouteTable, log_tap::LogOwner},
+  state::{AudioManager, LogTap, PlaybackTargetStore, RouteTable, log_tap::LogOwner},
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -100,6 +100,7 @@ impl PeerTracker {
     player: Player,
     audio: AudioManager,
     capabilities: CapabilitiesRegistry,
+    playback_targets: PlaybackTargetStore,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
     log_tap: LogTap,
@@ -114,6 +115,7 @@ impl PeerTracker {
       player,
       audio,
       capabilities,
+      playback_targets,
       ws_routes,
       stream_routes,
       log_tap,
@@ -225,6 +227,7 @@ struct PeerActor {
   player: Player,
   audio: AudioManager,
   capabilities: CapabilitiesRegistry,
+  playback_targets: PlaybackTargetStore,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
   log_tap: LogTap,
@@ -245,6 +248,7 @@ async fn run_actor(
   player: Player,
   audio: AudioManager,
   capabilities: CapabilitiesRegistry,
+  playback_targets: PlaybackTargetStore,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
   log_tap: LogTap,
@@ -256,6 +260,7 @@ async fn run_actor(
     player,
     audio,
     capabilities,
+    playback_targets,
     ws_routes,
     stream_routes,
     log_tap,
@@ -618,6 +623,9 @@ impl PeerActor {
       }
       if let Err(err) = self.player.reset_companion().await {
         tracing::warn!(?err, "failed to reset player queue state on companion disconnect");
+      }
+      if let Err(err) = self.playback_targets.clear_companion().await {
+        tracing::warn!(?err, "failed to clear playback targets on companion disconnect");
       }
       let drained = self.log_tap.drain_for_owner(LogOwner::Gateway(Some(addr)));
       if !drained.is_empty() {

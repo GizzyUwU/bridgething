@@ -1,14 +1,5 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import Foundation
 
-/// Filler-strip helper for WEBAPP_INTENT raw_query slots.
-///
-/// Conservative on heavy disfluencies: removes single-word fillers,
-/// compound hedges, RESTART-verb prefixes, and the heavy-suffix tail.
-/// Does NOT resolve self-corrections (`turn off no wait turn on`); that
-/// needs a semantic pass.
 public enum NluFillerStrip {
     static let singleFillers: Set<String> = [
         "uh", "uhh", "uhhh", "um", "umm", "uhm",
@@ -49,7 +40,6 @@ public enum NluFillerStrip {
         try! NSRegularExpression(pattern: "^[\\s\\.\\,!?;:\"'`]+|[\\s\\.\\,!?;:\"'`]+$")
     }()
 
-    /// Strip fillers + restart prefixes + heavy suffixes; collapse whitespace.
     public static func strip(_ text: String) -> String {
         guard !text.isEmpty else { return "" }
         var s = text
@@ -94,5 +84,3 @@ public enum NluFillerStrip {
         return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: replacement)
     }
 }
-
-#endif

@@ -1,7 +1,10 @@
-import type { CatalogListing } from '@bridgething/session-react-native';
+import type {
+  CatalogAppListing,
+  RecommendedSource,
+} from '@bridgething/catalog';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Link as LinkIcon, Plus, RefreshCw, Trash2 } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
@@ -11,120 +14,109 @@ import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
-import { getSession, peerDisplayName, useSession } from '../lib/session';
+import {
+  addSource,
+  installApp,
+  listingsFor,
+  quickAddSources,
+  refreshCatalog,
+  removeSource,
+  useCatalog,
+} from '../lib/catalog';
+import { peerDisplayName, useSession } from '../lib/session';
+import { useWebapps } from '../lib/webapps';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Store'>;
 
 export function StoreScreen({ route }: Props) {
-  const session = getSession();
-  const deviceId = route.params.deviceId;
+  const deviceId = route.params?.deviceId ?? null;
 
-  const [listings, setListings] = useState<CatalogListing[]>([]);
-  const [sources, setSources] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
   const [newSource, setNewSource] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
+  const sources = useCatalog(s => s.sources);
+  const catalogs = useCatalog(s => s.catalogs);
+  const directory = useCatalog(s => s.directory);
+  const failures = useCatalog(s => s.failures);
+  const refreshing = useCatalog(s => s.refreshing);
+
+  const peer = useSession(s =>
+    deviceId ? (s.peers.find(p => p.id === deviceId) ?? null) : null,
+  );
   const ledger = useSession(s => s.ledger);
+  const installed = useWebapps(deviceId ?? '');
 
-  const reload = useCallback(async () => {
-    try {
-      const [apps, srcs] = await Promise.all([
-        session.availableApps(deviceId),
-        session.catalogSources(),
-      ]);
-      setListings(apps);
-      setSources(srcs);
-    } catch {
-      // surfaces as an empty list
-    }
-  }, [deviceId, session]);
-
-  const refreshCatalog = useCallback(async () => {
-    setLoading(true);
-    try {
-      await session.refreshCatalog();
-      await reload();
-    } finally {
-      setLoading(false);
-    }
-  }, [reload, session]);
+  const listings = useMemo(
+    () => listingsFor(deviceId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deviceId, catalogs, installed.list],
+  );
+  const recommended = useMemo<RecommendedSource[]>(
+    () => quickAddSources(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalogs, directory, sources],
+  );
 
   useEffect(() => {
-    refreshCatalog();
-  }, [refreshCatalog]);
+    void refreshCatalog();
+  }, []);
 
-  useEffect(() => {
-    return session.subscribe(event => {
-      if (event.type === 'catalogEvent') {
-        const k = event.event.kind;
-        if (k === 'refreshed' || k === 'installed' || k === 'installFailed')
-          void reload();
-      } else if (
-        event.type === 'webappsChanged' &&
-        event.deviceId === deviceId
-      ) {
-        void reload();
+  const install = useCallback(
+    (listing: CatalogAppListing) => {
+      const version = listing.newestCompatible;
+      if (!version || busyId) return;
+      if (!deviceId) {
+        Alert.alert(
+          'No Car Thing connected',
+          `connect one to install ${listing.app.name}. browsing works without it.`,
+        );
+        return;
       }
-    });
-  }, [deviceId, reload, session]);
-
-  const install = (listing: CatalogListing) => {
-    const version = listing.newestCompatible;
-    if (!version || busyId) return;
-    const perms = version.permissions.length
-      ? version.permissions.join(', ')
-      : 'none';
-    Alert.alert(
-      `Install ${listing.app.name}?`,
-      `Version ${version.version} by ${listing.app.author}.\n\nPermissions: ${perms}\n\nSource: ${listing.sourceUrl}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Install',
-          onPress: async () => {
-            setBusyId(listing.app.id);
-            try {
-              await session.installCatalogApp(
-                deviceId,
-                listing.app.id,
-                version.version,
-                listing.sourceUrl,
-              );
-            } catch (err) {
-              Alert.alert(
-                'Install failed',
-                err instanceof Error ? err.message : String(err),
-              );
-            } finally {
-              setBusyId(null);
-            }
+      const perms = version.permissions.length
+        ? version.permissions.join(', ')
+        : 'none';
+      Alert.alert(
+        `Install ${listing.app.name}?`,
+        `Version ${version.version} by ${listing.app.author}.\n\nPermissions: ${perms}\n\nSource: ${listing.sourceUrl}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Install',
+            onPress: async () => {
+              setBusyId(listing.app.id);
+              try {
+                await installApp(deviceId, listing);
+              } catch (err) {
+                Alert.alert(
+                  'Install failed',
+                  err instanceof Error ? err.message : String(err),
+                );
+              } finally {
+                setBusyId(null);
+              }
+            },
           },
-        },
-      ],
-    );
-  };
+        ],
+      );
+    },
+    [busyId, deviceId],
+  );
 
-  const addSource = async () => {
+  const onAddSource = async () => {
     const trimmed = newSource.trim();
     if (!trimmed) return;
     setNewSource('');
-    await session.addCatalogSource(trimmed);
-    await refreshCatalog();
+    await addSource(trimmed);
   };
 
-  const removeSource = (url: string) => {
+  const onRemoveSource = (url: string) => {
     Alert.alert('Remove source?', url, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: async () => {
-          await session.removeCatalogSource(url);
-          await refreshCatalog();
-        },
+        onPress: () => void removeSource(url),
       },
     ]);
   };
@@ -136,15 +128,21 @@ export function StoreScreen({ route }: Props) {
         subtitle={
           peer
             ? `browse and install webapps onto ${peerDisplayName(peer, ledger)}.`
-            : 'browse and install webapps onto your Car Thing.'
+            : deviceId
+              ? 'browse and install webapps onto your Car Thing.'
+              : 'browse webapps. connect a Car Thing to install one.'
         }
       />
 
       <View className="mb-3 flex-row items-center justify-between">
         <SectionHeader title="available apps" />
-        <Press onPress={refreshCatalog} scaleTo={0.9} disabled={loading}>
+        <Press
+          onPress={() => void refreshCatalog()}
+          scaleTo={0.9}
+          disabled={refreshing}
+        >
           <View className="flex-row items-center gap-1.5 px-1 py-1">
-            {loading ? (
+            {refreshing ? (
               <ActivityIndicator size="small" />
             ) : (
               <RefreshCw size={15} color="hsl(215 14% 45%)" strokeWidth={2.4} />
@@ -156,7 +154,7 @@ export function StoreScreen({ route }: Props) {
         </Press>
       </View>
 
-      {loading && listings.length === 0 ? (
+      {refreshing && listings.length === 0 ? (
         <View className="items-center py-8">
           <ActivityIndicator />
         </View>
@@ -175,6 +173,13 @@ export function StoreScreen({ route }: Props) {
         </ListGroup>
       )}
 
+      {failures.length > 0 ? (
+        <Text className="mt-3 px-1 text-[11.5px] leading-[16px] text-muted-foreground">
+          {failures.length} source{failures.length === 1 ? '' : 's'} could not
+          be read. anything already installed from them keeps working.
+        </Text>
+      ) : null}
+
       <View className="mt-10">
         <SectionHeader title="sources" />
         {sources.length === 0 ? (
@@ -189,14 +194,67 @@ export function StoreScreen({ route }: Props) {
                 >
                   {src}
                 </Text>
-                <Press onPress={() => removeSource(src)} scaleTo={0.9}>
+                <Press onPress={() => onRemoveSource(src)} scaleTo={0.9}>
                   <Trash2 size={18} color="hsl(0 70% 55%)" strokeWidth={2.2} />
                 </Press>
               </View>
             ))}
           </ListGroup>
         )}
-        <View className="mt-3">
+
+        {recommended.length > 0 ? (
+          <View className="mt-6">
+            <SectionHeader title="suggested sources" />
+            <ListGroup>
+              {recommended.map(source => (
+                <View
+                  key={source.url}
+                  className="flex-row items-center gap-3 px-4 py-3"
+                >
+                  <View className="flex-1">
+                    <View className="flex-row items-center gap-2">
+                      <Text
+                        className="text-[14px] font-semibold text-foreground"
+                        numberOfLines={1}
+                      >
+                        {source.name}
+                      </Text>
+                      {source.attested ? (
+                        <View className="rounded-full bg-primary-soft px-2 py-0.5">
+                          <Text className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                            vouched for
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text
+                      className="mt-0.5 text-[12px] text-muted-foreground"
+                      numberOfLines={2}
+                    >
+                      {source.description ?? source.url}
+                    </Text>
+                  </View>
+                  <Press
+                    onPress={() => void addSource(source.url)}
+                    scaleTo={0.9}
+                  >
+                    <View className="rounded-full bg-primary px-3 py-1.5">
+                      <Text className="text-[11px] font-bold uppercase tracking-[0.08em] text-primary-foreground">
+                        add
+                      </Text>
+                    </View>
+                  </Press>
+                </View>
+              ))}
+            </ListGroup>
+            <Text className="mt-2 px-1 text-[11.5px] leading-[16px] text-muted-foreground">
+              listed in the bridgething directory. a listing means someone
+              checked it is a real catalog, never that its apps are safe.
+            </Text>
+          </View>
+        ) : null}
+
+        <View className="mt-6">
           <Field
             label="add a source"
             icon={LinkIcon}
@@ -211,7 +269,7 @@ export function StoreScreen({ route }: Props) {
         </View>
         <View className="mt-3">
           <Button
-            onPress={addSource}
+            onPress={onAddSource}
             disabled={newSource.trim().length === 0}
             icon={Plus}
             size="lg"
@@ -229,7 +287,7 @@ function AppRow({
   busy,
   onInstall,
 }: {
-  listing: CatalogListing;
+  listing: CatalogAppListing;
   busy: boolean;
   onInstall: () => void;
 }) {

@@ -128,7 +128,7 @@ final class AppleMusicGlueTests: XCTestCase {
             lyricsResolver: FakeLyricsResolver(),
             host: HostInfo(appName: "applemusic-test", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         await companion.setDeviceAutoResume(deviceId: "carthing-test", enabled: autoResume)
         let driver = WireDriver(adapter: adapter)
@@ -193,7 +193,7 @@ final class AppleMusicGlueTests: XCTestCase {
             host: HostInfo(appName: "t", appVersion: "1", osName: "macOS")
         )
         addTeardownBlock { await companion.stop() }
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         try await waitUntil { states.contains { if case .failed = $0 { return true }; return false } }
     }
@@ -209,7 +209,7 @@ final class AppleMusicGlueTests: XCTestCase {
             host: HostInfo(appName: "t", appVersion: "1", osName: "macOS")
         )
         addTeardownBlock { await companion.stop() }
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         try await waitUntil { states.contains { if case .failed = $0 { return true }; return false } }
     }
@@ -224,7 +224,7 @@ final class AppleMusicGlueTests: XCTestCase {
             host: HostInfo(appName: "t", appVersion: "1", osName: "macOS")
         )
         addTeardownBlock { await companion.stop() }
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         try await waitUntil { states.contains { if case .authenticated = $0 { return true }; return false } }
     }
@@ -300,7 +300,7 @@ final class AppleMusicGlueTests: XCTestCase {
         let h = try await boot(player: player)
         addTeardownBlock { await h.companion.stop() }
 
-        try await h.glue.play(PlayUri(uri: "applemusic:song:1", context: PlayContext(contextUri: "applemusic:album:2", position: nil)))
+        try await h.glue.play(PlayUri(uri: "applemusic:song:1", context: PlayContext(contextUri: "applemusic:album:2")))
         XCTAssertEqual(player.playContextCalls.last?.context, "applemusic:album:2")
         XCTAssertEqual(player.playContextCalls.last?.startAt, "applemusic:song:1")
 
@@ -503,7 +503,7 @@ final class AppleMusicGlueTests: XCTestCase {
             host: HostInfo(appName: "t", appVersion: "1", osName: "macOS")
         )
         addTeardownBlock { await companion.stop() }
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         try await waitUntil { states.contains { if case .authenticated = $0 { return true }; return false } }
         await companion.setDeviceAutoResume(deviceId: "carthing-test", enabled: autoResume)

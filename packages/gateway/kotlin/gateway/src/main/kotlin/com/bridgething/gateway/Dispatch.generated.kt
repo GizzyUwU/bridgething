@@ -932,6 +932,15 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Player::TransferTo` messages. */
+  public val transferTo: Flow<Pair<String, TransferTo>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.TransferTo ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `Player::Snapshot` to every connected peer (broadcast). */
   public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -959,6 +968,23 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Player::TargetsChanged` to every connected peer (broadcast). */
+  public suspend fun targetsChanged(payload: PlaybackTargets, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.TargetsChanged(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -2853,6 +2879,16 @@ public class PlayerSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Player::TransferTo` from this peer. */
+  public val transferTo: Flow<TransferTo> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.TransferTo ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `Player::Snapshot` to this peer. */
   public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2869,6 +2905,16 @@ public class PlayerSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Player::TargetsChanged` to this peer. */
+  public suspend fun targetsChanged(payload: PlaybackTargets, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.TargetsChanged(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }

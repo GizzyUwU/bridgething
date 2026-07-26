@@ -9,12 +9,12 @@ public struct Album: Codable, Sendable {
 	public let id: String
 	public let name: String
 	/// Opaque artwork asset id (`asset.get`), when known.
-	public let artwork_id: String?
+	public let artworkId: String?
 
-	public init(id: String, name: String, artwork_id: String?) {
+	public init(id: String, name: String, artworkId: String?) {
 		self.id = id
 		self.name = name
-		self.artwork_id = artwork_id
+		self.artworkId = artworkId
 	}
 }
 
@@ -37,12 +37,12 @@ public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
 	/// Opaque artwork asset id (`asset.get`), when known.
-	public let artwork_id: String?
+	public let artworkId: String?
 
-	public init(id: String, name: String, artwork_id: String?) {
+	public init(id: String, name: String, artworkId: String?) {
 		self.id = id
 		self.name = name
-		self.artwork_id = artwork_id
+		self.artworkId = artworkId
 	}
 }
 
@@ -712,14 +712,19 @@ public struct SurfaceAvailability: Codable, Sendable {
 	public let netWs: Bool
 	public let audioTts: Bool
 	public let lyrics: Bool
+	/// The active music provider can enumerate remote endpoints and move
+	/// playback between them. False for providers whose platform refuses to
+	/// expose routes (Apple Music), and whenever no glue is attached.
+	public let playbackTargets: Bool?
 
-	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool) {
+	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool, playbackTargets: Bool?) {
 		self.geo = geo
 		self.notifications = notifications
 		self.netFetch = netFetch
 		self.netWs = netWs
 		self.audioTts = audioTts
 		self.lyrics = lyrics
+		self.playbackTargets = playbackTargets
 	}
 }
 
@@ -1812,6 +1817,8 @@ public struct LogsUnsubscribe: Codable, Sendable {
 	}
 }
 
+/// One timed line. `start_ms` is relative to track start, so a webapp highlights against the
+/// same clock it draws the progress bar from.
 public struct LyricLine: Codable, Sendable {
 	public let startMs: UInt32
 	public let text: String
@@ -1822,6 +1829,8 @@ public struct LyricLine: Codable, Sendable {
 	}
 }
 
+/// Lyrics for one track. `synced` and `plain` are independent: a source may carry either, both,
+/// or neither. `source` names the provider so a webapp can attribute it.
 public struct Lyrics: Codable, Sendable {
 	public let synced: [LyricLine]?
 	public let plain: String?
@@ -2487,18 +2496,16 @@ public enum NotificationCategory: String, Codable, Sendable {
 }
 
 /// ANCS-shaped flags. `silent` mirrors the iOS "do not surface
-/// audibly" hint, `important` is the high-importance flag, and
-/// `pre_existing` is true for notifications that arrived before the
-/// daemon connected (replayed by the companion on first sync).
+/// audibly" hint and `important` is the high-importance flag. Only
+/// notifications posted while the daemon is connected are surfaced, so
+/// there is no pre-existing/backfill marker.
 public struct NotificationFlags: Codable, Sendable {
 	public let silent: Bool
 	public let important: Bool
-	public let preExisting: Bool
 
-	public init(silent: Bool, important: Bool, preExisting: Bool) {
+	public init(silent: Bool, important: Bool) {
 		self.silent = silent
 		self.important = important
-		self.preExisting = preExisting
 	}
 }
 
@@ -2809,10 +2816,6 @@ public struct OtaBegin: Codable, Sendable {
 	public let updateUrlBase: String?
 	public let transfer: TransferRef
 	public let patch: OtaPatch?
-	/// Provenance to record against the installed webapp, conventionally the
-	/// catalog source URL. `InstalledWebapp` only; authoritative, so `None`
-	/// clears any previously recorded provenance for that uuid. Capped at
-	/// `WEBAPP_PROVENANCE_MAX_LEN` bytes.
 	public let provenance: String?
 
 	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef, patch: OtaPatch?, provenance: String?) {
@@ -3287,15 +3290,14 @@ public struct PhoneStateReply: Codable, Sendable {
 
 /// Optional context for `play({ uri })`. `context_uri` is the album /
 /// playlist / show URI the track is being played from; gateways with
-/// playlist support honor it for skip-next semantics. `position` is the
-/// 0-based index inside the context.
+/// playlist support honor it for skip-next semantics. A row inside the
+/// context is addressed by playing that row's own uri within it, so there
+/// is no index here.
 public struct PlayContext: Codable, Sendable {
 	public let contextUri: String
-	public let position: UInt32?
 
-	public init(contextUri: String, position: UInt32?) {
+	public init(contextUri: String) {
 		self.contextUri = contextUri
-		self.position = position
 	}
 }
 
@@ -3380,17 +3382,68 @@ public struct PlaybackOptions: Codable, Sendable {
 	}
 }
 
+/// What kind of endpoint a `PlaybackTarget` is. Coarse on purpose: the
+/// provider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in
+/// their long tails, and webapps only pick an icon from this. Anything
+/// unrecognized maps to `Unknown` rather than leaking a provider string.
+public enum PlaybackTargetKind: String, Codable, Sendable {
+	case unknown
+	case phone
+	case tablet
+	case computer
+	case speaker
+	case tv
+	case gameConsole
+	case automobile
+	case wearable
+}
+
+/// A remote endpoint the current provider can move playback to. Only
+/// meaningful when `SurfaceAvailability::playback_targets` is set; the
+/// list never contains the Car Thing itself, which is a control surface
+/// and never an audio endpoint.
+/// 
+/// `volume_percent` is `None` when the endpoint does not report volume.
+public struct PlaybackTarget: Codable, Sendable {
+	/// Provider-opaque endpoint id; pass back to `transferTo`.
+	public let id: String
+	public let name: String
+	public let kind: PlaybackTargetKind
+	/// Whether this endpoint is the one currently playing.
+	public let isActive: Bool
+	public let volumePercent: UInt32?
+
+	public init(id: String, name: String, kind: PlaybackTargetKind, isActive: Bool, volumePercent: UInt32?) {
+		self.id = id
+		self.name = name
+		self.kind = kind
+		self.isActive = isActive
+		self.volumePercent = volumePercent
+	}
+}
+
+/// Complete replacement list of the provider's remote endpoints. The
+/// companion pushes one whenever its endpoint set changes; there is no
+/// delta and no daemon-side poll.
+public struct PlaybackTargets: Codable, Sendable {
+	public let targets: [PlaybackTarget]
+
+	public init(targets: [PlaybackTarget]) {
+		self.targets = targets
+	}
+}
+
 /// User-tunable knobs that are not "currently playing" state.
 /// `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
 /// distinguishes "user explicitly set zero" from "feature unsupported by
 /// gateway".
 public struct PlayerOptions: Codable, Sendable {
 	public let speed: Float
-	public let crossfade_ms: UInt32?
+	public let crossfadeMs: UInt32?
 
-	public init(speed: Float, crossfade_ms: UInt32?) {
+	public init(speed: Float, crossfadeMs: UInt32?) {
 		self.speed = speed
-		self.crossfade_ms = crossfade_ms
+		self.crossfadeMs = crossfadeMs
 	}
 }
 
@@ -3435,13 +3488,18 @@ public struct PlayerState: Codable, Sendable {
 	public let queue: [QueueItem]
 	public let options: PlayerOptions
 	public let context: PlaybackContext?
+	/// The endpoint the audio is coming out of, when it is not the phone
+	/// itself. `None` means local playback, or a provider with no remote
+	/// endpoint concept. Webapps render "playing on <name>" from this.
+	public let target: PlaybackTarget?
 
-	public init(track: MediaItem?, playback: Playback, queue: [QueueItem], options: PlayerOptions, context: PlaybackContext?) {
+	public init(track: MediaItem?, playback: Playback, queue: [QueueItem], options: PlayerOptions, context: PlaybackContext?, target: PlaybackTarget?) {
 		self.track = track
 		self.playback = playback
 		self.queue = queue
 		self.options = options
 		self.context = context
+		self.target = target
 	}
 }
 
@@ -3822,20 +3880,20 @@ public struct Track: Codable, Sendable {
 	public let artist: Artist
 	/// All credited artists, in order.
 	public let artists: [Artist]
-	public let duration_ms: UInt32
+	public let durationMs: UInt32
 	/// Opaque artwork asset id; pass to `asset.get` for the bytes.
-	public let image_id: String
+	public let imageId: String
 	/// Whether the track is saved in the user's library.
 	public let saved: Bool
 
-	public init(id: String, name: String, album: Album, artist: Artist, artists: [Artist], duration_ms: UInt32, image_id: String, saved: Bool) {
+	public init(id: String, name: String, album: Album, artist: Artist, artists: [Artist], durationMs: UInt32, imageId: String, saved: Bool) {
 		self.id = id
 		self.name = name
 		self.album = album
 		self.artist = artist
 		self.artists = artists
-		self.duration_ms = duration_ms
-		self.image_id = image_id
+		self.durationMs = durationMs
+		self.imageId = imageId
 		self.saved = saved
 	}
 }
@@ -3869,6 +3927,14 @@ public struct TransferFragment: Codable, Sendable {
 		self.transferId = transferId
 		self.offset = offset
 		self.bytes = bytes
+	}
+}
+
+public struct TransferTo: Codable, Sendable {
+	public let targetId: String
+
+	public init(targetId: String) {
+		self.targetId = targetId
 	}
 }
 
@@ -4454,10 +4520,7 @@ public struct WebappInfo: Codable, Sendable {
 	public let art: ArtProfile?
 	/// Opaque provenance token recorded at install time by whoever pushed
 	/// the bundle, conventionally the catalog source URL. The daemon stores
-	/// and returns it verbatim and never dereferences it; it exists so every
-	/// client agrees on which source an installed webapp came from, and can
-	/// tell an update apart from a different source claiming the same uuid.
-	/// `None` means unknown provenance (image-seeded examples, sideloads).
+	/// and returns it verbatim and never dereferences it.
 	public let provenance: String?
 
 	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?, provenance: String?) {
@@ -5289,6 +5352,7 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	case setRepeat(SetRepeat)
 	case setSpeed(SetSpeed)
 	case setCrossfade(SetCrossfade)
+	case transferTo(TransferTo)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case play,
@@ -5302,7 +5366,8 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			setShuffle,
 			setRepeat,
 			setSpeed,
-			setCrossfade
+			setCrossfade,
+			transferTo
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5365,6 +5430,11 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 					self = .setCrossfade(content)
 					return
 				}
+			case .transferTo:
+				if let content = try? container.decode(TransferTo.self, forKey: .data) {
+					self = .transferTo(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayPlayerMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayPlayerMsg"))
@@ -5404,6 +5474,9 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .setCrossfade(let content):
 			try container.encode(CodingKeys.setCrossfade, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .transferTo(let content):
+			try container.encode(CodingKeys.transferTo, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6697,11 +6770,13 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
 	case queueChanged(QueueSnapshot)
+	case targetsChanged(PlaybackTargets)
 	case requestSpotifyWake
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
 			queueChanged,
+			targetsChanged,
 			requestSpotifyWake
 	}
 
@@ -6723,6 +6798,11 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 					self = .queueChanged(content)
 					return
 				}
+			case .targetsChanged:
+				if let content = try? container.decode(PlaybackTargets.self, forKey: .data) {
+					self = .targetsChanged(content)
+					return
+				}
 			case .requestSpotifyWake:
 				self = .requestSpotifyWake
 				return
@@ -6739,6 +6819,9 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .queueChanged(let content):
 			try container.encode(CodingKeys.queueChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .targetsChanged(let content):
+			try container.encode(CodingKeys.targetsChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .requestSpotifyWake:
 			try container.encode(CodingKeys.requestSpotifyWake, forKey: .event)
@@ -7418,6 +7501,15 @@ public struct PlayerErrorNotInQueueInner: Codable, Sendable {
 		self.index = index
 	}
 }
+
+/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
+public struct PlayerErrorUnknownTargetInner: Codable, Sendable {
+	public let target_id: String
+
+	public init(target_id: String) {
+		self.target_id = target_id
+	}
+}
 public enum PlayerError: Codable, Sendable {
 	/// `play({uri})` was called with a scheme no connected gateway claims.
 	/// Returned synchronously by the daemon without round-tripping.
@@ -7428,12 +7520,15 @@ public enum PlayerError: Codable, Sendable {
 	case noGateway
 	/// `skipToIndex` referenced a queue index that doesn't exist.
 	case notInQueue(PlayerErrorNotInQueueInner)
+	/// `transferTo` named an endpoint that is not in the current target list.
+	case unknownTarget(PlayerErrorUnknownTargetInner)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case schemeUnclaimed,
 			playFailed,
 			noGateway,
-			notInQueue
+			notInQueue,
+			unknownTarget
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -7462,6 +7557,11 @@ public enum PlayerError: Codable, Sendable {
 					self = .notInQueue(content)
 					return
 				}
+			case .unknownTarget:
+				if let content = try? container.decode(PlayerErrorUnknownTargetInner.self, forKey: .data) {
+					self = .unknownTarget(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(PlayerError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PlayerError"))
@@ -7480,6 +7580,9 @@ public enum PlayerError: Codable, Sendable {
 			try container.encode(CodingKeys.noGateway, forKey: .type)
 		case .notInQueue(let content):
 			try container.encode(CodingKeys.notInQueue, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .unknownTarget(let content):
+			try container.encode(CodingKeys.unknownTarget, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}

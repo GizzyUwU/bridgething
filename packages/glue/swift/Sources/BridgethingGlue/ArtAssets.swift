@@ -8,13 +8,13 @@ import Foundation
 public extension LibraryItem {
     var artworkId: String? {
         switch self {
-        case let .track(t): return t.image_id.isEmpty ? nil : t.image_id
+        case let .track(t): return t.imageId.isEmpty ? nil : t.imageId
         case let .playlist(p): return p.artworkId
         case let .podcastEpisode(e): return e.artworkId
         case let .show(s): return s.artworkId
         case let .station(s): return s.artworkId
-        case let .album(a): return a.artwork_id
-        case let .artist(a): return a.artwork_id
+        case let .album(a): return a.artworkId
+        case let .artist(a): return a.artworkId
         }
     }
 }

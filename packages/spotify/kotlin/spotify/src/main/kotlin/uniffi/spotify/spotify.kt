@@ -4490,7 +4490,7 @@ data class Device (
     , 
     var `name`: kotlin.String
     , 
-    var `kind`: kotlin.String
+    var `kind`: DeviceKind
     , 
     var `isActive`: kotlin.Boolean
     , 
@@ -4513,7 +4513,7 @@ public object FfiConverterTypeDevice: FfiConverterRustBuffer<Device> {
         return Device(
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
+            FfiConverterTypeDeviceKind.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterFloat.read(buf),
         )
@@ -4522,7 +4522,7 @@ public object FfiConverterTypeDevice: FfiConverterRustBuffer<Device> {
     override fun allocationSize(value: Device) = (
             FfiConverterString.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterTypeDeviceKind.allocationSize(value.`kind`) +
             FfiConverterBoolean.allocationSize(value.`isActive`) +
             FfiConverterFloat.allocationSize(value.`volume`)
     )
@@ -4530,7 +4530,7 @@ public object FfiConverterTypeDevice: FfiConverterRustBuffer<Device> {
     override fun write(value: Device, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
             FfiConverterString.write(value.`name`, buf)
-            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterTypeDeviceKind.write(value.`kind`, buf)
             FfiConverterBoolean.write(value.`isActive`, buf)
             FfiConverterFloat.write(value.`volume`, buf)
     }
@@ -5226,6 +5226,52 @@ public object FfiConverterTypeAuthState : FfiConverterRustBuffer<AuthState>{
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * Coarse endpoint class. Spotify's own `DeviceType` long tail collapses
+ * here so callers pick an icon from a closed set instead of matching on a
+ * protobuf name.
+ */
+
+enum class DeviceKind {
+    
+    UNKNOWN,
+    PHONE,
+    TABLET,
+    COMPUTER,
+    SPEAKER,
+    TV,
+    GAME_CONSOLE,
+    AUTOMOBILE,
+    WEARABLE;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceKind: FfiConverterRustBuffer<DeviceKind> {
+    override fun read(buf: ByteBuffer) = try {
+        DeviceKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: DeviceKind) = 4UL
+
+    override fun write(value: DeviceKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 

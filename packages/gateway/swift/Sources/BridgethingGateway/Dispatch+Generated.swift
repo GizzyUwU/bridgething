@@ -1311,6 +1311,23 @@ public struct PlayerSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Player::TransferTo` messages.
+  public var transferTo: AsyncStream<(deviceId: String, msg: TransferTo)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .transferTo(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Player::Snapshot` to every connected peer (broadcast).
   public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1332,6 +1349,20 @@ public struct PlayerSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.queueChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Player::TargetsChanged` to every connected peer (broadcast).
+  public func targetsChanged(_ payload: PlaybackTargets, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.targetsChanged(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -3894,6 +3925,24 @@ public struct PlayerSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Player::TransferTo` from this peer.
+  public var transferTo: AsyncStream<TransferTo> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .transferTo(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Player::Snapshot` to this peer.
   public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.snapshot(payload)))
@@ -3903,6 +3952,12 @@ public struct PlayerSurfaceForDevice: Sendable {
   /// Send `Player::QueueChanged` to this peer.
   public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.queueChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Player::TargetsChanged` to this peer.
+  public func targetsChanged(_ payload: PlaybackTargets, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.targetsChanged(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

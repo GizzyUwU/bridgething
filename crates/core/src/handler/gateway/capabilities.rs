@@ -46,8 +46,14 @@ impl GatewayToBridgeCapabilitiesMsgEventDispatch for CapabilitiesHandler {
         .peers
         .set_companion(mac, PeerCompanionStatus::Connected(params.gateway.clone()))
         .await;
-      if let Err(err) = self.handle.state.capabilities.set_announce(mac, params).await {
-        tracing::warn!(?err, "failed to publish capabilities snapshot");
+      match self.handle.state.capabilities.set_announce(mac, params).await {
+        Ok(true) => {
+          if let Err(err) = self.handle.state.player.note_library_changed().await {
+            tracing::warn!(?err, "failed to invalidate browse caches on provider change");
+          }
+        }
+        Ok(false) => {}
+        Err(err) => tracing::warn!(?err, "failed to publish capabilities snapshot"),
       }
       let ancs = self.handle.bluetooth.le.ancs_auth_state();
       self

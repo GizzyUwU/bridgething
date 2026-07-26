@@ -1409,6 +1409,17 @@ impl Emitter<'_> {
       r.disallow_toggling_repeat_context_reasons.is_empty(),
       r.disallow_toggling_repeat_track_reasons.is_empty(),
     );
+    let dev_sig = cluster
+      .device
+      .iter()
+      .map(|(id, info)| format!("{id}:{}:{}", info.volume, *id == cluster.active_device_id))
+      .collect::<Vec<_>>()
+      .join(",");
+    if force || dev_sig != self.last_dev {
+      self.last_dev = dev_sig;
+      self.observer.on_devices(model::devices(cluster, self.me));
+    }
+
     if force || np_sig != self.last_np {
       self.last_np = np_sig;
       let mut state = model::player_state(cluster);
@@ -1426,17 +1437,6 @@ impl Emitter<'_> {
         state.context_name = name;
       }
       self.observer.on_player(state);
-    }
-
-    let dev_sig = cluster
-      .device
-      .iter()
-      .map(|(id, info)| format!("{id}:{}:{}", info.volume, *id == cluster.active_device_id))
-      .collect::<Vec<_>>()
-      .join(",");
-    if force || dev_sig != self.last_dev {
-      self.last_dev = dev_sig;
-      self.observer.on_devices(model::devices(cluster, self.me));
     }
 
     let q_sig = ps

@@ -52,7 +52,6 @@ public object CompanionHolder {
             bluetooth = (appCtx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter,
         )
         val notificationBackend = AndroidNotificationBackend(
-            activeShade = { NotificationBridgeRegistry.listener?.activeWireNotifications() ?: emptyList() },
             resolveAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
         )
         val c = BridgethingCompanion(

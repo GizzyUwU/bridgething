@@ -2473,13 +2473,13 @@ public func FfiConverterTypeBrowsePage_lower(_ value: BrowsePage) -> RustBuffer 
 public struct Device: Equatable, Hashable {
     public var id: String
     public var name: String
-    public var kind: String
+    public var kind: DeviceKind
     public var isActive: Bool
     public var volume: Float
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, name: String, kind: String, isActive: Bool, volume: Float) {
+    public init(id: String, name: String, kind: DeviceKind, isActive: Bool, volume: Float) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -2505,7 +2505,7 @@ public struct FfiConverterTypeDevice: FfiConverterRustBuffer {
             try Device(
                 id: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
-                kind: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeDeviceKind.read(from: &buf), 
                 isActive: FfiConverterBool.read(from: &buf), 
                 volume: FfiConverterFloat.read(from: &buf)
         )
@@ -2514,7 +2514,7 @@ public struct FfiConverterTypeDevice: FfiConverterRustBuffer {
     public static func write(_ value: Device, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterTypeDeviceKind.write(value.kind, into: &buf)
         FfiConverterBool.write(value.isActive, into: &buf)
         FfiConverterFloat.write(value.volume, into: &buf)
     }
@@ -3315,6 +3315,122 @@ public func FfiConverterTypeAuthState_lift(_ buf: RustBuffer) throws -> AuthStat
 #endif
 public func FfiConverterTypeAuthState_lower(_ value: AuthState) -> RustBuffer {
     return FfiConverterTypeAuthState.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum DeviceKind: Equatable, Hashable {
+    
+    case unknown
+    case phone
+    case tablet
+    case computer
+    case speaker
+    case tv
+    case gameConsole
+    case automobile
+    case wearable
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DeviceKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceKind: FfiConverterRustBuffer {
+    typealias SwiftType = DeviceKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .unknown
+        
+        case 2: return .phone
+        
+        case 3: return .tablet
+        
+        case 4: return .computer
+        
+        case 5: return .speaker
+        
+        case 6: return .tv
+        
+        case 7: return .gameConsole
+        
+        case 8: return .automobile
+        
+        case 9: return .wearable
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DeviceKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .phone:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .tablet:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .computer:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .speaker:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .tv:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .gameConsole:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .automobile:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .wearable:
+            writeInt(&buf, Int32(9))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceKind_lift(_ buf: RustBuffer) throws -> DeviceKind {
+    return try FfiConverterTypeDeviceKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceKind_lower(_ value: DeviceKind) -> RustBuffer {
+    return FfiConverterTypeDeviceKind.lower(value)
 }
 
 

@@ -42,6 +42,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public let uriSchemes: [String] = ["spotify"]
     public let musicProvider: MusicProvider = .spotify
     public let lyricsSupported: Bool = false
+    public let supportsPlaybackTargets: Bool = true
 
     private let workerBase: String
     private let psk: String
@@ -59,7 +60,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var connectivityMonitor: (any ConnectivityMonitoring)?
 
     private let stateLock = NSLock()
-    private var heldScopes: Set<CompanionAuthorityScope> = []
+    private var onRemoteSpeaker = false
+    private var lastHadItem = false
+    private var nowPlayingSink: (any NowPlayingSink)?
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
     private var authObserver: (@Sendable (GlueAuthState) -> Void)?
     private var serviceHealthObserver: (@Sendable (GlueServiceHealth) -> Void)?
@@ -68,6 +71,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var lastQueueItems: [QueueItem] = []
     private var lastState: SpPlayerState?
     private var lastStateAt: Date?
+    private var lastDevices: [SpDevice] = []
     private var lastEmittedRemoteVolume: Float?
     private var likedOverride: [String: Bool] = [:]
     private var artHeroEdge = defaultHeroEdge
@@ -79,6 +83,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private enum EmitJob {
         case player(snapshot: BridgethingSchema.PlayerState, hasItem: Bool, onRemote: Bool)
         case queue(entries: [QueueItem], thumbEdge: Int)
+        case targets(entries: [PlaybackTarget])
     }
 
     public static let defaultImageSession: URLSession = {
@@ -214,7 +219,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
         monitor?.cancel()
         if let client { await client.disconnect() }
-        await releaseAllAuthority()
+        let sink = stateLock.withLock { () -> (any NowPlayingSink)? in
+            onRemoteSpeaker = false
+            lastHadItem = false
+            lastEmittedRemoteVolume = nil
+            return nowPlayingSink
+        }
+        sink?.clearSource(sourceId: Self.name)
         let npObs = stateLock.withLock { nowPlayingObserver }
         npObs?(nil)
         resetQueueDedup()
@@ -258,23 +269,38 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     private func handleEmit(_ job: EmitJob) async {
-        guard let gateway = currentGateway() else { return }
+        guard currentGateway() != nil else { return }
+        let sink = stateLock.withLock { nowPlayingSink }
         switch job {
         case let .player(snapshot, hasItem, onRemote):
-            if hasItem {
-                await claimAuthority([.nowPlayingPlayback, .nowPlayingMetadata], forRemote: onRemote)
-                if onRemote { await emitRemoteVolumeFromCluster() }
-            } else {
-                await releaseAllAuthority()
+            let gainedRemote = stateLock.withLock { () -> Bool in
+                let gained = hasItem && onRemote && !onRemoteSpeaker
+                onRemoteSpeaker = hasItem && onRemote
+                lastHadItem = hasItem
+                if !onRemoteSpeaker { lastEmittedRemoteVolume = nil }
+                return gained
             }
-            try? await gateway.player.snapshot(snapshot)
+            if hasItem, onRemote { await emitRemoteVolumeFromCluster(force: gainedRemote) }
+            sink?.submitPlayer(
+                sourceId: Self.name,
+                snapshot: snapshot,
+                appBundle: spotifyAppBundle,
+                hasItem: hasItem,
+                wantsVolume: onRemote
+            )
         case let .queue(entries, thumbEdge):
             await sendQueueChangedIfNeeded(entries, thumbEdge: thumbEdge)
+        case let .targets(entries):
+            sink?.submitTargets(sourceId: Self.name, targets: PlaybackTargets(targets: entries))
         }
     }
 
     public func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async {
         stateLock.withLock { nowPlayingObserver = observer }
+    }
+
+    public func setNowPlayingSink(_ sink: (any NowPlayingSink)?) async {
+        stateLock.withLock { nowPlayingSink = sink }
     }
 
     public func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
@@ -299,7 +325,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         } else {
             glueLog.info("peer connect without auto-resume; leaving playback as-is")
         }
-        stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
         if var pending = stateLock.withLock({ lastState }), pending.track != nil {
             var ageMs: UInt32?
@@ -320,10 +345,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func debugState() async -> GlueDebugState {
         stateLock.withLock {
-            GlueDebugState(
-                authorityPlaybackHeld: heldScopes.contains(.nowPlayingPlayback),
-                authorityMetadataHeld: heldScopes.contains(.nowPlayingMetadata)
-            )
+            GlueDebugState(authorityPlaybackHeld: lastHadItem, authorityMetadataHeld: lastHadItem)
         }
     }
 
@@ -345,6 +367,12 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let hasItem = state.track != nil
         let onRemote = state.onRemoteSpeaker
         enqueue(.player(snapshot: snapshot, hasItem: hasItem, onRemote: onRemote))
+    }
+
+    fileprivate func onDevices(_ devices: [SpDevice]) {
+        guard currentGateway() != nil else { return }
+        stateLock.withLock { lastDevices = devices }
+        enqueue(.targets(entries: devices.map(Self.playbackTarget(from:))))
     }
 
     fileprivate func onQueue(_ queue: SpQueue) {
@@ -385,8 +413,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private func handleAuthDown() {
         currentNowPlayingObserver()?(nil)
-        let held = stateLock.withLock { !heldScopes.isEmpty }
-        if currentGateway() != nil, held { Task { await releaseAllAuthority() } }
+        let sink = stateLock.withLock { () -> (any NowPlayingSink)? in
+            onRemoteSpeaker = false
+            lastHadItem = false
+            lastEmittedRemoteVolume = nil
+            return nowPlayingSink
+        }
+        sink?.clearSource(sourceId: Self.name)
     }
 
     private func checkPremium() async {
@@ -642,8 +675,48 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             PlaybackContext(uri: state.contextUri, name: state.contextName.isEmpty ? nil : state.contextName)
         return BridgethingSchema.PlayerState(
             track: track, playback: playback, queue: [],
-            options: PlayerOptions(speed: 1.0, crossfade_ms: nil), context: context
+            options: PlayerOptions(speed: 1.0, crossfadeMs: nil), context: context,
+            target: activeTarget(for: state)
         )
+    }
+
+    private func activeTarget(for state: SpPlayerState) -> PlaybackTarget? {
+        guard state.playingRemotely, !state.remoteDeviceId.isEmpty else { return nil }
+        guard let device = stateLock.withLock({ lastDevices.first { $0.id == state.remoteDeviceId } }) else {
+            return nil
+        }
+        return Self.playbackTarget(from: device)
+    }
+
+    private static func playbackTarget(from device: SpDevice) -> PlaybackTarget {
+        PlaybackTarget(
+            id: device.id,
+            name: device.name,
+            kind: targetKind(device.kind),
+            isActive: device.isActive,
+            volumePercent: device.volume > 0 ? UInt32((device.volume * 100).rounded()) : nil
+        )
+    }
+
+    private static func targetKind(_ kind: DeviceKind) -> PlaybackTargetKind {
+        switch kind {
+        case .phone: .phone
+        case .tablet: .tablet
+        case .computer: .computer
+        case .speaker: .speaker
+        case .tv: .tv
+        case .gameConsole: .gameConsole
+        case .automobile: .automobile
+        case .wearable: .wearable
+        case .unknown: .unknown
+        }
+    }
+
+    public func transferTo(targetId: String) async throws {
+        guard let client else { throw GlueError.notAuthenticated }
+        do { try await client.transfer(deviceId: targetId) } catch {
+            throw GlueError.underlying(error)
+        }
     }
 
     private func sendQueueChangedIfNeeded(_ entries: [QueueItem], thumbEdge: Int) async {
@@ -704,48 +777,12 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         try? await gateway.player.snapshot(makeSnapshot(from: pending, positionAgeMs: cachedPositionAgeMs()))
     }
 
-    // MARK: - authority
-
-    private func claimAuthority(_ scopes: Set<CompanionAuthorityScope>, forRemote onRemote: Bool) async {
-        guard let gateway = currentGateway() else { return }
-        var want = scopes
-        if onRemote { want.insert(.volume) }
-        for scope in want {
-            let needs = stateLock.withLock { !heldScopes.contains(scope) }
-            if needs {
-                do {
-                    try await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: spotifyAppBundle))
-                    stateLock.withLock { _ = heldScopes.insert(scope) }
-                    if scope == .volume { await emitRemoteVolumeFromCluster(force: true) }
-                } catch {}
-            }
-        }
-        if !onRemote {
-            let dropVolume = stateLock.withLock { () -> Bool in
-                lastEmittedRemoteVolume = nil
-                return heldScopes.remove(.volume) != nil
-            }
-            if dropVolume { try? await gateway.authority.release(AuthorityRelease(scope: .volume)) }
-        }
-    }
-
-    private func releaseAllAuthority() async {
-        guard let gateway = currentGateway() else { return }
-        let scopes = stateLock.withLock { () -> [CompanionAuthorityScope] in
-            let s = Array(heldScopes)
-            heldScopes.removeAll()
-            lastEmittedRemoteVolume = nil
-            return s
-        }
-        for scope in scopes { try? await gateway.authority.release(AuthorityRelease(scope: scope)) }
-    }
-
     // MARK: - remote connect-device volume
 
     private static let volumeStepPercent = 6.25
 
     public func ownsVolume() async -> Bool {
-        stateLock.withLock { heldScopes.contains(.volume) }
+        stateLock.withLock { onRemoteSpeaker }
     }
 
     public func volumeUp() async throws {
@@ -771,7 +808,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private func emitRemoteVolume(level: Float, force: Bool = false) async {
         guard let gateway = currentGateway() else { return }
         let changed = stateLock.withLock { () -> Bool in
-            guard heldScopes.contains(.volume) else { return false }
+            guard onRemoteSpeaker else { return false }
             if !force, let last = lastEmittedRemoteVolume, abs(last - level) < 0.005 { return false }
             lastEmittedRemoteVolume = level
             return true
@@ -824,11 +861,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         BridgethingSchema.Track(
             id: b.uri,
             name: b.title,
-            album: BridgethingSchema.Album(id: b.album.uri, name: b.album.name, artwork_id: nil),
-            artist: BridgethingSchema.Artist(id: b.artists.first?.uri ?? "", name: b.artists.first?.name ?? "", artwork_id: nil),
-            artists: b.artists.map { BridgethingSchema.Artist(id: $0.uri, name: $0.name, artwork_id: nil) },
-            duration_ms: b.durationMs,
-            image_id: artAssetId(b.imageId, edge: edge) ?? "",
+            album: BridgethingSchema.Album(id: b.album.uri, name: b.album.name, artworkId: nil),
+            artist: BridgethingSchema.Artist(id: b.artists.first?.uri ?? "", name: b.artists.first?.name ?? "", artworkId: nil),
+            artists: b.artists.map { BridgethingSchema.Artist(id: $0.uri, name: $0.name, artworkId: nil) },
+            durationMs: b.durationMs,
+            imageId: artAssetId(b.imageId, edge: edge) ?? "",
             saved: b.saved
         )
     }
@@ -839,9 +876,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         case "track":
             return .track(mapTrack(b, edge: edge))
         case "album":
-            return .album(BridgethingSchema.Album(id: b.uri, name: b.title, artwork_id: art))
+            return .album(BridgethingSchema.Album(id: b.uri, name: b.title, artworkId: art))
         case "artist":
-            return .artist(BridgethingSchema.Artist(id: b.uri, name: b.title, artwork_id: art))
+            return .artist(BridgethingSchema.Artist(id: b.uri, name: b.title, artworkId: art))
         case "playlist":
             return .playlist(Playlist(uri: b.uri, name: b.title, ownerName: nil, trackCount: nil, artworkId: art))
         case "user" where b.uri.hasSuffix(":collection"):
@@ -930,7 +967,9 @@ private final class ObserverBridge: Spotify.Observer, @unchecked Sendable {
     init(_ glue: SpotifyGlue) { self.glue = glue }
     func onPlayer(state: SpPlayerState) { glue?.onPlayer(state) }
     func onQueue(queue: SpQueue) { glue?.onQueue(queue) }
-    func onDevices(devices _: [SpDevice]) {}
+    func onDevices(devices: [SpDevice]) {
+        glue?.onDevices(devices)
+    }
     func onAuth(state: SpAuthState) { glue?.onAuth(state) }
     func onLibraryChanged(scope: SpLibraryScope) { glue?.onLibraryChanged(scope) }
 }

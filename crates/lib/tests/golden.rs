@@ -230,6 +230,7 @@ fn gateway_capabilities() -> GatewayCapabilities {
       net_ws: true,
       audio_tts: false,
       lyrics: true,
+      playback_targets: true,
     },
     audio: AudioCapabilities {
       earcons: vec![],
@@ -649,6 +650,53 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       meta: GatewayMsgMeta::Command,
       data: GatewayToBridgeMsgData::Chrome(GatewayToBridgeChromeMsg::Navigate(ChromeNavigate {
         url: "https://example.com".into(),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/library-browse-reply",
+    "companion answering a browse with one track and one album - pins the field casing of the nested Track / Album / Artist shapes",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: GatewayToBridgeMsgData::Library(GatewayToBridgeLibraryMsg::BrowseReply(BrowseReply {
+        result: BrowseResult {
+          entries: vec![
+            BrowseEntry::Item(LibraryItem::Track(Track {
+              id: "spotify:track:golden".into(),
+              name: "Golden".into(),
+              album: Album {
+                id: "spotify:album:golden".into(),
+                name: "Golden Album".into(),
+                artwork_id: Some("spotify/img/640/album".into()),
+              },
+              artist: Artist {
+                id: "spotify:artist:golden".into(),
+                name: "Golden Artist".into(),
+                artwork_id: Some("spotify/img/640/artist".into()),
+              },
+              artists: vec![Artist {
+                id: "spotify:artist:golden".into(),
+                name: "Golden Artist".into(),
+                artwork_id: None,
+              }],
+              duration_ms: 185_741,
+              image_id: "spotify/img/640/track".into(),
+              saved: true,
+            })),
+            BrowseEntry::Folder(BrowseFolder {
+              node_id: "spotify:playlist:golden".into(),
+              title: "Golden Playlist".into(),
+              subtitle: Some("12 songs".into()),
+              artwork_id: Some("spotify/img/640/playlist".into()),
+              total: Some(12),
+              preview_children: None,
+            }),
+          ],
+          total: Some(2),
+          has_more: false,
+        },
       })),
     },
   ));

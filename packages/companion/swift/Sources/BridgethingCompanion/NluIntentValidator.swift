@@ -1,13 +1,6 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 
-/// Snap hallucinated intent strings to the nearest valid intent. Two-pass:
-/// synonym map first (well-known close-misses mined from SFT failure tails),
-/// then a Levenshtein-3 fallback. Also strips fillers from WEBAPP_INTENT
-/// raw_query slots so the wire matches what a webapp grammar handler expects.
 public enum NluIntentValidator {
     public static let synonymMap: [String: String] = [
         "SET_PLAYBACK_SPEED_1_2X": "SET_PLAYBACK_SPEED_1POINT2X",
@@ -144,14 +137,13 @@ public enum NluIntentValidator {
         "WHATS_PLAYING",
     ]
 
-    public enum SnapReason: Equatable {
+    public enum SnapReason: Equatable, Sendable {
         case exact
         case synonym
         case edit(Int)
         case noMatch
     }
 
-    /// Snap a raw intent string to the nearest valid intent.
     public static func snapIntent(_ raw: String?, editMax: Int = 3) -> (String?, SnapReason) {
         guard let raw, !raw.isEmpty else { return (nil, .noMatch) }
         if validIntents.contains(raw) { return (raw, .exact) }
@@ -170,9 +162,6 @@ public enum NluIntentValidator {
         return (nil, .noMatch)
     }
 
-    /// Apply intent snap + WEBAPP_INTENT raw_query filler-strip to a parsed
-    /// prediction. Returns `(snapped, reason)`. `nil` snapped means dispatch
-    /// should fall back (no reasonable target).
     public static func snapPrediction(_ pred: NluPrediction?) -> (NluPrediction?, SnapReason) {
         guard let pred else { return (nil, .noMatch) }
         let (snapped, reason) = snapIntent(pred.intent)
@@ -193,7 +182,6 @@ public enum NluIntentValidator {
         return (next, reason)
     }
 
-    /// Iterative Levenshtein distance.
     static func levenshtein(_ a: String, _ b: String) -> Int {
         if a == b { return 0 }
         let aChars = Array(a)
@@ -214,5 +202,3 @@ public enum NluIntentValidator {
         return prev[bChars.count]
     }
 }
-
-#endif

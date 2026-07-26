@@ -1,16 +1,15 @@
 import Foundation
 import NitroModules
 
-/// backend protocol the host app implements; decouples the Nitro HybridObject from host-app orchestration logic.
 public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func start() async throws
     func stop() async
 
     func availableProviders() async -> [BridgethingProviderInfo]
-    func setActiveProvider(id: String?) async throws
-    func cancelAuth() async
-    func signOut() async
-    func currentProvider() async -> BridgethingProviderInfo?
+    func connectProvider(id: String) async throws
+    func disconnectProvider(id: String) async
+    func cancelAuth(id: String) async
+    func setProviderPriority(ids: [String]) async
 
     func snapshot() async -> BridgethingSessionSnapshot
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
@@ -51,14 +50,13 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest
     func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) async throws
 
-    func catalogSources() async -> [String]
-    func addCatalogSource(url: String) async
-    func removeCatalogSource(url: String) async
-    func refreshCatalog() async
-    func availableCatalogApps(deviceId: String) async -> String
-    func checkForCatalogUpdates(deviceId: String) async -> String
-    func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) async throws -> BridgethingWebappInfo
-    func setCatalogPollConfig(config: BridgethingCatalogPollConfig?) async
+    func installWebappFromUrl(
+        deviceId: String,
+        url: String,
+        sha256: String,
+        size: Double,
+        provenance: String?
+    ) async throws -> BridgethingWebappInfo
 
     func reconnectPeer(deviceId: String) async throws
 
@@ -80,9 +78,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func revokeRuntimePermissions(permissions: [String]) async -> Bool
     func killApp() async
 
-    func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void)
-    func setOnAuthStateChanged(_ callback: @escaping @Sendable (BridgethingAuthState) -> Void)
-    func setOnServiceHealthChanged(_ callback: @escaping @Sendable (BridgethingServiceHealth) -> Void)
+    func setOnProvidersChanged(_ callback: @escaping @Sendable ([BridgethingProviderInfo]) -> Void)
     func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnPeerDisconnected(_ callback: @escaping @Sendable (String) -> Void)
     func setOnPeerLinkFailed(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
@@ -96,17 +92,13 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappDocChanged(_ callback: @escaping @Sendable (String, String, String, String?) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
-    func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void)
 }
 
-/// thin Nitro proxy; buffers callback setters until a backend is installed via `installBackend(_:)`.
 public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unchecked Sendable {
     private static let stateLock = NSLock()
     private static var _backend: (any BridgethingSessionBackend)?
 
-    private static var pendingProviderChanged: (@Sendable (BridgethingProviderInfo?) -> Void)?
-    private static var pendingAuthStateChanged: (@Sendable (BridgethingAuthState) -> Void)?
-    private static var pendingServiceHealthChanged: (@Sendable (BridgethingServiceHealth) -> Void)?
+    private static var pendingProvidersChanged: (@Sendable ([BridgethingProviderInfo]) -> Void)?
     private static var pendingPeerConnected: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingPeerDisconnected: (@Sendable (String) -> Void)?
     private static var pendingPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
@@ -117,15 +109,11 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
-    private static var pendingCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
 
-    /// install the backend; must be called before RN starts. replays any already-registered callback setters.
     public static func installBackend(_ backend: any BridgethingSessionBackend) {
         stateLock.lock()
         _backend = backend
-        let providerCb = pendingProviderChanged
-        let authCb = pendingAuthStateChanged
-        let healthCb = pendingServiceHealthChanged
+        let providerCb = pendingProvidersChanged
         let peerConnCb = pendingPeerConnected
         let peerDisconnCb = pendingPeerDisconnected
         let peerLinkFailedCb = pendingPeerLinkFailed
@@ -136,10 +124,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let webappDocCb = pendingWebappDocChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
-        let catalogCb = pendingCatalogEvent
-        pendingProviderChanged = nil
-        pendingAuthStateChanged = nil
-        pendingServiceHealthChanged = nil
+        pendingProvidersChanged = nil
         pendingPeerConnected = nil
         pendingPeerDisconnected = nil
         pendingPeerLinkFailed = nil
@@ -150,12 +135,9 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingWebappDocChanged = nil
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
-        pendingCatalogEvent = nil
         stateLock.unlock()
 
-        if let providerCb { backend.setOnProviderChanged(providerCb) }
-        if let authCb { backend.setOnAuthStateChanged(authCb) }
-        if let healthCb { backend.setOnServiceHealthChanged(healthCb) }
+        if let providerCb { backend.setOnProvidersChanged(providerCb) }
         if let peerConnCb { backend.setOnPeerConnected(peerConnCb) }
         if let peerDisconnCb { backend.setOnPeerDisconnected(peerDisconnCb) }
         if let peerLinkFailedCb { backend.setOnPeerLinkFailed(peerLinkFailedCb) }
@@ -166,7 +148,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let webappDocCb { backend.setOnWebappDocChanged(webappDocCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
-        if let catalogCb { backend.setOnCatalogEvent(catalogCb) }
     }
 
     private static func backend() throws -> any BridgethingSessionBackend {
@@ -210,34 +191,27 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func setActiveProvider(id: Variant_NullType_String?) throws -> Promise<Void> {
-        let stringId: String? = id.flatMap { variant in
-            switch variant {
-            case .first: nil
-            case let .second(value): value
-            }
-        }
-        return Promise.async {
-            try await Self.backend().setActiveProvider(id: stringId)
+    public func connectProvider(id: String) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().connectProvider(id: id)
         }
     }
 
-    public func cancelAuth() throws -> Promise<Void> {
+    public func disconnectProvider(id: String) throws -> Promise<Void> {
         Promise.async {
-            await (try Self.backend()).cancelAuth()
+            await (try Self.backend()).disconnectProvider(id: id)
         }
     }
 
-    public func signOut() throws -> Promise<Void> {
+    public func cancelAuth(id: String) throws -> Promise<Void> {
         Promise.async {
-            await (try Self.backend()).signOut()
+            await (try Self.backend()).cancelAuth(id: id)
         }
     }
 
-    public func currentProvider() throws -> Promise<Variant_NullType_BridgethingProviderInfo> {
+    public func setProviderPriority(ids: [String]) throws -> Promise<Void> {
         Promise.async {
-            let info = await (try Self.backend()).currentProvider()
-            return info.map { .second($0) } ?? .first(NullType.null)
+            await (try Self.backend()).setProviderPriority(ids: ids)
         }
     }
 
@@ -453,47 +427,20 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    // MARK: - Catalog
+    // MARK: - Webapp install
 
-    public func catalogSources() throws -> Promise<[String]> {
-        Promise.async { await (try Self.backend()).catalogSources() }
-    }
-
-    public func addCatalogSource(url: String) throws -> Promise<Void> {
-        Promise.async { await (try Self.backend()).addCatalogSource(url: url) }
-    }
-
-    public func removeCatalogSource(url: String) throws -> Promise<Void> {
-        Promise.async { await (try Self.backend()).removeCatalogSource(url: url) }
-    }
-
-    public func refreshCatalog() throws -> Promise<Void> {
-        Promise.async { await (try Self.backend()).refreshCatalog() }
-    }
-
-    public func availableCatalogApps(deviceId: String) throws -> Promise<String> {
-        Promise.async { await (try Self.backend()).availableCatalogApps(deviceId: deviceId) }
-    }
-
-    public func checkForCatalogUpdates(deviceId: String) throws -> Promise<String> {
-        Promise.async { await (try Self.backend()).checkForCatalogUpdates(deviceId: deviceId) }
-    }
-
-    public func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) throws -> Promise<BridgethingWebappInfo> {
-        Promise.async {
-            try await Self.backend().installCatalogApp(deviceId: deviceId, appId: appId, version: version, sourceUrl: sourceUrl)
-        }
-    }
-
-    public func setCatalogPollConfig(config: Variant_NullType_BridgethingCatalogPollConfig?) throws -> Promise<Void> {
-        let unwrapped: BridgethingCatalogPollConfig? = config.flatMap { variant in
-            switch variant {
-            case .first: nil
-            case let .second(value): value
-            }
-        }
+    public func installWebappFromUrl(
+        deviceId: String,
+        url: String,
+        sha256: String,
+        size: Double,
+        provenance: Variant_NullType_String?
+    ) throws -> Promise<BridgethingWebappInfo> {
+        let prov = Self.unwrapString(provenance)
         return Promise.async {
-            await (try Self.backend()).setCatalogPollConfig(config: unwrapped)
+            try await Self.backend().installWebappFromUrl(
+                deviceId: deviceId, url: url, sha256: sha256, size: size, provenance: prov
+            )
         }
     }
 
@@ -564,33 +511,13 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     // MARK: - Callback setters
 
-    public func setOnProviderChanged(callback: @escaping (Variant_NullType_BridgethingProviderInfo?) -> Void) throws {
-        let wrapped: @Sendable (BridgethingProviderInfo?) -> Void = { info in
-            callback(info.map { .second($0) } ?? .first(NullType.null))
-        }
+    public func setOnProvidersChanged(callback: @escaping ([BridgethingProviderInfo]) -> Void) throws {
+        let wrapped: @Sendable ([BridgethingProviderInfo]) -> Void = { providers in callback(providers) }
         Self.stateLock.lock()
         let backend = Self._backend
-        if backend == nil { Self.pendingProviderChanged = wrapped }
+        if backend == nil { Self.pendingProvidersChanged = wrapped }
         Self.stateLock.unlock()
-        backend?.setOnProviderChanged(wrapped)
-    }
-
-    public func setOnAuthStateChanged(callback: @escaping (BridgethingAuthState) -> Void) throws {
-        let wrapped: @Sendable (BridgethingAuthState) -> Void = { state in callback(state) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingAuthStateChanged = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnAuthStateChanged(wrapped)
-    }
-
-    public func setOnServiceHealthChanged(callback: @escaping (BridgethingServiceHealth) -> Void) throws {
-        let wrapped: @Sendable (BridgethingServiceHealth) -> Void = { health in callback(health) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingServiceHealthChanged = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnServiceHealthChanged(wrapped)
+        backend?.setOnProvidersChanged(wrapped)
     }
 
     public func setOnPeerConnected(callback: @escaping (BridgethingSessionPeer) -> Void) throws {
@@ -650,7 +577,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     }
 
     public func setLogStreamingEnabled(enabled: Bool) throws {
-        // pre-backend toggles are dropped; the backend installer sets initial state
         Self.stateLock.lock()
         let backend = Self._backend
         Self.stateLock.unlock()
@@ -658,7 +584,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     }
 
     public func setLocalLogStreamingEnabled(enabled: Bool) throws {
-        // pre-backend toggles are dropped; the backend installer sets initial state
         Self.stateLock.lock()
         let backend = Self._backend
         Self.stateLock.unlock()
@@ -703,12 +628,4 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         backend?.setOnOtaEvent(wrapped)
     }
 
-    public func setOnCatalogEvent(callback: @escaping (BridgethingCatalogEvent) -> Void) throws {
-        let wrapped: @Sendable (BridgethingCatalogEvent) -> Void = { event in callback(event) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingCatalogEvent = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnCatalogEvent(wrapped)
-    }
 }

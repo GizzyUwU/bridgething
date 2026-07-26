@@ -2,7 +2,7 @@ mod bus;
 mod connection;
 mod connman;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
   Router,
@@ -33,13 +33,6 @@ pub struct Server {
   rx: ServerRx,
   cancel_token: CancellationToken,
 
-  #[cfg(feature = "test-tap")]
-  stock_addr: SocketAddr,
-  #[cfg(feature = "test-tap")]
-  modern_addr: SocketAddr,
-  #[cfg(feature = "test-tap")]
-  frame_tap_addr: SocketAddr,
-
   _stock_handle: tokio::task::JoinHandle<()>,
   _modern_handle: tokio::task::JoinHandle<()>,
   #[cfg(feature = "test-tap")]
@@ -52,13 +45,88 @@ struct ModernRouterState {
   tx: ServerTx,
 }
 
-impl Server {
+pub const STOCK_FD_NAME: &str = "bridgething-stock";
+pub const MODERN_FD_NAME: &str = "bridgething-modern";
+
+pub struct Listeners {
+  stock: TcpListener,
+  modern: TcpListener,
+  #[cfg(feature = "test-tap")]
+  frame_tap: TcpListener,
+
+  stock_addr: SocketAddr,
+  modern_addr: SocketAddr,
+  #[cfg(feature = "test-tap")]
+  frame_tap_addr: SocketAddr,
+}
+
+impl Listeners {
   pub async fn bind(
-    state: BridgeThingState,
     stock_bind: SocketAddr,
     modern_bind: SocketAddr,
     #[cfg(feature = "test-tap")] frame_tap_bind: SocketAddr,
   ) -> WSResult<Self> {
+    let mut inherited = crate::systemd::socket::inherited_listeners();
+
+    let stock = take_or_bind(&mut inherited, STOCK_FD_NAME, stock_bind).await?;
+    let modern = take_or_bind(&mut inherited, MODERN_FD_NAME, modern_bind).await?;
+    #[cfg(feature = "test-tap")]
+    let frame_tap = TcpListener::bind(frame_tap_bind).await?;
+
+    for name in inherited.keys() {
+      tracing::warn!("ignoring unclaimed inherited socket {name:?}");
+    }
+
+    let stock_addr = stock.local_addr().unwrap_or(stock_bind);
+    let modern_addr = modern.local_addr().unwrap_or(modern_bind);
+    #[cfg(feature = "test-tap")]
+    let frame_tap_addr = frame_tap.local_addr().unwrap_or(frame_tap_bind);
+    tracing::info!("listening on {stock_addr} (stock) and {modern_addr} (modern + file serve)");
+
+    Ok(Self {
+      stock,
+      modern,
+      #[cfg(feature = "test-tap")]
+      frame_tap,
+
+      stock_addr,
+      modern_addr,
+      #[cfg(feature = "test-tap")]
+      frame_tap_addr,
+    })
+  }
+
+  pub fn modern_addr(&self) -> SocketAddr {
+    self.modern_addr
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn stock_addr(&self) -> SocketAddr {
+    self.stock_addr
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn frame_tap_addr(&self) -> SocketAddr {
+    self.frame_tap_addr
+  }
+}
+
+async fn take_or_bind(
+  inherited: &mut HashMap<String, TcpListener>,
+  name: &str,
+  fallback: SocketAddr,
+) -> WSResult<TcpListener> {
+  match inherited.remove(name) {
+    Some(listener) => {
+      tracing::info!("adopted inherited socket {name:?} from the service manager");
+      Ok(listener)
+    }
+    None => Ok(TcpListener::bind(fallback).await?),
+  }
+}
+
+impl Server {
+  pub fn serve(state: BridgeThingState, listeners: Listeners) -> Self {
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let cancel_token = CancellationToken::new();
 
@@ -69,18 +137,22 @@ impl Server {
       .fallback(axum::routing::any(stock_ws_handler))
       .with_state(Arc::new(tx.clone()));
 
-    let state_for_port = state.clone();
     let modern_state = ModernRouterState { state, tx };
     let modern_app = Router::new()
       .fallback(axum::routing::any(modern_handler))
       .with_state(modern_state);
 
-    let stock_listener = TcpListener::bind(stock_bind).await?;
-    let modern_listener = TcpListener::bind(modern_bind).await?;
-    let stock_addr = stock_listener.local_addr().unwrap_or(stock_bind);
-    let modern_addr = modern_listener.local_addr().unwrap_or(modern_bind);
-    let _ = state_for_port.modern_port.set(modern_addr.port());
-    tracing::info!("listening on {stock_addr} (stock) and {modern_addr} (modern + file serve)");
+    let Listeners {
+      stock: stock_listener,
+      modern: modern_listener,
+      #[cfg(feature = "test-tap")]
+        frame_tap: frame_tap_listener,
+      stock_addr,
+      modern_addr,
+      #[cfg(feature = "test-tap")]
+      frame_tap_addr,
+    } = listeners;
+    tracing::info!("serving on {stock_addr} (stock) and {modern_addr} (modern + file serve)");
 
     let stock_cancel_token = cancel_token.clone();
     let _stock_handle = tokio::spawn(async move {
@@ -107,16 +179,14 @@ impl Server {
     });
 
     #[cfg(feature = "test-tap")]
-    let (frame_tap_addr, _frame_tap_handle) = {
+    let _frame_tap_handle = {
       let frame_tap_app = Router::new()
         .fallback(axum::routing::any(frame_tap_ws_handler))
         .with_state(frame_tap_state);
-      let frame_tap_listener = TcpListener::bind(frame_tap_bind).await?;
-      let frame_tap_addr = frame_tap_listener.local_addr().unwrap_or(frame_tap_bind);
-      tracing::info!("listening on {frame_tap_addr} (frame-tap egress mirror)");
+      tracing::info!("serving on {frame_tap_addr} (frame-tap egress mirror)");
 
       let frame_tap_cancel_token = cancel_token.clone();
-      let handle = tokio::spawn(async move {
+      tokio::spawn(async move {
         tokio::select! {
           _ = axum::serve(frame_tap_listener, frame_tap_app.into_make_service()) => {
             tracing::error!("FATAL: frame-tap server stopped");
@@ -125,41 +195,18 @@ impl Server {
             tracing::debug!("frame-tap server shutting down");
           }
         }
-      });
-      (frame_tap_addr, handle)
+      })
     };
 
-    Ok(Self {
+    Self {
       rx,
       cancel_token,
-
-      #[cfg(feature = "test-tap")]
-      stock_addr,
-      #[cfg(feature = "test-tap")]
-      modern_addr,
-      #[cfg(feature = "test-tap")]
-      frame_tap_addr,
 
       _stock_handle,
       _modern_handle,
       #[cfg(feature = "test-tap")]
       _frame_tap_handle,
-    })
-  }
-
-  #[cfg(feature = "test-tap")]
-  pub fn stock_addr(&self) -> SocketAddr {
-    self.stock_addr
-  }
-
-  #[cfg(feature = "test-tap")]
-  pub fn modern_addr(&self) -> SocketAddr {
-    self.modern_addr
-  }
-
-  #[cfg(feature = "test-tap")]
-  pub fn frame_tap_addr(&self) -> SocketAddr {
-    self.frame_tap_addr
+    }
   }
 
   /// cancel-safe

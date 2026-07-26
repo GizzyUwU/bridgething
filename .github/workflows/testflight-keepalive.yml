@@ -1,0 +1,86 @@
+name: testflight-keepalive
+
+on:
+  schedule:
+    - cron: "0 11 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Refresh regardless of how much life the newest build has left
+        type: boolean
+        default: false
+
+concurrency:
+  group: testflight-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    outputs:
+      refresh: ${{ steps.expiry.outputs.refresh }}
+    env:
+      THRESHOLD_DAYS: 10
+
+    steps:
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install asc
+        run: brew install asc
+
+      - name: how much life is left on the newest build
+        id: expiry
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$ASC_PRIVATE_KEY" >"$RUNNER_TEMP/asc-key.p8"
+          export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
+
+          # the newest build is the one the public link serves, so its expiry is the deadline.
+          newest=$(asc builds list --app "$ASC_APP_ID" --output json \
+            | jq -c '[.data[] | select(.attributes.processingState == "VALID")]
+                     | max_by(.attributes.version | tonumber) // empty')
+          if [[ -z "$newest" ]]; then
+            echo "no valid builds on app store connect; nothing to keep alive"
+            echo "refresh=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          number=$(jq -r '.attributes.version' <<<"$newest")
+          expires=$(jq -r '.attributes.expirationDate' <<<"$newest")
+          # the api returns a utc offset rather than a Z, which neither jq's fromdateiso8601 nor
+          # bsd date parses.
+          days=$(bun -e 'console.log(Math.floor((new Date(Bun.argv[1]).getTime() - Date.now()) / 86400000))' "$expires")
+          echo "build $number expires $expires ($days days left, threshold ${THRESHOLD_DAYS})"
+
+          if [[ "$FORCE" == "true" ]]; then
+            echo "forced" && echo "refresh=true" >>"$GITHUB_OUTPUT"
+          elif (( days < THRESHOLD_DAYS )); then
+            echo "inside the window; refreshing" && echo "refresh=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "plenty of life left; nothing to do" && echo "refresh=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  refresh:
+    needs: check
+    if: needs.check.outputs.refresh == 'true'
+    uses: ./.github/workflows/release-companion.yml
+    secrets: inherit
+    with:
+      android: false
+      ios: true
+      publish: true
+      testflight_groups: public
+      testflight_submit: true
+      force: true

@@ -1,20 +1,9 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 
-/// Build the system prompt the LLM stage runs against. The
-/// `activeWebapps` block is what makes WEBAPP_INTENT emission context-
-/// aware; without it, an utterance like "what's the weather" rationally
-/// falls back to NO_INTENT because the model has no signal a weather
-/// webapp exists to route to.
 public enum NluSystemPrompt {
-    /// Closed intent enum the LLM is told to pick from. These surface
-    /// names are what the LLM emits; the snap layer maps any close-misses
-    /// back to this catalog.
     public static let surfaceNames: [String] = [
-        "ADD_TO_COLLECTION", "ADD_TO_QUEUE", "BAN_TRACK", "CANCEL_INTERACTION",
+        "ADD_TO_COLLECTION", "ADD_TO_PLAYLIST", "ADD_TO_QUEUE", "BAN_TRACK", "CANCEL_INTERACTION",
         "CLARIFY", "FOLLOW", "HELP", "MORE_LIKE_THIS", "MUTE", "NEXT",
         "NO_INTENT", "OPEN_WEBAPP", "PAUSE", "PLAY", "PLAY_PRESET",
         "PREVIOUS", "REPEAT_OFF", "REPEAT_ON", "REPEAT_ONE", "RESUME",
@@ -29,11 +18,6 @@ public enum NluSystemPrompt {
         "WHATS_PLAYING",
     ]
 
-    /// One row of the active-extensions block. `id` is the webapp's wire
-    /// id (typically the manifest UUID string; human-readable names like
-    /// "home-assistant" work too if your dispatcher maps name -> uuid).
-    /// `voiceGrammar` is the plain-English description the manifest
-    /// declares; used in the prompt verbatim.
     public struct ActiveWebapp: Sendable {
         public let id: String
         public let voiceGrammar: String
@@ -83,5 +67,3 @@ public enum NluSystemPrompt {
         return prompt
     }
 }
-
-#endif

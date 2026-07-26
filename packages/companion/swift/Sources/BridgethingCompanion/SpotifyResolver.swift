@@ -1,25 +1,9 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
 
-/// Resolve string slots on an `NluPrediction` into Spotify URIs via the
-/// public Spotify Web API search endpoint. Decorates the prediction in
-/// place; pure NLU intents (CLARIFY, WEBAPP_INTENT, fast-path-only)
-/// pass through unchanged.
-///
-/// Auth: the host supplies an `accessTokenProvider` closure pointing at
-/// the active Spotify authenticator's cached token. The resolver doesn't
-/// refresh on its own; a 401 surfaces as ResolveError and the host's auth
-/// layer catches it and rotates.
-///
-/// Cache: in-process LRU of size `cacheCapacity` (default 100) keyed by
-/// (entityType, normalizedQuery). Hits the same Spotify endpoint that
-/// returns ranked search results, so cache hits are exact-query.
 public actor SpotifyResolver {
     public enum ResolveError: Error, CustomStringConvertible {
         case authMissing
@@ -42,8 +26,6 @@ public actor SpotifyResolver {
     public struct Config: Sendable {
         public let baseURL: URL
         public let cacheCapacity: Int
-        /// Curated playlist URIs for mood / genre slots when no Spotify
-        /// search query maps cleanly. Seed table of common moods and genres.
         public let moodPlaylists: [String: String]
         public let genrePlaylists: [String: String]
 
@@ -98,18 +80,12 @@ public actor SpotifyResolver {
         self.accessTokenProvider = accessTokenProvider
     }
 
-    /// Decorate `prediction.slots.uri` with the resolved Spotify URI when
-    /// the intent + slots support it. Returns the input unchanged when
-    /// the prediction is not catalog-shaped (e.g. fast-path, WEBAPP_INTENT,
-    /// CLARIFY, NO_INTENT).
     public func decorate(_ prediction: NluPrediction) async throws -> NluPrediction {
         var pred = prediction
         let intent = prediction.intent
 
-        // CLARIFY / NO_INTENT / fast-path local commands: no catalog lookup.
         guard isCatalogIntent(intent) else { return pred }
 
-        // Mood / genre route to curated playlist tables.
         if let mood = prediction.slots.mood?.lowercased(),
            let uri = config.moodPlaylists[mood] {
             pred.slots.uri = uri
@@ -121,9 +97,6 @@ public actor SpotifyResolver {
             return pred
         }
 
-        // Pick the search type from whichever string slot the LLM populated.
-        // Track-with-artist is the highest-precision catalog query; the
-        // single-slot variants fall back to that slot's type.
         if let track = prediction.slots.track, !track.isEmpty {
             let query = [track, prediction.slots.artist].compactMap { $0 }.joined(separator: " ")
             pred.slots.uri = try await search(entityType: "track", query: query)
@@ -162,7 +135,6 @@ public actor SpotifyResolver {
         }
     }
 
-    /// Run a Spotify Search query and return the top match's URI.
     func search(entityType: String, query: String) async throws -> String {
         let normalized = query.lowercased().trimmingCharacters(in: .whitespaces)
         let cacheKey = "\(entityType):\(normalized)"
@@ -237,5 +209,3 @@ public actor SpotifyResolver {
         }
     }
 }
-
-#endif

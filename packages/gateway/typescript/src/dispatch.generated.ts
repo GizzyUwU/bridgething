@@ -101,6 +101,7 @@ import type {
   PhoneMuteAction,
   PhoneStateReply,
   PlayUri,
+  PlaybackTargets,
   QueueSnapshot,
   QueueUri,
   RecommendationsReply,
@@ -116,6 +117,7 @@ import type {
   TransferAbandon,
   TransferAck,
   TransferFragment,
+  TransferTo,
   Tts,
   TtsCancel,
   TtsEnded,
@@ -315,6 +317,7 @@ export type PlayerInboundHandlers = {
   setRepeat: (deviceId: string, msg: SetRepeat) => void;
   setSpeed: (deviceId: string, msg: SetSpeed) => void;
   setCrossfade: (deviceId: string, msg: SetCrossfade) => void;
+  transferTo: (deviceId: string, msg: TransferTo) => void;
 };
 
 export type PlayerDeviceInboundHandlers = {
@@ -330,6 +333,7 @@ export type PlayerDeviceInboundHandlers = {
   setRepeat: (msg: SetRepeat) => void;
   setSpeed: (msg: SetSpeed) => void;
   setCrossfade: (msg: SetCrossfade) => void;
+  transferTo: (msg: TransferTo) => void;
 };
 
 export type SystemInboundHandlers = {
@@ -1985,6 +1989,18 @@ export class PlayerSurface {
     });
   }
 
+  /** Subscribe to `Player::TransferTo` across all peers. */
+  onTransferTo(handler: (deviceId: string, msg: TransferTo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'transferTo') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Player` variants. */
   subscribe(handlers: PlayerInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2050,6 +2066,10 @@ export class PlayerSurface {
           handlers.setCrossfade?.(event.deviceId, inner.data);
           return;
         }
+        case 'transferTo': {
+          handlers.transferTo?.(event.deviceId, inner.data);
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
           return;
@@ -2082,6 +2102,21 @@ export class PlayerSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'queueChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Player::TargetsChanged` to every connected peer (broadcast). */
+  async targetsChanged(payload: PlaybackTargets, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'targetsChanged', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -5165,6 +5200,19 @@ export class PlayerSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Player::TransferTo` from this peer. */
+  onTransferTo(handler: (msg: TransferTo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'transferTo') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Player` variants from this peer. */
   subscribe(handlers: PlayerDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5231,6 +5279,10 @@ export class PlayerSurfaceForDevice {
           handlers.setCrossfade?.(inner.data);
           return;
         }
+        case 'transferTo': {
+          handlers.transferTo?.(inner.data);
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
           return;
@@ -5255,6 +5307,16 @@ export class PlayerSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'queueChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Player::TargetsChanged` to this peer. */
+  async targetsChanged(payload: PlaybackTargets, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'targetsChanged', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -8155,6 +8217,10 @@ function outerSubscribeGateway(
             innerHandlers.setCrossfade?.(event.deviceId, inner.data);
             return;
           }
+          case 'transferTo': {
+            innerHandlers.transferTo?.(event.deviceId, inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('Player: no handler for inner', inner);
             return;
@@ -8889,6 +8955,10 @@ function outerSubscribeDevice(
           }
           case 'setCrossfade': {
             innerHandlers.setCrossfade?.(inner.data);
+            return;
+          }
+          case 'transferTo': {
+            innerHandlers.transferTo?.(inner.data);
             return;
           }
           default: {

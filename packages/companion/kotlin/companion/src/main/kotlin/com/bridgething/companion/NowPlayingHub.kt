@@ -9,6 +9,7 @@ import com.bridgething.schema.AuthorityClaim
 import com.bridgething.schema.AuthorityRelease
 import com.bridgething.schema.CompanionAuthorityScope
 import com.bridgething.schema.PlaybackState
+import com.bridgething.schema.PlaybackTargets
 import com.bridgething.schema.PlayerState
 import com.bridgething.schema.QueueSnapshot
 import kotlinx.coroutines.CoroutineScope
@@ -16,23 +17,27 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
-/**
- * The single companion-owned now-playing arbiter + emitter. Sources push player
- * snapshots / queues here; the hub is the ONLY caller of `gateway.player.snapshot`,
- * `gateway.player.queueChanged`, and the now-playing authority claim/release.
- */
 class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
     private class SourceState {
         var snapshot: PlayerState? = null
         var appBundle: String = ""
         var hasItem: Boolean = false
+        var wantsVolume: Boolean = false
         var queue: QueueSnapshot? = null
+        var targets: PlaybackTargets? = null
         var seq: Long = 0
     }
 
     private sealed interface Op {
-        data class Player(val sourceId: String, val snapshot: PlayerState, val appBundle: String, val hasItem: Boolean) : Op
+        data class Player(
+            val sourceId: String,
+            val snapshot: PlayerState,
+            val appBundle: String,
+            val hasItem: Boolean,
+            val wantsVolume: Boolean,
+        ) : Op
         data class Queue(val sourceId: String, val queue: QueueSnapshot) : Op
+        data class Targets(val sourceId: String, val targets: PlaybackTargets) : Op
         data class Clear(val sourceId: String) : Op
         object Reconnect : Op
     }
@@ -60,24 +65,32 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
         consumer = null
     }
 
-    override fun submitPlayer(sourceId: String, snapshot: PlayerState, appBundle: String, hasItem: Boolean) {
-        channel.trySend(Op.Player(sourceId, snapshot, appBundle, hasItem))
+    override fun submitPlayer(
+        sourceId: String,
+        snapshot: PlayerState,
+        appBundle: String,
+        hasItem: Boolean,
+        wantsVolume: Boolean,
+    ) {
+        channel.trySend(Op.Player(sourceId, snapshot, appBundle, hasItem, wantsVolume))
     }
 
     override fun submitQueue(sourceId: String, queue: QueueSnapshot) {
         channel.trySend(Op.Queue(sourceId, queue))
     }
 
+    override fun submitTargets(sourceId: String, targets: PlaybackTargets) {
+        channel.trySend(Op.Targets(sourceId, targets))
+    }
+
     override fun clearSource(sourceId: String) {
         channel.trySend(Op.Clear(sourceId))
     }
 
-    /** A device peer (re)connected; the daemon dropped authority, so re-claim + re-emit the current source. */
     fun onConnect() {
         channel.trySend(Op.Reconnect)
     }
 
-    /** Register a source's control surface so inbound transport verbs can route to it when it is audible. */
     fun register(sourceId: String, transport: NowPlayingTransport) {
         transports[sourceId] = transport
     }
@@ -86,8 +99,9 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
         transports.remove(sourceId)
     }
 
-    /** The control surface of the arbitrated current source, or null when nothing is playing / it is unregistered. */
     fun currentTransport(): NowPlayingTransport? = current?.let { transports[it] }
+
+    fun currentSource(): String? = current
 
     private suspend fun handle(op: Op) {
         when (op) {
@@ -96,6 +110,7 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
                 s.snapshot = op.snapshot
                 s.appBundle = op.appBundle
                 s.hasItem = op.hasItem
+                s.wantsVolume = op.wantsVolume
                 s.seq = ++seqCounter
                 emitArbitrated()
             }
@@ -104,6 +119,13 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
                 s.queue = op.queue
                 if (current == null || current == op.sourceId) {
                     runCatching { gateway.player.queueChanged(op.queue) }
+                }
+            }
+            is Op.Targets -> {
+                val s = sources.getOrPut(op.sourceId) { SourceState() }
+                s.targets = op.targets
+                if (current == null || current == op.sourceId) {
+                    runCatching { gateway.player.targetsChanged(op.targets) }
                 }
             }
             is Op.Clear -> {
@@ -130,19 +152,21 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
             return
         }
         val s = sources.getValue(next)
-        if (s.hasItem) claim(s.appBundle) else releaseAll()
+        if (s.hasItem) claim(s.appBundle, s.wantsVolume) else releaseAll()
         s.snapshot?.let { runCatching { gateway.player.snapshot(it) } }
         if (prev != null && next != prev) {
             runCatching { gateway.player.queueChanged(s.queue ?: QueueSnapshot(order = emptyList(), items = emptyList())) }
+            runCatching { gateway.player.targetsChanged(s.targets ?: PlaybackTargets(targets = emptyList())) }
         }
     }
 
     private suspend fun reemitCurrent() {
         val next = current ?: pickCurrent()?.also { current = it } ?: return
         val s = sources[next] ?: return
-        if (s.hasItem) claim(s.appBundle)
+        if (s.hasItem) claim(s.appBundle, s.wantsVolume)
         s.snapshot?.let { runCatching { gateway.player.snapshot(it) } }
         s.queue?.let { runCatching { gateway.player.queueChanged(it) } }
+        s.targets?.let { runCatching { gateway.player.targetsChanged(it) } }
     }
 
     private fun pickCurrent(): String? {
@@ -152,13 +176,17 @@ class NowPlayingHub(private val gateway: BridgethingGateway) : NowPlayingSink {
         return pool.maxByOrNull { it.value.seq }?.key
     }
 
-    private suspend fun claim(appBundle: String) {
+    private suspend fun claim(appBundle: String, wantsVolume: Boolean) {
         val bundleChanged = claimedBundle != appBundle
-        for (scope in NOW_PLAYING_SCOPES) {
+        val want = if (wantsVolume) NOW_PLAYING_SCOPES + CompanionAuthorityScope.Volume else NOW_PLAYING_SCOPES
+        for (scope in want) {
             if (!heldScopes.contains(scope) || bundleChanged) {
                 val sent = runCatching { gateway.authority.claim(AuthorityClaim(scope = scope, appBundle = appBundle)) }.isSuccess
                 if (sent) heldScopes.add(scope)
             }
+        }
+        if (!wantsVolume && heldScopes.remove(CompanionAuthorityScope.Volume)) {
+            runCatching { gateway.authority.release(AuthorityRelease(scope = CompanionAuthorityScope.Volume)) }
         }
         claimedBundle = appBundle
     }

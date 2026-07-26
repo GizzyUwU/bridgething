@@ -1,15 +1,8 @@
-/**
- * Centralised stack route map. Screens import the param-list to type
- * their `navigation` props.
- *
- * Webapp routes carry the target `deviceId` so multi-device install /
- * detail flows route to the correct Car Thing.
- */
 export type RootStackParamList = {
   Setup: { step?: number } | undefined;
   Dashboard: undefined;
   WebappBrowse: { deviceId: string };
-  Store: { deviceId: string };
+  Store: { deviceId: string } | undefined;
   WebappDetail: { deviceId: string; id: string };
   WebappSettings: { deviceId: string; id: string; name: string };
   Settings: undefined;

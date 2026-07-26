@@ -44,13 +44,17 @@ impl CapabilitiesRegistry {
     self.inner.snapshot.read().expect("capabilities lock poisoned").clone()
   }
 
-  pub async fn set_announce(&self, addr: Address, mut caps: GatewayCapabilities) -> WSResult<()> {
+  pub async fn set_announce(&self, addr: Address, mut caps: GatewayCapabilities) -> WSResult<bool> {
     caps.uri_schemes = normalize_schemes(caps.uri_schemes);
-    {
+    let provider = caps.music_provider;
+    let provider_changed = {
       let mut guard = self.inner.announces.write().expect("announces lock poisoned");
-      guard.insert(addr, caps);
-    }
-    self.rebuild_and_broadcast().await
+      guard
+        .insert(addr, caps)
+        .is_none_or(|prev| prev.music_provider != provider)
+    };
+    self.rebuild_and_broadcast().await?;
+    Ok(provider_changed)
   }
 
   pub async fn clear_companion(&self, addr: Address) -> WSResult<()> {
@@ -218,6 +222,7 @@ mod tests {
       net_ws: true,
       audio_tts: true,
       lyrics: true,
+      playback_targets: true,
     };
     let caps = caps_with(vec!["spotify:", "Apple-Music"], claimed);
     let _ = reg.set_announce(addr, caps).await;

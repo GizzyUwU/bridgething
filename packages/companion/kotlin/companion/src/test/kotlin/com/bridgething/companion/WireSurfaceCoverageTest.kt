@@ -29,7 +29,6 @@ import org.junit.jupiter.api.assertDoesNotThrow
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
-/** coverage ratchet: every inbound request must be probed or classified; every command/event must be accounted for. a new manifest entry fails until consciously classified. */
 class WireSurfaceCoverageTest {
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -42,7 +41,7 @@ class WireSurfaceCoverageTest {
             volume = NoOpVolumeSource,
             audio = NoOpAudioBackend,
         )
-        companion.setActive(FakeGlue())
+        companion.attach(FakeGlue())
         companion.start()
         val driver = WireDriver(adapter)
         driver.start(scope)
@@ -50,7 +49,6 @@ class WireSurfaceCoverageTest {
         return companion to driver
     }
 
-    // a reply of any kind proves the dispatcher exists; absence within the timeout is the silent-hang bug
     private val probes: Map<String, BridgeToGatewayMsgData> = mapOf(
         "asset.request" to BridgeToGatewayMsgData.Asset(BridgeToGatewayAssetMsg.Request(AssetRequest(id = "probe", requestId = UUID.randomUUID()))),
         "library.browse" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.Browse(LibraryBrowseRequest(nodeId = null, limit = 1u, offset = 0u))),
@@ -60,13 +58,11 @@ class WireSurfaceCoverageTest {
         "library.favoritesList" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.FavoritesList(LibraryFavoritesListRequest(limit = 1u, offset = 0u))),
         "library.favoritesContains" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.FavoritesContains(LibraryFavoritesContainsRequest(uris = listOf("x")))),
         "lyrics.get" to BridgeToGatewayMsgData.Lyrics(BridgeToGatewayLyricsMsg.Get(LyricsRequest(track = TrackIdentity(artist = "a", track = "b")))),
-        // closed port refuses fast, giving an ErrorReply that proves the dispatcher answers
         "tunnel.open" to BridgeToGatewayMsgData.Tunnel(BridgeToGatewayTunnelMsg.Open(TunnelOpen(tunnelId = UUID.randomUUID(), host = "127.0.0.1", port = 1u))),
         "phone.stateGet" to BridgeToGatewayMsgData.Phone(BridgeToGatewayPhoneMsg.StateGet),
         "system.keepalive" to BridgeToGatewayMsgData.System(BridgeToGatewaySystemMsg.Keepalive(KeepalivePing(seq = 0u))),
     )
 
-    // proven to reply but require real I/O outside this hermetic ratchet
     private val handledElsewhere: Set<String> = setOf(
         "net.fetch",
         "geo.getOnce",
@@ -97,12 +93,12 @@ class WireSurfaceCoverageTest {
         companion.stop()
     }
 
-    // fire-and-forget; ratchet is completeness only -- a new id must be consciously listed here
     private val accountedCommandsAndEvents: Set<String> = setOf(
         // player
         "player.play", "player.pause", "player.queue", "player.resume",
         "player.seekTo", "player.setCrossfade", "player.setRepeat", "player.setShuffle",
         "player.setSpeed", "player.skipNext", "player.skipPrev", "player.skipToIndex",
+        "player.transferTo",
         // library favorites
         "library.favoritesSet", "library.favoritesSetMany", "library.favoritesToggle",
         // geo

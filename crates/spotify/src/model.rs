@@ -78,11 +78,25 @@ pub struct Queue {
   pub next: Vec<Track>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Enum)]
+pub enum DeviceKind {
+  #[default]
+  Unknown,
+  Phone,
+  Tablet,
+  Computer,
+  Speaker,
+  Tv,
+  GameConsole,
+  Automobile,
+  Wearable,
+}
+
 #[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct Device {
   pub id: String,
   pub name: String,
-  pub kind: String,
+  pub kind: DeviceKind,
   pub is_active: bool,
   pub volume: f32,
 }
@@ -305,6 +319,24 @@ pub fn queue(cluster: &Cluster) -> Queue {
   }
 }
 
+fn device_kind(kind: DeviceType) -> DeviceKind {
+  match kind {
+    DeviceType::SMARTPHONE => DeviceKind::Phone,
+    DeviceType::TABLET => DeviceKind::Tablet,
+    DeviceType::COMPUTER | DeviceType::CHROMEBOOK => DeviceKind::Computer,
+    DeviceType::SPEAKER
+    | DeviceType::AVR
+    | DeviceType::AUDIO_DONGLE
+    | DeviceType::CAST_AUDIO
+    | DeviceType::HOME_THING => DeviceKind::Speaker,
+    DeviceType::TV | DeviceType::STB | DeviceType::CAST_VIDEO => DeviceKind::Tv,
+    DeviceType::GAME_CONSOLE => DeviceKind::GameConsole,
+    DeviceType::AUTOMOBILE | DeviceType::CAR_THING => DeviceKind::Automobile,
+    DeviceType::SMARTWATCH => DeviceKind::Wearable,
+    DeviceType::UNKNOWN | DeviceType::UNKNOWN_SPOTIFY | DeviceType::OBSERVER => DeviceKind::Unknown,
+  }
+}
+
 pub fn devices(cluster: &Cluster, me: &str) -> Vec<Device> {
   let mut out = Vec::new();
   for (id, info) in &cluster.device {
@@ -314,7 +346,7 @@ pub fn devices(cluster: &Cluster, me: &str) -> Vec<Device> {
     out.push(Device {
       id: id.clone(),
       name: info.name.clone(),
-      kind: format!("{:?}", info.device_type.enum_value_or_default()),
+      kind: device_kind(info.device_type.enum_value_or_default()),
       is_active: *id == cluster.active_device_id,
       volume: if info.volume > 0 {
         info.volume as f32 / 65535.0

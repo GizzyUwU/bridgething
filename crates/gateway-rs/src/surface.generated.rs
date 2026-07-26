@@ -218,6 +218,12 @@ impl<'a> PlayerSurface<'a> {
   pub async fn queue_changed(&self, payload: QueueSnapshot) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePlayerMsgEvent::QueueChanged(payload)).await
   }
+  pub async fn targets_changed(&self, payload: PlaybackTargets) -> Result<(), SdkError> {
+    self
+      .0
+      .event(GatewayToBridgePlayerMsgEvent::TargetsChanged(payload))
+      .await
+  }
   pub async fn request_spotify_wake(&self) -> Result<(), SdkError> {
     self
       .0

@@ -156,41 +156,24 @@ impl Ancs {
   }
 
   pub async fn on_notification_source(&mut self, frame: &[u8], bus: &WireEventBus) {
-    if frame.len() < 8 {
-      tracing::trace!(len = frame.len(), "ANCS NS frame too short; dropping");
-      return;
+    match classify_ns_frame(frame) {
+      NsAction::Removed(uid) => {
+        let event = BridgeToClientNotificationsMsgEvent::Removed(NotificationRemoved {
+          id: format!("{ANCS_ID_PREFIX}{uid}"),
+          reason: DismissReason::RemoteDismissed,
+        });
+        let _ = bus.broadcast_event(event).await;
+      }
+      NsAction::Fetch(pending) => {
+        if self.pending.len() >= PENDING_QUEUE_CAP
+          && let Some(d) = self.pending.pop_front()
+        {
+          tracing::warn!(dropped_uid = d.uid, "ANCS pending queue full; dropped oldest");
+        }
+        self.pending.push_back(pending);
+      }
+      NsAction::Ignore => {}
     }
-    let event_id = frame[0];
-    let flags = frame[1];
-    let category = frame[2];
-    let uid = u32::from_le_bytes([frame[4], frame[5], frame[6], frame[7]]);
-
-    if event_id == EVENT_REMOVED {
-      let event = BridgeToClientNotificationsMsgEvent::Removed(NotificationRemoved {
-        id: format!("{ANCS_ID_PREFIX}{uid}"),
-        reason: DismissReason::RemoteDismissed,
-      });
-      let _ = bus.broadcast_event(event).await;
-      return;
-    }
-
-    if event_id != EVENT_ADDED && event_id != EVENT_MODIFIED {
-      tracing::trace!(event_id, "ANCS NS frame with unknown EventID; dropping");
-      return;
-    }
-
-    if self.pending.len() >= PENDING_QUEUE_CAP
-      && let Some(d) = self.pending.pop_front()
-    {
-      tracing::warn!(dropped_uid = d.uid, "ANCS pending queue full; dropped oldest");
-    }
-    self.pending.push_back(PendingNotification {
-      uid,
-      event_id,
-      flags,
-      category,
-      attempts: 0,
-    });
   }
 
   pub async fn on_data_source(&mut self, value: &[u8], bus: &WireEventBus) -> bool {
@@ -277,13 +260,51 @@ async fn locate_characteristics(service: &Service) -> AncsResult<AncsCharacteris
   })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingNotification {
   uid: u32,
   event_id: u8,
   flags: u8,
   category: u8,
   attempts: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NsAction {
+  Removed(u32),
+  Fetch(PendingNotification),
+  Ignore,
+}
+
+fn classify_ns_frame(frame: &[u8]) -> NsAction {
+  if frame.len() < 8 {
+    tracing::trace!(len = frame.len(), "ANCS NS frame too short; dropping");
+    return NsAction::Ignore;
+  }
+  let event_id = frame[0];
+  let flags = frame[1];
+  let category = frame[2];
+  let uid = u32::from_le_bytes([frame[4], frame[5], frame[6], frame[7]]);
+
+  if event_id == EVENT_REMOVED {
+    return NsAction::Removed(uid);
+  }
+  if event_id != EVENT_ADDED && event_id != EVENT_MODIFIED {
+    tracing::trace!(event_id, "ANCS NS frame with unknown EventID; dropping");
+    return NsAction::Ignore;
+  }
+  if flags & FLAG_PRE_EXISTING != 0 {
+    tracing::trace!(uid, "ANCS pre-existing notification; dropping");
+    return NsAction::Ignore;
+  }
+
+  NsAction::Fetch(PendingNotification {
+    uid,
+    event_id,
+    flags,
+    category,
+    attempts: 0,
+  })
 }
 
 fn build_get_attributes(uid: u32) -> Vec<u8> {
@@ -400,7 +421,6 @@ async fn emit_notification(bus: &WireEventBus, meta: &PendingNotification, field
   let flags = NotificationFlags {
     silent: meta.flags & FLAG_SILENT != 0,
     important: meta.flags & FLAG_IMPORTANT != 0,
-    pre_existing: meta.flags & FLAG_PRE_EXISTING != 0,
   };
   let positive_action = (meta.flags & FLAG_POSITIVE_ACTION != 0).then(|| libbridgething::NotificationAction {
     label: fields.positive_label.unwrap_or_else(|| "OK".to_string()),
@@ -484,6 +504,38 @@ mod tests {
     }
     r.extend(attr(ATTR_DATE, b"20260526T134500"));
     r
+  }
+
+  fn ns_frame(event_id: u8, flags: u8, uid: u32) -> Vec<u8> {
+    let mut f = vec![event_id, flags, 4, 1];
+    f.extend_from_slice(&uid.to_le_bytes());
+    f
+  }
+
+  #[test]
+  fn pre_existing_notifications_are_never_fetched() {
+    for event_id in [EVENT_ADDED, EVENT_MODIFIED] {
+      let frame = ns_frame(event_id, FLAG_PRE_EXISTING | FLAG_IMPORTANT, 11);
+      assert_eq!(classify_ns_frame(&frame), NsAction::Ignore);
+    }
+  }
+
+  #[test]
+  fn newly_added_notifications_are_fetched() {
+    let action = classify_ns_frame(&ns_frame(EVENT_ADDED, FLAG_IMPORTANT, 12));
+    let NsAction::Fetch(pending) = action else {
+      panic!("a notification posted after connect must be fetched");
+    };
+    assert_eq!(pending.uid, 12);
+    assert_eq!(pending.event_id, EVENT_ADDED);
+  }
+
+  #[test]
+  fn removals_pass_through_regardless_of_flags() {
+    assert_eq!(
+      classify_ns_frame(&ns_frame(EVENT_REMOVED, FLAG_PRE_EXISTING, 13)),
+      NsAction::Removed(13)
+    );
   }
 
   #[test]

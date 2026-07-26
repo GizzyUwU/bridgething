@@ -1,14 +1,5 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import Foundation
 
-/// Vertical fast-path matcher on the ASR transcript. Closed regex on the
-/// 25 fast-path intents; emits an intent + slots when matched, returns nil
-/// for fall-through to the LLM stage.
-///
-/// Design invariant: FALSE POSITIVES are catastrophic, so rules are
-/// conservative and fall through on any content beyond the closed command.
 public enum NluFastPath {
     static let fillers: Set<String> = [
         "uh", "uhh", "uhhh", "uhhhh", "um", "umm", "hmm", "hmmm",
@@ -31,8 +22,6 @@ public enum NluFastPath {
         public let slots: NluMutableSlots
     }
 
-    /// Match an ASR transcript against the fast-path rule set. Returns nil
-    /// for fall-through.
     public static func match(_ transcript: String) -> Hit? {
         let (raw, tokens) = normalize(transcript)
         guard !tokens.isEmpty else { return nil }
@@ -95,7 +84,7 @@ public enum NluFastPath {
         guard tokens.contains("preset") else { return nil }
         let leadOk: Bool = {
             if let first = tokens.first, ["play", "load", "switch", "go", "select"].contains(first) { return true }
-            if tokens.prefix(2).map(String.init) == ["go", "to"] { return true }
+            if Array(tokens.prefix(2)) == ["go", "to"] { return true }
             return false
         }()
         guard leadOk else { return nil }
@@ -357,7 +346,7 @@ public enum NluFastPath {
         return nil
     }
 
-    static let rules: [([String], String) -> Hit?] = [
+    static let rules: [@Sendable ([String], String) -> Hit?] = [
         ruleSaveToPreset,
         rulePlayPreset,
         ruleVolumeAbsolute,
@@ -379,5 +368,3 @@ public enum NluFastPath {
         rulePlayBare,
     ]
 }
-
-#endif

@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.time.Duration.Companion.seconds
 
-/** companion dispatch: drives wire requests through [BridgethingCompanion] + [FakeGlue] at the [FakeAdapter] seam and asserts response frames. */
 class CompanionDispatchTest {
     private suspend fun boot(scope: CoroutineScope, glue: FakeGlue?): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -37,7 +36,7 @@ class CompanionDispatchTest {
             volume = NoOpVolumeSource,
             audio = NoOpAudioBackend,
         )
-        if (glue != null) companion.setActive(glue)
+        if (glue != null) companion.attach(glue)
         companion.start()
         val driver = WireDriver(adapter)
         driver.start(scope)
@@ -115,7 +114,6 @@ class CompanionDispatchTest {
         driver.send(BridgeToGatewayMsgData.Version(nicknameTestMeta(nickname = null)), MsgMeta.Event)
         withTimeout(5.seconds) { while (ota.meta(driver.deviceId) == null) delay(20) }
 
-        // the announce and nickname events ride independent collectors; the announce must land first.
         driver.send(
             BridgeToGatewayMsgData.System(
                 BridgeToGatewaySystemMsg.DeviceNicknameChanged(DeviceNicknameReply(nickname = "garage thing")),

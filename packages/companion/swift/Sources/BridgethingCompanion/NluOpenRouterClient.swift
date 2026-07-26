@@ -1,19 +1,9 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
 
-/// Minimal OpenRouter chat-completions client for the voice-NLU LLM
-/// stage. Issues a single grammar-constrained completion against a model
-/// (default: Gemma-4-26B-A4B-IT) and returns the parsed JSON. Pure NLU:
-/// no streaming, no tool-use, no retries.
-///
-/// `responseFormat` carries a strict-grammar schema that keeps the
-/// model's output to the closed intent enum.
 public actor NluOpenRouterClient {
     public enum ClientError: Error, CustomStringConvertible {
         case missingApiKey
@@ -33,11 +23,9 @@ public actor NluOpenRouterClient {
 
     public struct Completion: Sendable {
         public let text: String
-        public let usage: [String: Any]?
 
-        public init(text: String, usage: [String: Any]? = nil) {
+        public init(text: String) {
             self.text = text
-            self.usage = usage
         }
     }
 
@@ -111,9 +99,6 @@ public actor NluOpenRouterClient {
         else {
             throw ClientError.invalidResponse(reason: "missing choices[0].message.content")
         }
-        let usage = json["usage"] as? [String: Any]
-        return Completion(text: content, usage: usage)
+        return Completion(text: content)
     }
 }
-
-#endif

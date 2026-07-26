@@ -16,6 +16,8 @@ import com.bridgething.schema.LibraryItem
 import com.bridgething.schema.LibraryScope as WireLibraryScope
 import com.bridgething.schema.LibrarySearchRequest
 import com.bridgething.schema.PlaybackState
+import com.bridgething.schema.PlaybackTargetKind
+import com.bridgething.schema.TransferTo as WireTransferTo
 import com.bridgething.schema.BrowseEntry
 import com.bridgething.schema.CompanionAuthorityScope
 import com.bridgething.glue.GlueAuthState
@@ -41,6 +43,7 @@ import uniffi.spotify.BrowseItem as SpBrowseItem
 import uniffi.spotify.BrowsePage as SpBrowsePage
 import uniffi.spotify.Device as SpDevice
 import uniffi.spotify.DeviceFlow as SpDeviceFlow
+import uniffi.spotify.DeviceKind as SpDeviceKind
 import uniffi.spotify.LibraryScope as SpLibraryScope
 import uniffi.spotify.Observer as SpObserver
 import uniffi.spotify.PlayerState as SpPlayerState
@@ -53,12 +56,6 @@ import uniffi.spotify.SpotifyClientInterface
 import uniffi.spotify.Track as SpTrack
 import uniffi.spotify.TokenStore as SpTokenStore
 
-/**
- * drives the real SpotifyGlue over a fake client + the in-memory wire,
- * asserting the reduced-delta -> gateway-wire mapping, authority claim (android always
- * claims, even on a remote speaker), and the queue push. no network/native; the dealer firehose is injected via the
- * captured Observer.
- */
 class SpotifyGlueDispatchTest {
     private class FakeTokenStore(private var refresh: String?) : SpTokenStore {
         override fun loadRefreshToken(): String? = refresh
@@ -110,7 +107,8 @@ class SpotifyGlueDispatchTest {
         }
         override suspend fun activeDeviceVolumePercent(): Double? = volume
         override suspend fun queueUri(uri: String) {}
-        override suspend fun transfer(deviceId: String) {}
+        val transferCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+        override suspend fun transfer(deviceId: String) { transferCalls.add(deviceId) }
         override suspend fun play(uri: String, skipToUri: String?) { lastPlay = uri to skipToUri }
         override suspend fun product(): SpProductState = productState
         @Volatile var lastRootBrowse: Pair<UInt?, UInt?>? = null
@@ -171,7 +169,7 @@ class SpotifyGlueDispatchTest {
             volume = NoOpVolumeSource,
             audio = NoOpAudioBackend,
         )
-        companion.setActive(glue)
+        companion.attach(glue)
         companion.start()
         if (autoResume != null) companion.setDeviceAutoResume("carthing-test", autoResume)
         val driver = WireDriver(adapter)
@@ -229,7 +227,7 @@ class SpotifyGlueDispatchTest {
         assertEquals(2, reply.data.result.entries.size)
         val first = (reply.data.result.entries.first() as BrowseEntry.Item).data as LibraryItem.Track
         assertEquals("Song", first.data.name)
-        assertFalse(first.data.image_id.isEmpty(), "track art id should be wrapped")
+        assertFalse(first.data.imageId.isEmpty(), "track art id should be wrapped")
         h.companion.stop()
     }
 
@@ -346,7 +344,6 @@ class SpotifyGlueDispatchTest {
     @Test
     fun `companion connect defaults to aggressive resume`() = runBlocking {
         val fake = FakeClient()
-        // pref left absent: the companion's boot-time peer connect must reconcile on its own.
         val h = boot(this, fake, autoResume = null)
         waitFor("companion-driven connect resume") { fake.resumeOnConnectCalls == 1 }
         h.companion.stop()
@@ -394,6 +391,75 @@ class SpotifyGlueDispatchTest {
     }
 
     @Test
+    fun `device push sends targetsChanged`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onDevices(
+            listOf(
+                device("speaker", "Kitchen", SpDeviceKind.SPEAKER, active = true, volume = 0.4f),
+                device("laptop", "Desk", SpDeviceKind.COMPUTER, active = false, volume = 0f),
+            ),
+        )
+
+        val frame = h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.TargetsChanged
+        }
+        val targets =
+            ((frame.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.TargetsChanged).data.targets
+        assertEquals(listOf("speaker", "laptop"), targets.map { it.id })
+        assertEquals(PlaybackTargetKind.Speaker, targets[0].kind, "the protobuf device type maps to a closed wire kind")
+        assertEquals(40u, targets[0].volumePercent)
+        assertTrue(targets[0].isActive)
+        assertNull(targets[1].volumePercent, "an endpoint reporting no volume must stay null, not zero")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `remote playback names the active target on the snapshot`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onDevices(listOf(device("speaker", "Kitchen", SpDeviceKind.SPEAKER, active = true, volume = 0.4f)))
+        h.observer()!!.onPlayer(state(npTrack("spotify:track:1", "Song"), remote = true))
+
+        val frame = h.driver.waitOutbound(20.seconds) {
+            val snap = (it.data as? GatewayToBridgeMsgData.Player)?.data as? GatewayToBridgePlayerMsg.Snapshot
+            snap?.data?.target != null
+        }
+        val snap = ((frame.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
+        assertEquals("speaker", snap.target?.id)
+        assertEquals("Kitchen", snap.target?.name, "the readout resolves the name off the cached cluster list")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `local playback leaves the target unset`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onDevices(listOf(device("speaker", "Kitchen", SpDeviceKind.SPEAKER, active = false, volume = 0.4f)))
+        h.observer()!!.onPlayer(state(npTrack("spotify:track:1", "Song"), remote = false))
+
+        val frame = h.driver.waitOutbound(20.seconds) {
+            val snap = (it.data as? GatewayToBridgeMsgData.Player)?.data as? GatewayToBridgePlayerMsg.Snapshot
+            snap?.data?.track != null
+        }
+        val snap = ((frame.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
+        assertNull(snap.target, "playing on the phone itself is not a remote endpoint")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `transferTo forwards to the client`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+
+        h.driver.send(
+            BridgeToGatewayMsgData.Player(BridgeToGatewayPlayerMsg.TransferTo(WireTransferTo(targetId = "speaker"))),
+        )
+        waitFor("transfer") { fake.transferCalls == listOf("speaker") }
+        h.companion.stop()
+    }
+
+    @Test
     fun `queue push sends queueChanged`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
@@ -412,7 +478,6 @@ class SpotifyGlueDispatchTest {
     fun `peer reconnect re-syncs the held queue even with no now-playing track`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
-        // seed a held queue with no player push, so the cached now-playing track is null.
         h.observer()!!.onQueue(SpQueue(previous = emptyList(), current = null, next = listOf(npTrack("spotify:track:2", "Next"))))
         h.driver.waitOutbound(20.seconds) {
             (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.QueueChanged
@@ -575,6 +640,9 @@ class SpotifyGlueDispatchTest {
             album = SpAlbum(uri = "spotify:album:1", name = "Album", imageId = "ab67616d00001e02deadbeef"),
             durationMs = 1000u, imageId = "ab67616d00001e02deadbeef", isEpisode = false, saved = saved, queued = false,
         )
+
+        fun device(id: String, name: String, kind: SpDeviceKind, active: Boolean, volume: Float) =
+            SpDevice(id = id, name = name, kind = kind, isActive = active, volume = volume)
 
         fun state(t: SpTrack, remote: Boolean = false) = SpPlayerState(
             track = t, contextUri = "spotify:playlist:1", contextName = "Ctx", isPaused = false,

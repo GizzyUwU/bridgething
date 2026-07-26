@@ -342,6 +342,44 @@ public actor OtaService {
 
     // MARK: - webapp install
 
+    public func installWebappFromUrl(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        url: URL,
+        sha256: String,
+        size: UInt64,
+        provenance: String?
+    ) async -> WebappInstallResult {
+        let bundle: URL
+        do {
+            bundle = try await downloadIfNeeded(
+                url: url,
+                into: webappCacheDirectory(),
+                filename: "webapp",
+                asset: url.lastPathComponent,
+                expected: OtaArtifactDigest(size: size, sha256: sha256),
+                progress: nil
+            )
+        } catch {
+            return .failed(reason: "bundle download failed: \(error.localizedDescription)")
+        }
+
+        let result = await installWebapp(
+            gateway: gateway,
+            deviceId: deviceId,
+            bundlePath: bundle,
+            provenance: provenance
+        )
+        try? FileManager.default.removeItem(at: bundle)
+        return result
+    }
+
+    private func webappCacheDirectory() -> URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return base.appendingPathComponent("bridgething-webapp-bundles", isDirectory: true)
+    }
+
     public func installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,

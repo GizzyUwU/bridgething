@@ -2,21 +2,22 @@ import { Text, View } from 'react-native';
 
 import { useSession } from '../lib/session';
 
-/** Shown while the active provider is signed in but its API is degraded
- *  (rate-limited or unreachable). The provider still reads as connected;
- *  this just makes the degraded state visible instead of silently failing. */
 export function ServiceHealthBanner() {
-  const health = useSession(s => s.serviceHealth);
-  if (health.kind === 'ok') return null;
+  const providers = useSession(s => s.providers);
+  const degraded = providers.find(
+    p => p.connected && p.serviceHealth.kind !== 'ok',
+  );
+  if (!degraded) return null;
+  const health = degraded.serviceHealth;
 
   const message =
     health.kind === 'rateLimited'
-      ? `Spotify is rate-limiting requests${
+      ? `${degraded.displayName} is rate-limiting requests${
           health.retryAfterSeconds
             ? ` - retrying in about ${Math.ceil(health.retryAfterSeconds)}s`
             : ' - retrying shortly'
         }.`
-      : 'Spotify is unreachable right now - retrying.';
+      : `${degraded.displayName} is unreachable right now - retrying.`;
 
   return (
     <View

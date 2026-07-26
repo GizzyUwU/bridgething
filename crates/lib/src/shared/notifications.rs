@@ -43,9 +43,9 @@ pub struct NotificationApp {
 }
 
 /// ANCS-shaped flags. `silent` mirrors the iOS "do not surface
-/// audibly" hint, `important` is the high-importance flag, and
-/// `pre_existing` is true for notifications that arrived before the
-/// daemon connected (replayed by the companion on first sync).
+/// audibly" hint and `important` is the high-importance flag. Only
+/// notifications posted while the daemon is connected are surfaced, so
+/// there is no pre-existing/backfill marker.
 #[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +53,6 @@ pub struct NotificationApp {
 pub struct NotificationFlags {
   pub silent: bool,
   pub important: bool,
-  pub pre_existing: bool,
 }
 
 /// One ANCS-style action slot. `label` is the gateway-localized prompt

@@ -9,7 +9,6 @@
     "typecheck": "turbo run typecheck",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "publish:packages": "bun scripts/publish-packages.ts",
-    "example:node-dev": "cd packages/examples/node-dev && bun run dev",
     "mobile": "cd mobile && bun run"
   },
   "devDependencies": {
@@ -36,7 +35,8 @@
     "crates/lib",
     "packages/*",
     "packages/gateway/*",
-    "packages/examples/*",
+    "packages/webapps/builtin/*",
+    "packages/webapps/catalog/*",
     "mobile"
   ],
   "patchedDependencies": {

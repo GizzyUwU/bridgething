@@ -28,7 +28,7 @@ class ConnectResumeGateTest {
             audio = NoOpAudioBackend,
         )
         companion.autoResumeCooldownMs = cooldownMs
-        companion.setActive(glue)
+        companion.attach(glue)
         companion.start()
         return companion to adapter
     }

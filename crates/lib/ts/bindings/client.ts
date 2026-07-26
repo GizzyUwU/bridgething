@@ -29,6 +29,7 @@ import type {
   LogEntry,
   LogLevel,
   LogSource,
+  Lyrics,
   NetError,
   NetFetchRequest,
   NetFetchResponse,
@@ -42,6 +43,7 @@ import type {
   PhoneError,
   PhoneState,
   PlayContext,
+  PlaybackTarget,
   PlayerError,
   PlayerState,
   Position,
@@ -258,7 +260,8 @@ export type BridgeToClientHardwareMsg =
 
 /**
  * Daemon -> webapp replies and events for the library surface. `BrowseReply`, `SearchReply`,
- * `RecommendationsReply`, `FavoritesListReply`, and `FavoritesContainsReply` answer the
+ * `RecommendationsReply`, `ResolveContextReply`, `FavoritesListReply`, and
+ * `FavoritesContainsReply` answer the
  * matching `ClientToBridgeLibraryMsg` request; `LibraryErrorReply` replaces the reply on
  * failure. `FavoriteChanged` is a live event broadcast to every connected webapp whenever a
  * favorite's status changes.
@@ -267,10 +270,18 @@ export type BridgeToClientLibraryMsg =
   | { event: 'browseReply'; data: LibraryBrowseReply }
   | { event: 'searchReply'; data: LibrarySearchReply }
   | { event: 'recommendationsReply'; data: LibraryRecommendationsReply }
+  | { event: 'resolveContextReply'; data: LibraryResolveContextReply }
   | { event: 'favoritesListReply'; data: LibraryFavoritesListReply }
   | { event: 'favoritesContainsReply'; data: LibraryFavoritesContainsReply }
   | { event: 'libraryErrorReply'; data: LibraryErrorReply }
   | { event: 'favoriteChanged'; data: FavoriteChanged };
+
+/**
+ * Daemon -> webapp lyrics replies.
+ */
+export type BridgeToClientLyricsMsg =
+  | { event: 'lyricsReply'; data: LyricsReply }
+  | { event: 'lyricsErrorReply'; data: LyricsErrorReply };
 
 /**
  * bridgething -> client
@@ -290,6 +301,7 @@ export type BridgeToClientMsgData =
   | { type: 'geo'; data: BridgeToClientGeoMsg }
   | { type: 'hardware'; data: BridgeToClientHardwareMsg }
   | { type: 'library'; data: BridgeToClientLibraryMsg }
+  | { type: 'lyrics'; data: BridgeToClientLyricsMsg }
   | { type: 'net'; data: BridgeToClientNetMsg }
   | { type: 'notifications'; data: BridgeToClientNotificationsMsg }
   | { type: 'peer'; data: BridgeToClientPeerMsg }
@@ -366,8 +378,10 @@ export type BridgeToClientPlayerMsg =
   | { event: 'snapshot'; data: PlayerStateReply }
   | { event: 'delta'; data: NowPlayingUpdate }
   | { event: 'queueChanged'; data: PlayerQueueReply }
+  | { event: 'targetsChanged'; data: PlayerTargetsReply }
   | { event: 'stateReply'; data: PlayerStateReply }
   | { event: 'queueReply'; data: PlayerQueueReply }
+  | { event: 'targetsReply'; data: PlayerTargetsReply }
   | { event: 'errorReply'; data: PlayerErrorReply };
 
 /**
@@ -524,8 +538,9 @@ export type ClientToBridgeHardwareMsg =
 
 /**
  * Webapp -> daemon library surface: browse/search/recommend across the connected gateway's
- * library, and read or mutate favorites. `Browse`, `Search`, `Recommendations`,
- * `FavoritesList`, and `FavoritesContains` are request/reply and fail with
+ * library, resolve a context uri, and read or mutate favorites. `Browse`, `Search`,
+ * `Recommendations`, `ResolveContext`, `FavoritesList`, and `FavoritesContains` are
+ * request/reply and fail with
  * `LibraryErrorReply` when no gateway is connected. `FavoritesToggle`, `FavoritesSet`, and
  * `FavoritesSetMany` are fire-and-forget commands with no completion reply; if no gateway is
  * connected they are silently dropped, and on success their effect surfaces later as a
@@ -535,11 +550,19 @@ export type ClientToBridgeLibraryMsg =
   | { event: 'browse'; data: LibraryBrowse }
   | { event: 'search'; data: LibrarySearch }
   | { event: 'recommendations'; data: LibraryRecommendations }
+  | { event: 'resolveContext'; data: LibraryResolveContext }
   | { event: 'favoritesList'; data: LibraryFavoritesList }
   | { event: 'favoritesContains'; data: LibraryFavoritesContains }
   | { event: 'favoritesToggle'; data: FavoritesToggle }
   | { event: 'favoritesSet'; data: FavoritesSet }
   | { event: 'favoritesSetMany'; data: FavoritesSetMany };
+
+/**
+ * Webapp -> daemon lyrics surface. Request/reply; check `Capabilities::available.lyrics`
+ * before offering a lyrics view, since a gateway that cannot supply them answers with an
+ * error rather than empty lyrics.
+ */
+export type ClientToBridgeLyricsMsg = { event: 'get' };
 
 /**
  * client -> bridgething
@@ -559,6 +582,7 @@ export type ClientToBridgeMsgData =
   | { type: 'geo'; data: ClientToBridgeGeoMsg }
   | { type: 'hardware'; data: ClientToBridgeHardwareMsg }
   | { type: 'library'; data: ClientToBridgeLibraryMsg }
+  | { type: 'lyrics'; data: ClientToBridgeLyricsMsg }
   | { type: 'net'; data: ClientToBridgeNetMsg }
   | { type: 'notifications'; data: ClientToBridgeNotificationsMsg }
   | { type: 'phone'; data: ClientToBridgePhoneMsg }
@@ -632,8 +656,10 @@ export type ClientToBridgePlayerMsg =
   | { event: 'setRepeat'; data: SetRepeat }
   | { event: 'setSpeed'; data: SetSpeed }
   | { event: 'setCrossfade'; data: SetCrossfade }
+  | { event: 'transferTo'; data: TransferTo }
   | { event: 'stateGet' }
-  | { event: 'queueGet' };
+  | { event: 'queueGet' }
+  | { event: 'targetsGet' };
 
 /**
  * Webapp -> daemon KV storage surface (`client.store`). Storage is
@@ -1011,6 +1037,19 @@ export type LibraryRecommendations = {
 export type LibraryRecommendationsReply = { result: RecommendationsResult };
 
 /**
+ * Payload for the `resolveContext` request: turn a context uri into something renderable.
+ * The uri a webapp holds is usually `PlayerState::context`, so this is what backs a
+ * "playing from <playlist>" line without having to browse for the containing entity.
+ */
+export type LibraryResolveContext = { uri: string };
+
+/**
+ * Reply to `resolveContext`. Every field is best-effort: a gateway that recognises the uri but
+ * cannot cheaply name it answers with `None`s rather than failing the request.
+ */
+export type LibraryResolveContextReply = { name: string | null; artworkId: string | null; subtitle: string | null };
+
+/**
  * Payload for the `search` request: free-text search across the connected gateway's library.
  */
 export type LibrarySearch = {
@@ -1097,6 +1136,40 @@ export type LogsTailReply = {
  * or malformed tokens are silently ignored rather than surfacing an error.
  */
 export type LogsUnsubscribe = { token: string };
+
+/**
+ * Why a lyrics lookup could not be answered. Only `LookupFailed` is worth retrying for the
+ * same track; the rest tell a webapp to stop asking until something changes.
+ */
+export type LyricsError =
+  | { type: 'noGateway' }
+  | { type: 'notSupported' }
+  | { type: 'nothingPlaying' }
+  | { type: 'trackUnidentifiable' }
+  | { type: 'lookupFailed'; data: { reason: string } };
+
+/**
+ * Domain-error reply to `LyricsGet`.
+ */
+export type LyricsErrorReply = { error: LyricsError };
+
+/**
+ * Successful reply to `LyricsGet`. `lyrics` is `None` when the lookup succeeded but the
+ * provider has nothing for this track, which is a normal answer rather than an error.
+ */
+export type LyricsReply = {
+  /**
+   * Uri of the track these lyrics were resolved for. The request carries no track, so a
+   * webapp compares this against its own now-playing state to discard a reply that landed
+   * after the track moved on. `None` when the playing item carries no uri.
+   */
+  trackUri: string | null;
+  /**
+   * Stable per-item id for the same comparison when there is no uri, as on iAP2 phone media.
+   */
+  trackPersistentId: string | null;
+  lyrics: Lyrics | null;
+};
 
 /**
  * Payload for `voice.muteMic`.
@@ -1385,6 +1458,14 @@ export type PlayerStateReply = {
 };
 
 /**
+ * Response to `targetsGet`, also carried by the `TargetsChanged` event.
+ * Empty when no companion is attached, or when the provider has no
+ * remote endpoint concept - check `capabilities.available.playbackTargets`
+ * to tell "none right now" from "never".
+ */
+export type PlayerTargetsReply = { targets: Array<PlaybackTarget> };
+
+/**
  * Payload for the `queue` command.
  */
 export type QueueUri = {
@@ -1511,6 +1592,16 @@ export type StorageResponse = {
  * the `Changed` event payload.
  */
 export type TimeSnapshot = { time: TimeInfo };
+
+/**
+ * Payload for `transferTo`: move playback to a remote endpoint.
+ */
+export type TransferTo = {
+  /**
+   * A `PlaybackTarget.id` from the current target list.
+   */
+  targetId: string;
+};
 
 /**
  * Fire-and-forget TTS request. `id` is webapp-assigned and used both

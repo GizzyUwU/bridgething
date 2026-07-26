@@ -5,8 +5,8 @@ use std::{
 
 use libbridgething::{
   CompanionAuthorityScope, CurrentlyActiveApplication, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback,
-  PlaybackContext, PlaybackOptions, PlaybackState, PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState,
-  QueueItem, RepeatMode, Track,
+  PlaybackContext, PlaybackOptions, PlaybackState, PlaybackTarget, PlaybackUpdate, PlayerOptions,
+  PlayerState as WirePlayerState, QueueItem, RepeatMode, Track,
   client::{PlayerQueueReply, PlayerStateReply},
   gateway::QueueSnapshot,
 };
@@ -27,6 +27,7 @@ pub struct PlayerState {
   pub playing: bool,
 
   context: Option<PlaybackContext>,
+  target: Option<PlaybackTarget>,
 
   position_anchor: Option<Instant>,
   pub position_ms: usize,
@@ -78,6 +79,7 @@ impl PlayerState {
       playing: false,
 
       context: None,
+      target: None,
 
       position_ms: 0,
       position_anchor: None,
@@ -307,6 +309,7 @@ impl PlayerState {
     self.companion_playback = PlaybackUpdate::default();
     self.companion_playback_at = None;
     self.context = None;
+    self.target = None;
     self.note_ownership();
     let merged_meta = self.merged_metadata();
     let merged_play = self.merged_playback();
@@ -320,9 +323,11 @@ impl PlayerState {
       queue: _,
       options,
       context,
+      target,
     } = snapshot;
 
     self.context = context;
+    self.target = target;
 
     self.companion_metadata = match track {
       Some(t) => MediaItemUpdate {
@@ -752,6 +757,7 @@ impl PlayerState {
     };
     let effective = self.effective_track();
     let context = effective.and_then(|_| companion_authoritative.then(|| self.context.clone()).flatten());
+    let target = effective.and_then(|_| companion_authoritative.then(|| self.target.clone()).flatten());
 
     let queue_current = effective.map(|t| build_queue_item(t, &merged_meta, head_art.clone()));
     let next = derive_next(raw_upcoming, queue_current.as_ref());
@@ -788,6 +794,7 @@ impl PlayerState {
         queue: next.clone(),
         options,
         context,
+        target,
       },
     };
 

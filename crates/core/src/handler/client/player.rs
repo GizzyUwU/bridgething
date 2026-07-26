@@ -2,7 +2,8 @@ use libbridgething::{
   PlayerError,
   client::{
     BridgeToClientPlayerMsg, ClientToBridgePlayerMsgDispatch, PlayUri, PlayerErrorReply, PlayerQueueGet,
-    PlayerStateGet, QueueUri, SeekTo, SetCrossfade, SetRepeat, SetShuffle, SetSpeed, SkipPrev, SkipToIndex,
+    PlayerStateGet, PlayerTargetsGet, QueueUri, SeekTo, SetCrossfade, SetRepeat, SetShuffle, SetSpeed, SkipPrev,
+    SkipToIndex, TransferTo,
   },
   gateway::{self, BridgeToGatewayPlayerMsgCommand},
 };
@@ -129,6 +130,38 @@ impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
     let reply = self.handle.state.player.queue_reply();
     self.handle.respond_to::<PlayerQueueGet>(reply).await?;
     Ok(())
+  }
+
+  async fn targets_get(&self) -> HandlerResult {
+    let reply = self.handle.state.playback_targets.current();
+    self.handle.respond_to::<PlayerTargetsGet>(reply).await?;
+    Ok(())
+  }
+
+  async fn transfer_to(&self, params: TransferTo) -> HandlerResult {
+    if self.handle.state.capabilities.snapshot().gateway.is_none() {
+      return self.respond_player_error(PlayerError::NoGateway).await;
+    }
+    if !self
+      .handle
+      .state
+      .playback_targets
+      .current()
+      .targets
+      .iter()
+      .any(|t| t.id == params.target_id)
+    {
+      return self
+        .respond_player_error(PlayerError::UnknownTarget {
+          target_id: params.target_id,
+        })
+        .await;
+    }
+    self
+      .forward_command(BridgeToGatewayPlayerMsgCommand::TransferTo(gateway::TransferTo {
+        target_id: params.target_id,
+      }))
+      .await
   }
 }
 

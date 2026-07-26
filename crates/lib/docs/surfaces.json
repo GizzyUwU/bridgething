@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.5.0",
   "surfaces": [
     {
       "name": "asset",
@@ -342,7 +342,7 @@
     {
       "name": "library",
       "title": "Library",
-      "description": "Daemon -> webapp replies and events for the library surface. `BrowseReply`, `SearchReply`,\n`RecommendationsReply`, `FavoritesListReply`, and `FavoritesContainsReply` answer the\nmatching `ClientToBridgeLibraryMsg` request; `LibraryErrorReply` replaces the reply on\nfailure. `FavoriteChanged` is a live event broadcast to every connected webapp whenever a\nfavorite's status changes.",
+      "description": "Daemon -> webapp replies and events for the library surface. `BrowseReply`, `SearchReply`,\n`RecommendationsReply`, `ResolveContextReply`, `FavoritesListReply`, and\n`FavoritesContainsReply` answer the\nmatching `ClientToBridgeLibraryMsg` request; `LibraryErrorReply` replaces the reply on\nfailure. `FavoriteChanged` is a live event broadcast to every connected webapp whenever a\nfavorite's status changes.",
       "events": [
         {
           "method": "onFavoriteChanged",
@@ -377,6 +377,15 @@
           "response": "LibraryRecommendationsReply",
           "error": "LibraryErrorReply",
           "response_event": "onRecommendationsReply"
+        },
+        {
+          "method": "resolveContext",
+          "description": "Payload for the `resolveContext` request: turn a context uri into something renderable.\nThe uri a webapp holds is usually `PlayerState::context`, so this is what backs a\n\"playing from <playlist>\" line without having to browse for the containing entity.",
+          "payload": "LibraryResolveContext",
+          "payload_ref": "LibraryResolveContext",
+          "response": "LibraryResolveContextReply",
+          "error": "LibraryErrorReply",
+          "response_event": "onResolveContextReply"
         },
         {
           "method": "favoritesList",
@@ -663,6 +672,11 @@
           "method": "onQueueChanged",
           "payload": "PlayerQueueReply",
           "payload_ref": "PlayerQueueReply"
+        },
+        {
+          "method": "onTargetsChanged",
+          "payload": "PlayerTargetsReply",
+          "payload_ref": "PlayerTargetsReply"
         }
       ],
       "requests": [
@@ -677,6 +691,12 @@
           "description": "Webapp asks for the current queue snapshot. Rarely needed - the SDK\ntracks the queue from `QueueChanged` events.",
           "response": "PlayerQueueReply",
           "response_event": "onQueueReply"
+        },
+        {
+          "method": "targetsGet",
+          "description": "Webapp asks for the provider's remote endpoints. Served from the\ndaemon's held snapshot, so it costs no phone round trip; changes\nafterwards arrive as `TargetsChanged`.",
+          "response": "PlayerTargetsReply",
+          "response_event": "onTargetsReply"
         }
       ],
       "commands": [
@@ -745,6 +765,12 @@
           "description": "Set the crossfade duration.",
           "payload": "SetCrossfade",
           "payload_ref": "SetCrossfade"
+        },
+        {
+          "method": "transferTo",
+          "description": "Move playback to one of the provider's remote endpoints.",
+          "payload": "TransferTo",
+          "payload_ref": "TransferTo"
         }
       ],
       "handlers": []
@@ -963,6 +989,22 @@
           "payload": "Uint8Array"
         }
       ],
+      "handlers": []
+    },
+    {
+      "name": "lyrics",
+      "title": "Lyrics",
+      "events": [],
+      "requests": [
+        {
+          "method": "get",
+          "description": "Webapp asks for lyrics of whatever is playing right now. Deliberately payload-free: the\ndaemon builds the track identity from its own player state, so a webapp cannot disagree with\nit about what is playing.",
+          "response": "LyricsReply",
+          "error": "LyricsErrorReply",
+          "response_event": "onLyricsReply"
+        }
+      ],
+      "commands": [],
       "handlers": []
     },
     {
@@ -2653,6 +2695,37 @@
         }
       ]
     },
+    "LibraryResolveContext": {
+      "kind": "struct",
+      "description": "Payload for the `resolveContext` request: turn a context uri into something renderable.\nThe uri a webapp holds is usually `PlayerState::context`, so this is what backs a\n\"playing from <playlist>\" line without having to browse for the containing entity.",
+      "fields": [
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    "LibraryResolveContextReply": {
+      "kind": "struct",
+      "description": "Reply to `resolveContext`. Every field is best-effort: a gateway that recognises the uri but\ncannot cheaply name it answers with `None`s rather than failing the request.",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "artworkId",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "subtitle",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
     "LibrarySearch": {
       "kind": "struct",
       "description": "Payload for the `search` request: free-text search across the connected gateway's library.",
@@ -2816,6 +2889,61 @@
         {
           "name": "token",
           "type": "string"
+        }
+      ]
+    },
+    "LyricLine": {
+      "kind": "struct",
+      "description": "One timed line. `start_ms` is relative to track start, so a webapp highlights against the\nsame clock it draws the progress bar from.",
+      "fields": [
+        {
+          "name": "startMs",
+          "type": "number"
+        },
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    "Lyrics": {
+      "kind": "struct",
+      "description": "Lyrics for one track. `synced` and `plain` are independent: a source may carry either, both,\nor neither. `source` names the provider so a webapp can attribute it.",
+      "fields": [
+        {
+          "name": "synced",
+          "type": "LyricLine[]",
+          "optional": true,
+          "type_ref": "LyricLine"
+        },
+        {
+          "name": "plain",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "source",
+          "type": "string"
+        }
+      ]
+    },
+    "LyricsErrorReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "message",
+          "type": "string"
+        }
+      ]
+    },
+    "LyricsReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "lyrics",
+          "type": "Lyrics",
+          "optional": true,
+          "type_ref": "Lyrics"
         }
       ]
     },
@@ -3472,7 +3600,7 @@
     },
     "NotificationFlags": {
       "kind": "struct",
-      "description": "ANCS-shaped flags. `silent` mirrors the iOS \"do not surface\naudibly\" hint, `important` is the high-importance flag, and\n`pre_existing` is true for notifications that arrived before the\ndaemon connected (replayed by the companion on first sync).",
+      "description": "ANCS-shaped flags. `silent` mirrors the iOS \"do not surface\naudibly\" hint and `important` is the high-importance flag. Only\nnotifications posted while the daemon is connected are surfaced, so\nthere is no pre-existing/backfill marker.",
       "fields": [
         {
           "name": "silent",
@@ -3480,10 +3608,6 @@
         },
         {
           "name": "important",
-          "type": "boolean"
-        },
-        {
-          "name": "preExisting",
           "type": "boolean"
         }
       ]
@@ -3930,16 +4054,11 @@
     },
     "PlayContext": {
       "kind": "struct",
-      "description": "Optional context for `play({ uri })`. `context_uri` is the album /\nplaylist / show URI the track is being played from; gateways with\nplaylist support honor it for skip-next semantics. `position` is the\n0-based index inside the context.",
+      "description": "Optional context for `play({ uri })`. `context_uri` is the album /\nplaylist / show URI the track is being played from; gateways with\nplaylist support honor it for skip-next semantics. A row inside the\ncontext is addressed by playing that row's own uri within it, so there\nis no index here.",
       "fields": [
         {
           "name": "contextUri",
           "type": "string"
-        },
-        {
-          "name": "position",
-          "type": "number",
-          "optional": true
         }
       ]
     },
@@ -4050,6 +4169,69 @@
         },
         {
           "name": "Playing"
+        }
+      ]
+    },
+    "PlaybackTarget": {
+      "kind": "struct",
+      "description": "A remote endpoint the current provider can move playback to. Only\nmeaningful when `SurfaceAvailability::playback_targets` is set; the\nlist never contains the Car Thing itself, which is a control surface\nand never an audio endpoint.\n\n`volume_percent` is `None` when the endpoint does not report volume.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "Provider-opaque endpoint id; pass back to `transferTo`."
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "type": "PlaybackTargetKind",
+          "type_ref": "PlaybackTargetKind"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "description": "Whether this endpoint is the one currently playing."
+        },
+        {
+          "name": "volumePercent",
+          "type": "number",
+          "optional": true
+        }
+      ]
+    },
+    "PlaybackTargetKind": {
+      "kind": "enum",
+      "description": "What kind of endpoint a `PlaybackTarget` is. Coarse on purpose: the\nprovider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in\ntheir long tails, and webapps only pick an icon from this. Anything\nunrecognized maps to `Unknown` rather than leaking a provider string.",
+      "variants": [
+        {
+          "name": "Unknown"
+        },
+        {
+          "name": "Phone"
+        },
+        {
+          "name": "Tablet"
+        },
+        {
+          "name": "Computer"
+        },
+        {
+          "name": "Speaker"
+        },
+        {
+          "name": "Tv"
+        },
+        {
+          "name": "GameConsole"
+        },
+        {
+          "name": "Automobile"
+        },
+        {
+          "name": "Wearable"
         }
       ]
     },
@@ -4206,6 +4388,13 @@
           "type": "PlaybackContext",
           "optional": true,
           "type_ref": "PlaybackContext"
+        },
+        {
+          "name": "target",
+          "type": "PlaybackTarget",
+          "optional": true,
+          "type_ref": "PlaybackTarget",
+          "description": "The endpoint the audio is coming out of, when it is not the phone\nitself. `None` means local playback, or a provider with no remote\nendpoint concept. Webapps render \"playing on <name>\" from this."
         }
       ]
     },
@@ -4224,6 +4413,17 @@
           "optional": true,
           "type_ref": "CurrentlyActiveApplication",
           "description": "The app currently driving playback, when known (iOS surfaces this over iAP2)."
+        }
+      ]
+    },
+    "PlayerTargetsReply": {
+      "kind": "struct",
+      "description": "Response to `targetsGet`, also carried by the `TargetsChanged` event.\nEmpty when no companion is attached, or when the provider has no\nremote endpoint concept - check `capabilities.available.playbackTargets`\nto tell \"none right now\" from \"never\".",
+      "fields": [
+        {
+          "name": "targets",
+          "type": "PlaybackTarget[]",
+          "type_ref": "PlaybackTarget"
         }
       ]
     },
@@ -4824,6 +5024,11 @@
         {
           "name": "lyrics",
           "type": "boolean"
+        },
+        {
+          "name": "playbackTargets",
+          "type": "boolean",
+          "description": "The active music provider can enumerate remote endpoints and move\nplayback between them. False for providers whose platform refuses to\nexpose routes (Apple Music), and whenever no glue is attached."
         }
       ]
     },
@@ -4911,6 +5116,15 @@
           "name": "saved",
           "type": "boolean",
           "description": "Whether the track is saved in the user's library."
+        }
+      ]
+    },
+    "TransferTo": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "targetId",
+          "type": "string"
         }
       ]
     },
@@ -5237,7 +5451,7 @@
           "name": "provenance",
           "type": "string",
           "optional": true,
-          "description": "Opaque provenance token recorded at install time by whoever pushed\nthe bundle, conventionally the catalog source URL. The daemon stores\nand returns it verbatim and never dereferences it; it exists so every\nclient agrees on which source an installed webapp came from, and can\ntell an update apart from a different source claiming the same uuid.\n`None` means unknown provenance (image-seeded examples, sideloads)."
+          "description": "Opaque provenance token recorded at install time by whoever pushed\nthe bundle, conventionally the catalog source URL. The daemon stores\nand returns it verbatim and never dereferences it."
         }
       ]
     },

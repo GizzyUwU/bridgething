@@ -63,18 +63,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var reloadDetacher: ReloadDetacher?
     private var companion: BridgethingCompanion?
     private var eventsTask: Task<Void, Never>?
-    private var authTask: Task<Void, Never>?
     private var otaEventsTask: Task<Void, Never>?
     private var deviceMetaTask: Task<Void, Never>?
-    private var catalogEventsTask: Task<Void, Never>?
     private var webappDocTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
-    private var activeRegistration: ProviderRegistration?
+    private var connectTasks: [String: Task<Void, Never>] = [:]
+    private var authStates: [String: BridgethingAuthState] = [:]
+    private var healthStates: [String: BridgethingServiceHealth] = [:]
+    private var connectedIds: Set<String> = []
+    private var priority: [String] = []
 
-    private var onProviderChanged: (@Sendable (BridgethingProviderInfo?) -> Void)?
-    private var onAuthStateChanged: (@Sendable (BridgethingAuthState) -> Void)?
-    private var onServiceHealthChanged: (@Sendable (BridgethingServiceHealth) -> Void)?
+    private var onProvidersChanged: (@Sendable ([BridgethingProviderInfo]) -> Void)?
     private var onPeerConnected: (@Sendable (BridgethingSessionPeer) -> Void)?
     private var onPeerDisconnected: (@Sendable (String) -> Void)?
     private var onPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
@@ -85,11 +85,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
-    private var onCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
     private var logStreamingDesired: Bool = false
     private var localLogStreamingDesired: Bool = false
-    private var lastAuthState: BridgethingAuthState = .idleState()
-    private var lastServiceHealth: BridgethingServiceHealth = toRNServiceHealth(.ok)
 
     public init() {
         observeAppLifecycle()
@@ -124,9 +121,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private func detachObservers() {
         stateLock.withLock {
-            onProviderChanged = nil
-            onAuthStateChanged = nil
-            onServiceHealthChanged = nil
+            onProvidersChanged = nil
             onPeerConnected = nil
             onPeerDisconnected = nil
             onPeerLinkFailed = nil
@@ -137,7 +132,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             onWebappDocChanged = nil
             onDeviceMetaChanged = nil
             onOtaEvent = nil
-            onCatalogEvent = nil
         }
     }
 
@@ -187,12 +181,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 self?.emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
             }
         }
-        let catalogStream = await companion.catalog.events
-        let catalogTask = Task { [weak self] in
-            for await event in catalogStream {
-                self?.emitCatalogEvent(toRNCatalogEvent(event))
-            }
-        }
         let docStream = companion.gateway.webapp.docChanged
         let docTask = Task { [weak self] in
             for await (deviceId, msg) in docStream {
@@ -203,44 +191,45 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         eventsTask = task
         otaEventsTask = otaTask
         deviceMetaTask = metaTask
-        catalogEventsTask = catalogTask
         webappDocTask = docTask
         stateLock.unlock()
 
         await applyOtaPollConfig(Self.loadOtaPollConfig())
         await applyDeviceAutoResume()
 
-        if let persisted = Self.defaults.string(forKey: PrefKey.activeProvider),
-           let restore = Self.registry.first(where: { $0.id == persisted && $0.available }) {
-            try? await setActiveProvider(id: restore.id)
-        } else if let restore = Self.registry.first(where: { $0.available && $0.hasCredentials() }) {
-            try? await setActiveProvider(id: restore.id)
+        let order = Self.defaults.stringArray(forKey: PrefKey.providerPriority) ?? []
+        stateLock.withLock { priority = order }
+        await companion.setProviderPriority(order)
+
+        var restore = Set(Self.defaults.stringArray(forKey: PrefKey.connectedProviders) ?? [])
+        for reg in Self.registry where reg.available && reg.hasCredentials() {
+            restore.insert(reg.id)
+        }
+        for reg in Self.registry where reg.available && restore.contains(reg.id) {
+            try? await connectProvider(id: reg.id)
         }
     }
 
     public func stop() async {
         stateLock.lock()
-        let auth = authTask
+        let auth = Array(connectTasks.values)
+        connectTasks.removeAll()
         let events = eventsTask
         let ota = otaEventsTask
         let deviceMeta = deviceMetaTask
-        let catalog = catalogEventsTask
         let webappDoc = webappDocTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
         otaEventsTask = nil
         deviceMetaTask = nil
-        catalogEventsTask = nil
         webappDocTask = nil
-        authTask = nil
         stateLock.unlock()
 
-        auth?.cancel()
+        for task in auth { task.cancel() }
         events?.cancel()
         ota?.cancel()
         deviceMeta?.cancel()
-        catalog?.cancel()
         webappDoc?.cancel()
 
         await companion?.stop()
@@ -255,13 +244,11 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     // MARK: - Provider selection
 
     public func availableProviders() async -> [BridgethingProviderInfo] {
-        Self.registry.map {
-            BridgethingProviderInfo(id: $0.id, displayName: $0.displayName, available: $0.available)
-        }
+        providerInfos()
     }
 
-    public func setActiveProvider(id: String?) async throws {
-        stateLock.lock(); let prevTask = authTask; stateLock.unlock()
+    public func connectProvider(id: String) async throws {
+        stateLock.lock(); let prevTask = connectTasks[id]; stateLock.unlock()
         prevTask?.cancel()
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -271,61 +258,80 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                     return
                 }
                 do {
-                    try await runSetActive(id: id)
+                    try await runConnect(id: id)
                     continuation.resume()
                 } catch is CancellationError {
-                    emitAuth(.idleState())
+                    setAuthState(id, .idleState())
                     continuation.resume(throwing: SessionError.cancelled)
                 } catch {
-                    emitAuth(.failed(message: String(describing: error)))
+                    setAuthState(id, .failed(message: String(describing: error)))
                     continuation.resume(throwing: error)
                 }
             }
-            stateLock.lock(); authTask = task; stateLock.unlock()
+            stateLock.lock(); connectTasks[id] = task; stateLock.unlock()
         }
     }
 
-    public func cancelAuth() async {
+    public func cancelAuth(id: String) async {
         stateLock.lock()
-        let task = authTask
-        activeRegistration = nil
-        stateLock.unlock()
-        Self.defaults.removeObject(forKey: PrefKey.activeProvider)
-        task?.cancel()
-        let companion = stateLock.withLock { self.companion }
-        try? await companion?.setActive(nil)
-        emitProvider(nil)
-        emitAuth(.idleState())
-    }
-
-    public func signOut() async {
-        stateLock.lock()
-        let task = authTask
-        let registration = activeRegistration
-        activeRegistration = nil
+        let task = connectTasks.removeValue(forKey: id)
+        connectedIds.remove(id)
         stateLock.unlock()
         task?.cancel()
-
-        Self.defaults.removeObject(forKey: PrefKey.activeProvider)
-        registration?.signOut()
-
+        persistConnected()
         let companion = stateLock.withLock { self.companion }
-        try? await companion?.setActive(nil)
-        emitProvider(nil)
-        emitServiceHealth(toRNServiceHealth(.ok))
-        emitAuth(.idleState())
+        await companion?.detach(id: id)
+        setAuthState(id, .idleState())
     }
 
-    public func currentProvider() async -> BridgethingProviderInfo? {
+    public func disconnectProvider(id: String) async {
+        stateLock.lock()
+        let task = connectTasks.removeValue(forKey: id)
+        connectedIds.remove(id)
+        healthStates.removeValue(forKey: id)
+        stateLock.unlock()
+        task?.cancel()
+
+        persistConnected()
+        Self.registry.first { $0.id == id }?.signOut()
+
         let companion = stateLock.withLock { self.companion }
-        let glue = await companion?.current()
-        return providerInfo(for: glue)
+        await companion?.detach(id: id)
+        setAuthState(id, .idleState())
+    }
+
+    public func setProviderPriority(ids: [String]) async {
+        stateLock.withLock { priority = ids }
+        Self.defaults.set(ids, forKey: PrefKey.providerPriority)
+        let companion = stateLock.withLock { self.companion }
+        await companion?.setProviderPriority(ids)
+        emitProviders()
+    }
+
+    private func providerInfos() -> [BridgethingProviderInfo] {
+        let (connected, auth, health, order) = stateLock.withLock {
+            (connectedIds, authStates, healthStates, priority)
+        }
+        let infos = Self.registry.map { reg in
+            BridgethingProviderInfo(
+                id: reg.id,
+                displayName: reg.displayName,
+                available: reg.available,
+                connected: connected.contains(reg.id),
+                authState: auth[reg.id] ?? .idleState(),
+                serviceHealth: health[reg.id] ?? toRNServiceHealth(.ok)
+            )
+        }
+        return infos.sorted { a, b in
+            let ra = order.firstIndex(of: a.id) ?? Int.max
+            let rb = order.firstIndex(of: b.id) ?? Int.max
+            return ra == rb ? a.id < b.id : ra < rb
+        }
     }
 
     public func snapshot() async -> BridgethingSessionSnapshot {
         let companion = stateLock.withLock { self.companion }
-        let glue = await companion?.current()
-        let provider = providerInfo(for: glue)
+        let libraryProvider = await companion?.libraryGlue().map { type(of: $0).name }
         let ancs: BridgethingAncsAuthStatus =
             if let companion { toRNAncsAuthStatus(await companion.currentAncsAuthState()) } else { .unknown }
 
@@ -342,15 +348,15 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             }
         }
 
-        let (peerList, nowPlaying, authState, serviceHealth) = stateLock.withLock {
-            (Array(self.peers.values), self.lastNowPlaying, self.lastAuthState, self.lastServiceHealth)
+        let (peerList, nowPlaying, order) = stateLock.withLock {
+            (Array(self.peers.values), self.lastNowPlaying, self.priority)
         }
 
         return BridgethingSessionSnapshot(
             hostInfo: rnHostInfo(),
-            provider: provider,
-            authState: authState,
-            serviceHealth: serviceHealth,
+            providers: providerInfos(),
+            providerPriority: order,
+            libraryProvider: libraryProvider,
             peers: peerList,
             ancsAuthStatus: ancs,
             nowPlaying: nowPlaying,
@@ -382,7 +388,11 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func companionDebug() async -> BridgethingCompanionDebug {
         let companion = stateLock.withLock { self.companion }
-        let glue = await companion?.current()
+        var glue: (any BridgethingGlue)?
+        if let companion {
+            glue = await companion.audibleGlue()
+            if glue == nil { glue = await companion.libraryGlue() }
+        }
         let debug = await glue?.debugState() ?? GlueDebugState()
         let ancs: BridgethingAncsAuthStatus =
             if let companion { toRNAncsAuthStatus(await companion.currentAncsAuthState()) } else { .unknown }
@@ -657,62 +667,31 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         await ota?.applyVersion(deviceId: deviceId, channel: channel, version: version, rootURL: Self.otaRootURL(rootUrl))
     }
 
-    // MARK: - Catalog
+    // MARK: - Webapp install
 
-    public func catalogSources() async -> [String] {
-        guard let companion = stateLock.withLock({ self.companion }) else { return [] }
-        return await companion.catalog.sources().map(\.absoluteString)
-    }
-
-    public func addCatalogSource(url: String) async {
-        guard let companion = stateLock.withLock({ self.companion }), let parsed = URL(string: url) else { return }
-        await companion.catalog.addSource(parsed)
-    }
-
-    public func removeCatalogSource(url: String) async {
-        guard let companion = stateLock.withLock({ self.companion }), let parsed = URL(string: url) else { return }
-        await companion.catalog.removeSource(parsed)
-    }
-
-    public func refreshCatalog() async {
-        guard let companion = stateLock.withLock({ self.companion }) else { return }
-        await companion.catalog.refresh()
-    }
-
-    public func availableCatalogApps(deviceId: String) async -> String {
-        guard let companion = stateLock.withLock({ self.companion }) else { return "[]" }
-        let listings = await companion.catalog.availableApps(deviceId: deviceId)
-        return Self.jsonString(listings) ?? "[]"
-    }
-
-    public func checkForCatalogUpdates(deviceId: String) async -> String {
-        guard let companion = stateLock.withLock({ self.companion }) else { return "[]" }
-        let updates = await companion.catalog.checkForUpdates(deviceId: deviceId)
-        return Self.jsonString(updates) ?? "[]"
-    }
-
-    public func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) async throws -> BridgethingWebappInfo {
+    public func installWebappFromUrl(
+        deviceId: String,
+        url: String,
+        sha256: String,
+        size: Double,
+        provenance: String?
+    ) async throws -> BridgethingWebappInfo {
         let companion = try requirePeerConnected(deviceId)
-        guard let source = URL(string: sourceUrl) else { throw SessionError.invalidArchive }
-        let result = await companion.catalog.install(deviceId: deviceId, appId: appId, version: version, sourceURL: source)
+        guard let parsed = URL(string: url), size >= 0 else { throw SessionError.invalidArchive }
+        let result = await companion.ota.installWebappFromUrl(
+            gateway: companion.gateway,
+            deviceId: deviceId,
+            url: parsed,
+            sha256: sha256.lowercased(),
+            size: UInt64(size),
+            provenance: provenance
+        )
         switch result {
         case let .installed(info):
             emitWebappsChanged(deviceId)
             return Self.toRNWebappInfo(info)
         case let .failed(reason):
             throw SessionError.installFailed(reason)
-        }
-    }
-
-    public func setCatalogPollConfig(config: BridgethingCatalogPollConfig?) async {
-        guard let companion = stateLock.withLock({ self.companion }) else { return }
-        if let config {
-            await companion.catalog.setPollConfig(CatalogPollConfig(
-                intervalSeconds: max(60, config.intervalSeconds),
-                autoInstall: config.autoInstall
-            ))
-        } else {
-            await companion.catalog.setPollConfig(nil)
         }
     }
 
@@ -791,7 +770,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         static let otaInterval = "bridgething.ota.intervalSeconds"
         static let otaAutoPush = "bridgething.ota.autoPush"
         static let otaRootUrl = "bridgething.ota.rootUrl"
-        static let activeProvider = "bridgething.activeProvider"
+        static let connectedProviders = "bridgething.connectedProviders"
+        static let providerPriority = "bridgething.providerPriority"
     }
 
     private static func loadCapabilityFlags() -> BridgethingCapabilityFlags {
@@ -853,16 +833,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     // MARK: - Callback setters
 
-    public func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void) {
-        stateLock.withLock { onProviderChanged = callback }
-    }
-
-    public func setOnAuthStateChanged(_ callback: @escaping @Sendable (BridgethingAuthState) -> Void) {
-        stateLock.withLock { onAuthStateChanged = callback }
-    }
-
-    public func setOnServiceHealthChanged(_ callback: @escaping @Sendable (BridgethingServiceHealth) -> Void) {
-        stateLock.withLock { onServiceHealthChanged = callback }
+    public func setOnProvidersChanged(_ callback: @escaping @Sendable ([BridgethingProviderInfo]) -> Void) {
+        stateLock.withLock { onProvidersChanged = callback }
     }
 
     public func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void) {
@@ -936,9 +908,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onDeviceMetaChanged = callback }
     }
 
-    public func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void) {
-        stateLock.withLock { onCatalogEvent = callback }
-    }
 
     public func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void) {
         stateLock.withLock { onOtaEvent = callback }
@@ -973,54 +942,54 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     // MARK: - Internal
 
-    private func runSetActive(id: String?) async throws {
+    private func runConnect(id: String) async throws {
         let companion = stateLock.withLock { self.companion }
         guard let companion else { throw SessionError.notStarted }
-
-        if let id {
-            guard let registration = Self.registry.first(where: { $0.id == id }) else {
-                throw SessionError.unknownProvider(id)
-            }
-
-            let glue = registration.factory()
-            stateLock.withLock { activeRegistration = registration }
-            await glue.setAuthObserver { [weak self] state in
-                self?.handleGlueAuthState(state)
-            }
-            await glue.setServiceHealthObserver { [weak self] health in
-                self?.emitServiceHealth(toRNServiceHealth(health))
-            }
-            try await companion.setActive(glue)
-            try Task.checkCancellation()
-        } else {
-            stateLock.withLock { activeRegistration = nil }
-            try await companion.setActive(nil)
-            emitProvider(nil)
-            emitAuth(.idleState())
+        guard let registration = Self.registry.first(where: { $0.id == id }) else {
+            throw SessionError.unknownProvider(id)
         }
+
+        let glue = registration.factory()
+        await glue.setAuthObserver { [weak self] state in
+            self?.handleGlueAuthState(id, state)
+        }
+        await glue.setServiceHealthObserver { [weak self] health in
+            self?.setServiceHealth(id, toRNServiceHealth(health))
+        }
+        try await companion.attach(glue)
+        try Task.checkCancellation()
     }
 
-    private func handleGlueAuthState(_ state: GlueAuthState) {
+    private func handleGlueAuthState(_ id: String, _ state: GlueAuthState) {
         switch state {
         case let .pending(prompt):
-            emitAuth(.pendingState(
+            setAuthState(id, .pendingState(
                 userCode: prompt?.userCode,
                 verificationUrl: prompt?.verificationURL.absoluteString,
                 verificationUrlComplete: prompt?.verificationURLComplete.absoluteString
             ))
         case .authenticated:
-            if let registration = stateLock.withLock({ activeRegistration }) {
-                Self.defaults.set(registration.id, forKey: PrefKey.activeProvider)
-                emitProvider(BridgethingProviderInfo(
-                    id: registration.id,
-                    displayName: registration.displayName,
-                    available: registration.available
-                ))
-            }
-            emitAuth(.authenticated())
+            stateLock.withLock { _ = connectedIds.insert(id) }
+            persistConnected()
+            setAuthState(id, .authenticated())
         case let .failed(message):
-            emitAuth(.failed(message: message))
+            setAuthState(id, .failed(message: message))
         }
+    }
+
+    private func setAuthState(_ id: String, _ state: BridgethingAuthState) {
+        stateLock.withLock { authStates[id] = state }
+        emitProviders()
+    }
+
+    private func setServiceHealth(_ id: String, _ health: BridgethingServiceHealth) {
+        stateLock.withLock { healthStates[id] = health }
+        emitProviders()
+    }
+
+    private func persistConnected() {
+        let ids = stateLock.withLock { Array(connectedIds).sorted() }
+        Self.defaults.set(ids, forKey: PrefKey.connectedProviders)
     }
 
     private func handleGatewayEvent(_ event: GatewayEvent) {
@@ -1047,16 +1016,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let rn: BridgethingNowPlaying? = glue.flatMap(Self.toRNNowPlaying)
         stateLock.withLock { lastNowPlaying = rn }
         emitNowPlaying(rn)
-    }
-
-    private func providerInfo(for glue: (any BridgethingGlue)?) -> BridgethingProviderInfo? {
-        guard let glue else { return nil }
-        let registration = Self.registry.first { $0.id == type(of: glue).name }
-        return BridgethingProviderInfo(
-            id: type(of: glue).name,
-            displayName: registration?.displayName ?? type(of: glue).displayName,
-            available: registration?.available ?? true
-        )
     }
 
     private func requirePeerConnected(_ deviceId: String) throws -> BridgethingCompanion {
@@ -1104,24 +1063,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     // MARK: - Emit helpers
 
-    private func emitProvider(_ info: BridgethingProviderInfo?) {
-        stateLock.withLock { foreground ? onProviderChanged : nil }?(info)
-    }
-
-    private func emitServiceHealth(_ health: BridgethingServiceHealth) {
-        let cb = stateLock.withLock { () -> (@Sendable (BridgethingServiceHealth) -> Void)? in
-            lastServiceHealth = health
-            return foreground ? onServiceHealthChanged : nil
-        }
-        cb?(health)
-    }
-
-    private func emitAuth(_ state: BridgethingAuthState) {
-        let cb = stateLock.withLock { () -> (@Sendable (BridgethingAuthState) -> Void)? in
-            lastAuthState = state
-            return foreground ? onAuthStateChanged : nil
-        }
-        cb?(state)
+    private func emitProviders() {
+        let cb = stateLock.withLock { foreground ? onProvidersChanged : nil }
+        cb?(providerInfos())
     }
 
     private func emitPeerConnected(_ peer: BridgethingSessionPeer) {
@@ -1160,9 +1104,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { foreground ? onDeviceMetaChanged : nil }?(deviceId, meta)
     }
 
-    private func emitCatalogEvent(_ event: BridgethingCatalogEvent) {
-        stateLock.withLock { foreground ? onCatalogEvent : nil }?(event)
-    }
 
     private func emitOtaEvent(_ event: BridgethingOtaEvent) {
         stateLock.withLock { foreground ? onOtaEvent : nil }?(event)
@@ -1200,6 +1141,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private static func toRNDeviceMeta(_ meta: BridgeThingMeta) -> BridgethingDeviceMeta {
         BridgethingDeviceMeta(
             daemonVersion: meta.appVersion,
+            libbridgethingVersion: meta.libbridgethingVersion,
             imageVersion: meta.imageVersion,
             appName: meta.appName,
             osName: meta.osName,
@@ -1243,6 +1185,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             source: info.source == .builtin ? .builtin : .installed,
             role: info.role == .launcher ? .launcher : .standard,
             version: info.version,
+            provenance: info.provenance,
             description: info.description,
             iconHash: info.iconHash,
             settingsHash: info.settingsHash,
@@ -1401,41 +1344,6 @@ private func toRNAncsSetupResult(_ result: AncsSetupResult) -> BridgethingAncsSe
     )
 }
 
-private func toRNCatalogEvent(_ event: CatalogEvent) -> BridgethingCatalogEvent {
-    switch event {
-    case let .refreshed(sourceCount, appCount):
-        return BridgethingCatalogEvent(
-            kind: .refreshed, sourceCount: Double(sourceCount), appCount: Double(appCount),
-            url: nil, reason: nil, deviceId: nil, appId: nil, name: nil,
-            fromVersion: nil, toVersion: nil, version: nil
-        )
-    case let .sourceFailed(url, reason):
-        return BridgethingCatalogEvent(
-            kind: .sourcefailed, sourceCount: nil, appCount: nil,
-            url: url.absoluteString, reason: reason, deviceId: nil, appId: nil, name: nil,
-            fromVersion: nil, toVersion: nil, version: nil
-        )
-    case let .updateAvailable(deviceId, update):
-        return BridgethingCatalogEvent(
-            kind: .updateavailable, sourceCount: nil, appCount: nil,
-            url: update.sourceURL.absoluteString, reason: nil, deviceId: deviceId,
-            appId: update.appId, name: update.name,
-            fromVersion: update.installedVersion, toVersion: update.target.version, version: nil
-        )
-    case let .installed(deviceId, appId, version):
-        return BridgethingCatalogEvent(
-            kind: .installed, sourceCount: nil, appCount: nil,
-            url: nil, reason: nil, deviceId: deviceId, appId: appId, name: nil,
-            fromVersion: nil, toVersion: nil, version: version
-        )
-    case let .installFailed(deviceId, appId, reason):
-        return BridgethingCatalogEvent(
-            kind: .installfailed, sourceCount: nil, appCount: nil,
-            url: nil, reason: reason, deviceId: deviceId, appId: appId, name: nil,
-            fromVersion: nil, toVersion: nil, version: nil
-        )
-    }
-}
 
 private func rnOtaEvent(
     kind: BridgethingOtaEventKind,

@@ -15,7 +15,7 @@ export type Album = {
   /**
    * Opaque artwork asset id (`asset.get`), when known.
    */
-  artwork_id: string | null;
+  artworkId: string | null;
 };
 
 /**
@@ -49,7 +49,7 @@ export type Artist = {
   /**
    * Opaque artwork asset id (`asset.get`), when known.
    */
-  artwork_id: string | null;
+  artworkId: string | null;
 };
 
 export type AssetRetention =
@@ -440,6 +440,18 @@ export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 export type LogSource = 'daemon' | 'system' | 'all';
 
 /**
+ * One timed line. `start_ms` is relative to track start, so a webapp highlights against the
+ * same clock it draws the progress bar from.
+ */
+export type LyricLine = { startMs: number; text: string };
+
+/**
+ * Lyrics for one track. `synced` and `plain` are independent: a source may carry either, both,
+ * or neither. `source` names the provider so a webapp can attribute it.
+ */
+export type Lyrics = { synced: Array<LyricLine> | null; plain: string | null; source: string };
+
+/**
  * Currently-playing track, populated to the extent the gateway/iAP2
  * stream has surfaced. All fields are optional because each one arrives
  * as a separate attribute fetch on iAP2; the daemon accumulates and the
@@ -679,11 +691,11 @@ export type NotificationCategory =
 
 /**
  * ANCS-shaped flags. `silent` mirrors the iOS "do not surface
- * audibly" hint, `important` is the high-importance flag, and
- * `pre_existing` is true for notifications that arrived before the
- * daemon connected (replayed by the companion on first sync).
+ * audibly" hint and `important` is the high-importance flag. Only
+ * notifications posted while the daemon is connected are surfaced, so
+ * there is no pre-existing/backfill marker.
  */
-export type NotificationFlags = { silent: boolean; important: boolean; preExisting: boolean };
+export type NotificationFlags = { silent: boolean; important: boolean };
 
 /**
  * Delta event the companion or iAP2 stream emits whenever a player
@@ -874,10 +886,11 @@ export type PhoneState = { activeCalls: Array<PhoneCall> };
 /**
  * Optional context for `play({ uri })`. `context_uri` is the album /
  * playlist / show URI the track is being played from; gateways with
- * playlist support honor it for skip-next semantics. `position` is the
- * 0-based index inside the context.
+ * playlist support honor it for skip-next semantics. A row inside the
+ * context is addressed by playing that row's own uri within it, so there
+ * is no index here.
  */
-export type PlayContext = { contextUri: string; position: number | null };
+export type PlayContext = { contextUri: string };
 
 /**
  * Per-session playback snapshot: where in the song we are, what mode is
@@ -926,15 +939,15 @@ export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Arra
  * UI for any capability that is `false`.
  */
 export type PlaybackRestrictions = {
-  can_repeat_context: boolean;
-  can_repeat_track: boolean;
-  can_seek: boolean;
-  can_skip_next: boolean;
-  can_skip_prev: boolean;
-  can_toggle_shuffle: boolean;
-  can_like: boolean;
-  can_change_volume: boolean;
-  can_set_output: boolean;
+  canRepeatContext: boolean;
+  canRepeatTrack: boolean;
+  canSeek: boolean;
+  canSkipNext: boolean;
+  canSkipPrev: boolean;
+  canToggleShuffle: boolean;
+  canLike: boolean;
+  canChangeVolume: boolean;
+  canSetOutput: boolean;
 };
 
 /**
@@ -943,6 +956,45 @@ export type PlaybackRestrictions = {
  * progressing state.
  */
 export type PlaybackState = 'stopped' | 'paused' | 'playing';
+
+/**
+ * A remote endpoint the current provider can move playback to. Only
+ * meaningful when `SurfaceAvailability::playback_targets` is set; the
+ * list never contains the Car Thing itself, which is a control surface
+ * and never an audio endpoint.
+ *
+ * `volume_percent` is `None` when the endpoint does not report volume.
+ */
+export type PlaybackTarget = {
+  /**
+   * Provider-opaque endpoint id; pass back to `transferTo`.
+   */
+  id: string;
+  name: string;
+  kind: PlaybackTargetKind;
+  /**
+   * Whether this endpoint is the one currently playing.
+   */
+  isActive: boolean;
+  volumePercent: number | null;
+};
+
+/**
+ * What kind of endpoint a `PlaybackTarget` is. Coarse on purpose: the
+ * provider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in
+ * their long tails, and webapps only pick an icon from this. Anything
+ * unrecognized maps to `Unknown` rather than leaking a provider string.
+ */
+export type PlaybackTargetKind =
+  | 'unknown'
+  | 'phone'
+  | 'tablet'
+  | 'computer'
+  | 'speaker'
+  | 'tv'
+  | 'gameConsole'
+  | 'automobile'
+  | 'wearable';
 
 /**
  * Per-playback-session attributes that vary regardless of track:
@@ -977,7 +1029,8 @@ export type PlayerError =
   | { type: 'schemeUnclaimed'; data: { scheme: string } }
   | { type: 'playFailed'; data: { reason: string } }
   | { type: 'noGateway' }
-  | { type: 'notInQueue'; data: { index: number } };
+  | { type: 'notInQueue'; data: { index: number } }
+  | { type: 'unknownTarget'; data: { target_id: string } };
 
 /**
  * User-tunable knobs that are not "currently playing" state.
@@ -985,7 +1038,7 @@ export type PlayerError =
  * distinguishes "user explicitly set zero" from "feature unsupported by
  * gateway".
  */
-export type PlayerOptions = { speed: number; crossfade_ms: number | null };
+export type PlayerOptions = { speed: number; crossfadeMs: number | null };
 
 /**
  * Full player snapshot the daemon broadcasts to webapps. Initial value
@@ -999,6 +1052,12 @@ export type PlayerState = {
   queue: Array<QueueItem>;
   options: PlayerOptions;
   context: PlaybackContext | null;
+  /**
+   * The endpoint the audio is coming out of, when it is not the phone
+   * itself. `None` means local playback, or a provider with no remote
+   * endpoint concept. Webapps render "playing on <name>" from this.
+   */
+  target?: PlaybackTarget | null;
 };
 
 /**
@@ -1208,6 +1267,12 @@ export type SurfaceAvailability = {
   netWs: boolean;
   audioTts: boolean;
   lyrics: boolean;
+  /**
+   * The active music provider can enumerate remote endpoints and move
+   * playback between them. False for providers whose platform refuses to
+   * expose routes (Apple Music), and whenever no glue is attached.
+   */
+  playbackTargets: boolean;
 };
 
 /**
@@ -1246,11 +1311,11 @@ export type Track = {
    * All credited artists, in order.
    */
   artists: Array<Artist>;
-  duration_ms: number;
+  durationMs: number;
   /**
    * Opaque artwork asset id; pass to `asset.get` for the bytes.
    */
-  image_id: string;
+  imageId: string;
   /**
    * Whether the track is saved in the user's library.
    */

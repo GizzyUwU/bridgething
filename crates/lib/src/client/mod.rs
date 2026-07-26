@@ -52,6 +52,8 @@ pub enum ClientToBridgeMsgData {
   #[from]
   Library(ClientToBridgeLibraryMsg),
   #[from]
+  Lyrics(ClientToBridgeLyricsMsg),
+  #[from]
   Net(ClientToBridgeNetMsg),
   #[from]
   Notifications(ClientToBridgeNotificationsMsg),
@@ -114,6 +116,8 @@ pub enum BridgeToClientMsgData {
   Hardware(BridgeToClientHardwareMsg),
   #[from]
   Library(BridgeToClientLibraryMsg),
+  #[from]
+  Lyrics(BridgeToClientLyricsMsg),
   #[from]
   Net(BridgeToClientNetMsg),
   #[from]

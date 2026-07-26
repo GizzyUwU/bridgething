@@ -9,9 +9,6 @@ import XCTest
 
 @testable import BridgethingSpotifyGlue
 
-/// drives the glue over a fake first-party client + the in-memory wire, asserting the
-/// reduced-delta -> gateway-wire mapping, authority claim/release (incl. the cast gate),
-/// and the queue push. no network; the dealer firehose is injected via the Observer.
 final class SpotifyGlueTests: XCTestCase {
     struct Harness {
         let companion: BridgethingCompanion
@@ -75,6 +72,8 @@ final class SpotifyGlueTests: XCTestCase {
             return volume
         }
         func activeDeviceVolumePercent() async -> Double? { volume }
+        var transferCalls: [String] = []
+        func transfer(deviceId: String) async throws { transferCalls.append(deviceId) }
         func product() async throws -> Spotify.ProductState { productState }
         var lastRootBrowse: (sections: UInt32?, preview: UInt32?)?
         func rootBrowse(sections: UInt32?, preview: UInt32?) async throws -> [Spotify.Shelf] {
@@ -137,7 +136,7 @@ final class SpotifyGlueTests: XCTestCase {
             lyricsResolver: FakeLyricsResolver(),
             host: HostInfo(appName: "spotify-test", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         if let autoResume {
             await companion.setDeviceAutoResume(deviceId: "carthing-test", enabled: autoResume)
@@ -145,9 +144,6 @@ final class SpotifyGlueTests: XCTestCase {
         let driver = WireDriver(adapter: adapter)
         await driver.start()
         driver.connect()
-        // barrier: the peer-connected handler resets glue authority out of band of the
-        // emit queue; the time snapshot is its last frame, so wait it out before tests
-        // drive dealer events or claims race the reset
         _ = try await driver.waitOutbound(timeout: .seconds(5)) {
             if case .time(.snapshot(_)) = $0.data { return true }
             return false
@@ -203,7 +199,7 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertEqual(reply.result.entries.count, 2)
         guard case let .item(.track(t)) = reply.result.entries.first else { return XCTFail("expected a track item") }
         XCTAssertEqual(t.name, "Song")
-        XCTAssertFalse(t.image_id.isEmpty, "track art id should be wrapped")
+        XCTAssertFalse(t.imageId.isEmpty, "track art id should be wrapped")
     }
 
     func testSearchMapsByRequestedKinds() async throws {
@@ -346,7 +342,6 @@ final class SpotifyGlueTests: XCTestCase {
 
     func testCompanionConnectDefaultsToAggressiveResume() async throws {
         let fake = FakeClient()
-        // pref left absent: the companion's boot-time peer connect must reconcile on its own.
         let h = try await boot(fake, autoResume: nil)
         addTeardownBlock { await h.companion.stop() }
         try await waitFor("companion-driven connect resume") { fake.resumeOnConnectCalls == 1 }
@@ -439,6 +434,67 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertEqual(fake.volumeSets.last ?? 0, 56.25, accuracy: 0.01)
     }
 
+    func testDevicePushSendsTargetsChanged() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onDevices(devices: [
+            device("speaker", "Kitchen", .speaker, active: true, volume: 0.4),
+            device("laptop", "Desk", .computer, active: false, volume: 0),
+        ])
+
+        let frame = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case .player(.targetsChanged) = $0.data { return true }
+            return false
+        }
+        guard case let .player(.targetsChanged(t)) = frame.data else { return XCTFail("expected targetsChanged") }
+        XCTAssertEqual(t.targets.map(\.id), ["speaker", "laptop"])
+        XCTAssertEqual(t.targets[0].kind, .speaker, "the protobuf device type maps to a closed wire kind")
+        XCTAssertEqual(t.targets[0].volumePercent, 40)
+        XCTAssertTrue(t.targets[0].isActive)
+        XCTAssertNil(t.targets[1].volumePercent, "an endpoint reporting no volume must stay nil, not zero")
+    }
+
+    func testRemotePlaybackNamesTheActiveTargetOnTheSnapshot() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onDevices(devices: [device("speaker", "Kitchen", .speaker, active: true, volume: 0.4)])
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: true))
+
+        let frame = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .player(.snapshot(ps)) = $0.data, ps.target != nil { return true }
+            return false
+        }
+        guard case let .player(.snapshot(ps)) = frame.data else { return XCTFail("expected snapshot") }
+        XCTAssertEqual(ps.target?.id, "speaker")
+        XCTAssertEqual(ps.target?.name, "Kitchen", "the readout resolves the name off the cached cluster list")
+    }
+
+    func testLocalPlaybackLeavesTheTargetUnset() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onDevices(devices: [device("speaker", "Kitchen", .speaker, active: false, volume: 0.4)])
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: false))
+
+        let frame = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .player(.snapshot(ps)) = $0.data, ps.track != nil { return true }
+            return false
+        }
+        guard case let .player(.snapshot(ps)) = frame.data else { return XCTFail("expected snapshot") }
+        XCTAssertNil(ps.target, "playing on the phone itself is not a remote endpoint")
+    }
+
+    func testTransferToForwardsToTheClient() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+
+        try await h.driver.send(.player(.transferTo(TransferTo(targetId: "speaker"))))
+        try await waitFor("transfer") { fake.transferCalls == ["speaker"] }
+    }
+
     func testQueuePushSendsQueueChanged() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
@@ -455,7 +511,6 @@ final class SpotifyGlueTests: XCTestCase {
         let fake = FakeClient()
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
-        // seed a held queue with no player push, so the cached now-playing track is nil.
         fake.observer?.onQueue(queue: Spotify.Queue(previous: [], current: nil, next: [npTrack("spotify:track:2", "Next")]))
         _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.queueChanged) = $0.data { return true }; return false }
 
@@ -496,7 +551,6 @@ final class SpotifyGlueTests: XCTestCase {
         let fake = FakeClient()
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
-        // the player push seeds the context uri; the queue push seeds the upcoming items.
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Now")))
         _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
         fake.observer?.onQueue(queue: Spotify.Queue(
@@ -557,14 +611,12 @@ final class SpotifyGlueTests: XCTestCase {
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
 
-        // a playing track claims authority + sets now-playing.
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
         _ = try await h.driver.waitOutbound(timeout: .seconds(20)) {
             if case let .authority(.claim(c)) = $0.data, c.scope == .nowPlayingPlayback { return true }
             return false
         }
         let cleared = expectation(description: "now-playing cleared on logout")
-        // the deferred companion.stop() -> detach clears now-playing a second time
         cleared.assertForOverFulfill = false
         await h.glue.setNowPlayingObserver { np in if np == nil { cleared.fulfill() } }
 
@@ -618,6 +670,12 @@ private func npTrack(_ uri: String, _ name: String, saved: Bool = false) -> Spot
         album: Spotify.Album(uri: "spotify:album:1", name: "Album", imageId: "ab67616d00001e02deadbeef"),
         durationMs: 1000, imageId: "ab67616d00001e02deadbeef", isEpisode: false, saved: saved, queued: false
     )
+}
+
+private func device(
+    _ id: String, _ name: String, _ kind: Spotify.DeviceKind, active: Bool, volume: Float
+) -> Spotify.Device {
+    Spotify.Device(id: id, name: name, kind: kind, isActive: active, volume: volume)
 }
 
 private func state(_ t: Spotify.Track, remote: Bool = false) -> Spotify.PlayerState {

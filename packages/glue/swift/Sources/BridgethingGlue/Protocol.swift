@@ -3,16 +3,7 @@ import BridgethingLyrics
 import BridgethingSchema
 import Foundation
 
-/// Pluggable music-provider abstraction over a connected `BridgethingGateway`.
-///
-/// The companion calls `attach(gateway:)` after the gateway is running and
-/// dispatches inbound player verbs, asset requests, and lyrics requests to
-/// the corresponding methods. Outbound (NowPlaying delta, authority claim/release)
-/// is the glue's own responsibility once it holds the gateway reference.
-///
-/// Glues contribute `uriSchemes`, `musicProvider`, and `lyricsSupported`;
-/// capability composition is companion-level.
-public protocol BridgethingGlue: Sendable {
+public protocol BridgethingGlue: NowPlayingTransport {
     static var name: String { get }
     static var displayName: String { get }
 
@@ -25,30 +16,22 @@ public protocol BridgethingGlue: Sendable {
     func detach() async
 
     func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
+
+    func setNowPlayingSink(_ sink: (any NowPlayingSink)?) async
+
     func setArtProfile(heroPx: Int, thumbPx: Int) async
 
     func handlePeerConnected(allowAutoResume: Bool) async
-
-    /// Inbound transport-control verbs. Default impls throw `GlueError.notImplemented`;
-    func play(_ uri: PlayUri) async throws
-    func queue(_ req: QueueUri) async throws
-    func pause() async throws
-    func resume() async throws
-    func skipNext() async throws
-    func skipPrev() async throws
-    func skipToIndex(_ index: UInt32) async throws
-    func seekTo(_ ms: UInt32) async throws
-    func setShuffle(_ on: Bool) async throws
-    func setRepeat(_ mode: BridgethingSchema.RepeatMode) async throws
-    func setSpeed(_ speed: Float) async throws
-    func setCrossfade(_ durationMs: UInt32?) async throws
 
     func ownsVolume() async -> Bool
     func volumeUp() async throws
     func volumeDown() async throws
     func setVolume(_ level: Float) async throws
 
-    /// Library verbs; default impls throw `GlueError.notImplemented`.
+    var supportsPlaybackTargets: Bool { get }
+
+    func transferTo(targetId: String) async throws
+
     func browse(_ req: LibraryBrowseRequest) async throws -> BrowseResult
     func resolveContext(_ uri: String) async throws -> ContextResolveReply
     func search(_ req: LibrarySearchRequest) async throws -> SearchResult
@@ -59,26 +42,14 @@ public protocol BridgethingGlue: Sendable {
     func favoritesSet(_ item: ItemRef, liked: Bool) async throws
     func favoritesSetMany(_ entries: [FavoritesSet]) async throws
 
-    /// Subscribe to auth-lifecycle updates. The glue drives the lifecycle:
-    /// `pending(nil)` while negotiating, `pending(prompt)` once a device-code
-    /// prompt is available, `authenticated` after token exchange, `failed` on error.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async
-
-    /// Subscribe to service-health updates: `ok` when the provider's API is
-    /// responsive, `rateLimited`/`unreachable` when degraded. Distinct from auth.
     func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async
 
-    /// Bytes for an asset id this glue produced. Return nil if the id isn't owned by this glue.
     func asset(id: String) async throws -> AssetBytes?
-
-    /// Provider-native lyrics path. Return nil to fall through to the companion's `LyricsResolver`.
     func lyrics(for track: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics?
-
-    /// Live augmentation state for the debug surface. Default is all-false.
     func debugState() async -> GlueDebugState
 }
 
-/// Snapshot of a glue's now-playing augmentation, surfaced to the debug page.
 public struct GlueDebugState: Sendable {
     public let authorityPlaybackHeld: Bool
     public let authorityMetadataHeld: Bool
@@ -95,22 +66,12 @@ public struct GlueDebugState: Sendable {
 public extension BridgethingGlue {
     func debugState() async -> GlueDebugState { GlueDebugState() }
 
-    func play(_: PlayUri) async throws { throw GlueError.notImplemented }
-    func queue(_: QueueUri) async throws { throw GlueError.notImplemented }
-    func pause() async throws { throw GlueError.notImplemented }
-    func resume() async throws { throw GlueError.notImplemented }
-    func skipNext() async throws { throw GlueError.notImplemented }
-    func skipPrev() async throws { throw GlueError.notImplemented }
-    func skipToIndex(_: UInt32) async throws { throw GlueError.notImplemented }
-    func seekTo(_: UInt32) async throws { throw GlueError.notImplemented }
-    func setShuffle(_: Bool) async throws { throw GlueError.notImplemented }
-    func setRepeat(_: BridgethingSchema.RepeatMode) async throws { throw GlueError.notImplemented }
-    func setSpeed(_: Float) async throws { throw GlueError.notImplemented }
-    func setCrossfade(_: UInt32?) async throws { throw GlueError.notImplemented }
     func ownsVolume() async -> Bool { false }
     func volumeUp() async throws { throw GlueError.notImplemented }
     func volumeDown() async throws { throw GlueError.notImplemented }
     func setVolume(_: Float) async throws { throw GlueError.notImplemented }
+    var supportsPlaybackTargets: Bool { false }
+    func transferTo(targetId _: String) async throws { throw GlueError.notImplemented }
     func browse(_: LibraryBrowseRequest) async throws -> BrowseResult { throw GlueError.notImplemented }
     func search(_: LibrarySearchRequest) async throws -> SearchResult { throw GlueError.notImplemented }
     func resolveContext(_: String) async throws -> ContextResolveReply { throw GlueError.notImplemented }
@@ -123,29 +84,25 @@ public extension BridgethingGlue {
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
     func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
+    func setNowPlayingSink(_: (any NowPlayingSink)?) async {}
     func setArtProfile(heroPx _: Int, thumbPx _: Int) async {}
     func handlePeerConnected(allowAutoResume _: Bool) async {}
 
-    /// Default for glues without an auth surface: report ready immediately.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
         observer(.authenticated)
     }
 
-    /// Default for glues without a health surface: always healthy.
     func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async {
         observer(.ok)
     }
 }
 
-/// Auth lifecycle state surfaced to the host. Intentionally narrower than the wire types
-/// so glues don't depend on the schema package.
 public enum GlueAuthState: Sendable {
     case pending(GlueDeviceCodePrompt?)
     case authenticated
     case failed(String)
 }
 
-/// Provider service health, surfaced alongside (not inside) auth state.
 public enum GlueServiceHealth: Sendable {
     case ok
     case rateLimited(retryAfterSeconds: Int)
@@ -168,8 +125,6 @@ public struct GlueDeviceCodePrompt: Sendable {
     }
 }
 
-/// NowPlaying snapshot surfaced by the active glue. Carries the raw artwork URL so the
-/// UI can load directly from the provider's CDN.
 public struct GlueNowPlaying: Sendable {
     public let update: NowPlayingUpdate
     public let artworkUrl: String?
@@ -180,7 +135,6 @@ public struct GlueNowPlaying: Sendable {
     }
 }
 
-/// Bytes payload returned from `BridgethingGlue.asset(id:)`.
 public struct AssetBytes: Sendable {
     public let bytes: Data
     public let mime: String?

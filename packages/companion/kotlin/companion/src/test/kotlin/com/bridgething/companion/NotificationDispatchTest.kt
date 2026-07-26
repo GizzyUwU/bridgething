@@ -25,29 +25,20 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/**
- * drives the [NotificationDispatcher] over a fake [NotificationBackend] and the in-memory wire: inbound
- * invokes route to the backend, outbound posted/removed relay to the gateway, a connect replays the backend's
- * shade per-peer, and the relay is suppressed while the notifications capability is off.
- */
 class NotificationDispatchTest {
-    private class RecordingBackend(
-        @Volatile var shade: List<WireNotification> = emptyList(),
-    ) : NotificationBackend {
+    private class RecordingBackend : NotificationBackend {
         val positive = CopyOnWriteArrayList<String>()
         val negative = CopyOnWriteArrayList<String>()
         private val _events = MutableSharedFlow<NotificationOutEvent>(extraBufferCapacity = 64)
         override val events: Flow<NotificationOutEvent> = _events.asSharedFlow()
-        override fun activeNotifications(): List<WireNotification> = shade
         override suspend fun invokePositive(id: String) { positive.add(id) }
         override suspend fun invokeNegative(id: String) { negative.add(id) }
         fun emit(event: NotificationOutEvent) { _events.tryEmit(event) }
     }
 
-    private fun wireNotif(id: String, preExisting: Boolean = false) = WireNotification(
+    private fun wireNotif(id: String) = WireNotification(
         id = id,
         app = NotificationApp(bundleId = "com.example", displayName = "Example", iconAssetId = null),
         category = NotificationCategory.Other,
@@ -55,7 +46,7 @@ class NotificationDispatchTest {
         subtitle = null,
         message = "Body",
         timestampUnixS = 0u,
-        flags = NotificationFlags(silent = false, important = false, preExisting = preExisting),
+        flags = NotificationFlags(silent = false, important = false),
         positiveAction = null,
         negativeAction = null,
     )
@@ -122,16 +113,18 @@ class NotificationDispatchTest {
     }
 
     @Test
-    fun `connect replays the backend shade to the peer`() = runBlocking {
-        val backend = RecordingBackend(shade = listOf(wireNotif("s-1", preExisting = true), wireNotif("s-2", preExisting = true)))
+    fun `connect does not backfill the peer with the existing shade`() = runBlocking {
+        val backend = RecordingBackend()
         val (companion, driver) = boot(this, backend)
-        val first = driver.waitOutbound(20.seconds) { postedId(it) == "s-1" }
-        val second = driver.waitOutbound(20.seconds) { postedId(it) == "s-2" }
-        assertTrue(
-            ((first.data as GatewayToBridgeMsgData.Notifications).data as GatewayToBridgeNotificationsMsg.Posted).data.flags.preExisting,
-            "a replayed shade notification must be flagged preExisting",
-        )
-        assertEquals("s-2", postedId(second))
+        val backfilled = try {
+            driver.waitOutbound(800.milliseconds) { postedId(it) != null }
+            true
+        } catch (e: TimeoutCancellationException) {
+            false
+        }
+        assertFalse(backfilled, "a connect must post nothing; only notifications posted afterwards are forwarded")
+        backend.emit(NotificationOutEvent.Posted(wireNotif("live-1")))
+        assertEquals("live-1", postedId(driver.waitOutbound(20.seconds) { postedId(it) == "live-1" }))
         companion.stop()
     }
 

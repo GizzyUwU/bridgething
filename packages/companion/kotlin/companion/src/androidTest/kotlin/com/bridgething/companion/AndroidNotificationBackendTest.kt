@@ -15,12 +15,6 @@ import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * Real-backend tier: drives [AndroidNotificationBackend] against a real [PendingIntent] on the device /
- * emulator, with no mocking of the firing mechanism. Invoking the resolved action must actually deliver the
- * PendingIntent (the same `send()` a phone notification's action uses). Dispatch routing is covered on the
- * JVM by [NotificationDispatchTest].
- */
 @RunWith(AndroidJUnit4::class)
 class AndroidNotificationBackendTest {
     private val context: Context
@@ -41,7 +35,6 @@ class AndroidNotificationBackendTest {
                 PendingIntent.FLAG_IMMUTABLE,
             )
             val backend = AndroidNotificationBackend(
-                activeShade = { emptyList() },
                 resolveAction = { id, positive -> if (id == "n-1" && positive) pending else null },
             )
             backend.invokePositive("n-1")
@@ -53,7 +46,7 @@ class AndroidNotificationBackendTest {
 
     @Test
     fun invokeWithNoResolvedActionIsNoOp() = runBlocking {
-        val backend = AndroidNotificationBackend(activeShade = { emptyList() }, resolveAction = { _, _ -> null })
+        val backend = AndroidNotificationBackend(resolveAction = { _, _ -> null })
         backend.invokePositive("missing")
         backend.invokeNegative("missing")
     }

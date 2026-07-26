@@ -59,7 +59,7 @@ pub fn ro_webapps_dir() -> PathBuf {
   {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
       .join("../../")
-      .join("packages/hub-webapp")
+      .join("packages/webapps/builtin/hub")
   }
 
   #[cfg(not(debug_assertions))]

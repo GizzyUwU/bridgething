@@ -1,4 +1,6 @@
-import { Logger, LogVerbosity } from '@bridgething/lib';
+import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
+
+import { Logger, LogVerbosity, walkUuidFields } from '@bridgething/lib';
 import type { BridgeToClientMsg, ClientToBridgeMsg, ClientToBridgeMsgData } from '@bridgething/lib/client';
 import { newUuid } from '@bridgething/lib/uuid';
 
@@ -48,7 +50,7 @@ type PendingRequest = {
 };
 
 type QueuedSend = {
-  text: string;
+  frame: Uint8Array<ArrayBuffer>;
   resolve: () => void;
   reject: (err: Error) => void;
 };
@@ -163,10 +165,12 @@ export class BridgethingClient {
    */
   async send(message: ClientToBridgeMsg): Promise<void> {
     this.logger.trace('send', message);
-    const text = JSON.stringify(message);
+    // msgpack encode returns a view into its own scratch buffer; copy it so a
+    // queued frame cannot be clobbered before it flushes
+    const frame = new Uint8Array(msgpackEncode(walkUuidFields(message, 'encode')));
     if (this.socket && this.state === 'open') {
       try {
-        this.socket.send(text);
+        this.socket.send(frame);
       } catch (err) {
         throw new ClientError('failed to send message', 'send-failed', err);
       }
@@ -176,7 +180,7 @@ export class BridgethingClient {
       throw new ClientError('client not connected', 'not-connected');
     }
     return new Promise<void>((resolve, reject) => {
-      this.sendQueue.push({ text, resolve, reject });
+      this.sendQueue.push({ frame, resolve, reject });
     });
   }
 
@@ -253,19 +257,20 @@ export class BridgethingClient {
   }
 
   private handleMessage(raw: unknown): void {
-    let text: string;
-    if (typeof raw === 'string') {
-      text = raw;
-    } else if (raw instanceof ArrayBuffer) {
-      text = new TextDecoder().decode(raw);
-    } else {
-      this.emit({ type: 'decodeError', description: 'unknown message payload type' });
-      return;
-    }
-
     let msg: BridgeToClientMsg;
     try {
-      msg = JSON.parse(text) as BridgeToClientMsg;
+      if (raw instanceof ArrayBuffer) {
+        // uuids cross msgpack as 16-byte bin, so they need the same walk the
+        // gateway transport does or nothing correlates to its request
+        msg = walkUuidFields(msgpackDecode(new Uint8Array(raw)), 'decode') as BridgeToClientMsg;
+      } else if (typeof raw === 'string') {
+        // the daemon answers in the encoding it was last spoken to, so a text
+        // frame can still arrive before our first request lands
+        msg = JSON.parse(raw) as BridgeToClientMsg;
+      } else {
+        this.emit({ type: 'decodeError', description: 'unknown message payload type' });
+        return;
+      }
     } catch (err) {
       this.emit({ type: 'decodeError', description: errorMessage(err) });
       return;
@@ -285,7 +290,7 @@ export class BridgethingClient {
         continue;
       }
       try {
-        this.socket.send(queued.text);
+        this.socket.send(queued.frame);
         queued.resolve();
       } catch (err) {
         queued.reject(new ClientError('failed to send message', 'send-failed', err));

@@ -23,7 +23,9 @@ mod audio;
 mod browse_content;
 mod geo_watchers;
 pub mod log_tap;
+mod lyrics;
 pub mod meta;
+mod playback_targets;
 mod root_browse;
 pub mod routes;
 pub mod storage;
@@ -36,6 +38,8 @@ pub use audio::{AudioError, AudioManager};
 pub use browse_content::BrowseContentCache;
 pub use geo_watchers::{GeoWatchers, WatchAggregate, WatchChange};
 pub use log_tap::{LogTap, LogTapLayer};
+pub use lyrics::LyricsCache;
+pub use playback_targets::{PlaybackTargetError, PlaybackTargetStore};
 pub use root_browse::RootBrowseCache;
 pub use routes::RouteTable;
 pub use storage::{DeviceStore, KvStore, MetaStore};
@@ -75,11 +79,13 @@ pub struct AppState {
   pub geo_watchers: GeoWatchers,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
+  pub playback_targets: PlaybackTargetStore,
   pub root_browse: RootBrowseCache,
+  pub lyrics: LyricsCache,
   pub browse_content: BrowseContentCache,
   pub transfer_sinks: TransferSinks,
   pub transfer_outbound: TransferOutbound,
-  pub modern_port: std::sync::OnceLock<u16>,
+  pub modern_port: u16,
 
   db: DatabaseConnection,
   meta_store: MetaStore,
@@ -94,6 +100,7 @@ impl AppState {
     let StateAssembly {
       client_man,
       bus,
+      modern_port,
       meta,
       player,
       chrome,
@@ -117,6 +124,7 @@ impl AppState {
       geo_watchers,
       log_tap,
       tunnel_routes,
+      playback_targets,
       transfer_sinks,
       db,
       meta_store,
@@ -151,11 +159,13 @@ impl AppState {
       geo_watchers,
       log_tap,
       tunnel_routes,
+      playback_targets,
       root_browse: RootBrowseCache::default(),
+      lyrics: LyricsCache::default(),
       browse_content: BrowseContentCache::default(),
       transfer_sinks,
       transfer_outbound: TransferOutbound::default(),
-      modern_port: std::sync::OnceLock::new(),
+      modern_port,
       db,
       meta_store,
       _asset_cache_handle: asset_cache_handle,
@@ -196,12 +206,7 @@ impl AppState {
       Some(id) => self.webapps.manifest(id).await.map(|m| m.overlays).unwrap_or_default(),
       None => libbridgething::OverlayProfile::default(),
     };
-    let port = self
-      .modern_port
-      .get()
-      .copied()
-      .unwrap_or(libbridgething::BRIDGETHING_WS_MODERN_PORT);
-    let script = crate::overlay::overlay_script(&profile, port).map(chrome::OverlayScript);
+    let script = crate::overlay::overlay_script(&profile, self.modern_port).map(chrome::OverlayScript);
     if let Err(e) = self
       .chrome
       .send(chrome::ChromeCommand::SetOverlay {
@@ -234,6 +239,7 @@ impl AppState {
 pub struct StateAssembly {
   pub client_man: ClientMan,
   pub bus: WireEventBus,
+  pub modern_port: u16,
   pub meta: meta::DeviceMeta,
   pub player: crate::player::Player,
   pub chrome: chrome::Chrome,
@@ -257,6 +263,7 @@ pub struct StateAssembly {
   pub geo_watchers: GeoWatchers,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
+  pub playback_targets: PlaybackTargetStore,
   pub transfer_sinks: TransferSinks,
   pub db: DatabaseConnection,
   pub meta_store: MetaStore,

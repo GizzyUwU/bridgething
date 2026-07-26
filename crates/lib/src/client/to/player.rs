@@ -2,7 +2,7 @@ use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{CurrentlyActiveApplication, NowPlayingUpdate, PlayerError, PlayerState, QueueItem};
+use crate::{CurrentlyActiveApplication, NowPlayingUpdate, PlaybackTarget, PlayerError, PlayerState, QueueItem};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -36,6 +36,15 @@ pub struct PlayerErrorReply {
   pub error: PlayerError,
 }
 
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+/// Response to `targetsGet`, also carried by the `TargetsChanged` event.
+pub struct PlayerTargetsReply {
+  pub targets: Vec<PlaybackTarget>,
+}
+
 /// Daemon -> webapp player surface. `Snapshot` lands on connect with the
 /// current player state; `Delta` is the `NowPlayingUpdate` stream the
 /// SDK auto-merges; `QueueChanged` fires when the queue mutates without
@@ -52,10 +61,14 @@ pub enum BridgeToClientPlayerMsg {
   Delta(NowPlayingUpdate),
   #[bridge_event]
   QueueChanged(PlayerQueueReply),
+  #[bridge_event]
+  TargetsChanged(PlayerTargetsReply),
   #[bridge_response]
   StateReply(PlayerStateReply),
   #[bridge_response]
   QueueReply(PlayerQueueReply),
+  #[bridge_response]
+  TargetsReply(PlayerTargetsReply),
   #[bridge_response]
   ErrorReply(PlayerErrorReply),
 }

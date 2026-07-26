@@ -50,14 +50,12 @@ public sealed interface NotificationOutEvent {
 
 public interface NotificationBackend {
     public val events: Flow<NotificationOutEvent>
-    public fun activeNotifications(): List<WireNotification>
     public suspend fun invokePositive(id: String)
     public suspend fun invokeNegative(id: String)
 }
 
 public object NoOpNotificationBackend : NotificationBackend {
     override val events: Flow<NotificationOutEvent> = emptyFlow()
-    override fun activeNotifications(): List<WireNotification> = emptyList()
     override suspend fun invokePositive(id: String) {}
     override suspend fun invokeNegative(id: String) {}
 }

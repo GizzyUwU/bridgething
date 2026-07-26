@@ -8,7 +8,6 @@ import XCTest
 
 @testable import BridgethingCompanion
 
-/// Asset / lyrics / library-breadth dispatch coverage.
 final class AssetLyricsDispatchTests: XCTestCase {
     struct Harness {
         let companion: BridgethingCompanion
@@ -26,7 +25,7 @@ final class AssetLyricsDispatchTests: XCTestCase {
             lyricsResolver: lyricsResolver,
             host: HostInfo(appName: "test-companion", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         let driver = WireDriver(adapter: adapter)
         await driver.start()
@@ -82,8 +81,6 @@ final class AssetLyricsDispatchTests: XCTestCase {
         XCTAssertEqual(ref.id, requestId, "stream ref id must be the request id")
         XCTAssertEqual(ref.totalSize, UInt32(payload.count))
 
-        // fragments follow on the background lane, offset-ordered, complete, and
-        // never more than one window past the acked byte count.
         var assembled = Data()
         var acked: UInt32 = 0
         let windowBytes = 8 * 1024
@@ -130,7 +127,6 @@ final class AssetLyricsDispatchTests: XCTestCase {
             }
         }
         let elapsed = start.duration(to: .now)
-        // serial dispatch would be ~count * 400ms (2.4s); per-message concurrency is ~400ms.
         XCTAssertLessThan(
             elapsed, .milliseconds(1500),
             "asset dispatch must run per-message-concurrent, not serialize behind each fetch"
@@ -139,7 +135,6 @@ final class AssetLyricsDispatchTests: XCTestCase {
     }
 
     func testAssetMissReturnsNotFound() async throws {
-        // FakeGlue with no asset behavior returns nil -> notFound.
         let h = try await boot()
         let resp = try await h.driver.request(
             .asset(.request(AssetRequest(id: "art:missing", requestId: UUID()))),
@@ -155,7 +150,6 @@ final class AssetLyricsDispatchTests: XCTestCase {
     // MARK: - lyrics
 
     func testLyricsFallsThroughToResolver() async throws {
-        // FakeGlue.lyrics returns nil; the resolver chain supplies the hit.
         let canned = BridgethingLyrics.Lyrics(
             synced: [BridgethingLyrics.LyricLine(startMs: 0, text: "one more time")],
             plain: nil,
@@ -178,7 +172,6 @@ final class AssetLyricsDispatchTests: XCTestCase {
     }
 
     func testLyricsNoHitReturnsNilReply() async throws {
-        // Neither glue nor resolver has lyrics -> a reply carrying lyrics == nil
         let h = try await boot(lyricsResolver: FakeLyricsResolver(canned: nil))
         let resp = try await h.driver.request(
             .lyrics(.get(LyricsRequest(track: TrackIdentity(

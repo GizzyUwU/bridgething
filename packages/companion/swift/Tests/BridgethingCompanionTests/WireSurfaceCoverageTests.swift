@@ -15,7 +15,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
             lyricsResolver: FakeLyricsResolver(),
             host: HostInfo(appName: "coverage", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(FakeGlue())
+        try await companion.attach(FakeGlue())
         try await companion.start()
         let driver = WireDriver(adapter: adapter)
         await driver.start()
@@ -80,6 +80,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "player.play", "player.pause", "player.queue", "player.resume",
         "player.seekTo", "player.setCrossfade", "player.setRepeat", "player.setShuffle",
         "player.setSpeed", "player.skipNext", "player.skipPrev", "player.skipToIndex",
+        "player.transferTo",
         // library favorites
         "library.favoritesSet", "library.favoritesSetMany", "library.favoritesToggle",
         // geo

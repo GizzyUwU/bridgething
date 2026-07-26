@@ -116,6 +116,27 @@ pub struct PlayerStateGet;
 )]
 pub struct PlayerQueueGet;
 
+/// Webapp asks for the provider's remote endpoints
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Player,
+  request_variant = TargetsGet,
+  response = crate::client::PlayerTargetsReply,
+  response_variant = TargetsReply,
+)]
+pub struct PlayerTargetsGet;
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+/// Payload for `transferTo`: move playback to a remote endpoint.
+pub struct TransferTo {
+  /// A `PlaybackTarget.id` from the current target list.
+  pub target_id: String,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum, BridgeDispatch)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -161,10 +182,16 @@ pub enum ClientToBridgePlayerMsg {
   /// Set the crossfade duration.
   #[bridge_command]
   SetCrossfade(SetCrossfade),
+  /// Move playback to one of the provider's remote endpoints.
+  #[bridge_command]
+  TransferTo(TransferTo),
   /// Request the current `PlayerState` snapshot.
   #[bridge_request]
   StateGet,
   /// Request the current queue snapshot.
   #[bridge_request]
   QueueGet,
+  /// Request the provider's current remote endpoints.
+  #[bridge_request]
+  TargetsGet,
 }

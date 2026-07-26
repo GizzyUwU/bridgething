@@ -1,5 +1,6 @@
 pub mod avahi;
 pub mod power;
+pub mod socket;
 pub mod time;
 
 #[cfg(feature = "systemd")]

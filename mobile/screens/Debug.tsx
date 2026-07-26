@@ -115,22 +115,20 @@ function StateDump({
               />
             ))
           )}
-          <Row label="auth" value={snapshot.authState.kind} />
-          <Row
-            label="service"
-            value={
-              snapshot.serviceHealth.kind +
-              (snapshot.serviceHealth.retryAfterSeconds != null
-                ? ` (${snapshot.serviceHealth.retryAfterSeconds}s)`
-                : '')
-            }
-          />
-          <Row label="ANCS" value={snapshot.ancsAuthStatus} />
-          {snapshot.provider ? (
+          {snapshot.providers.map(p => (
             <Row
-              label="provider"
-              value={`${snapshot.provider.displayName}${snapshot.provider.available ? '' : ' (unavailable)'}`}
+              key={p.id}
+              label={p.displayName}
+              value={`${p.connected ? 'connected' : p.authState.kind}${
+                p.serviceHealth.kind === 'ok'
+                  ? ''
+                  : ` / ${p.serviceHealth.kind}`
+              }`}
             />
+          ))}
+          <Row label="ANCS" value={snapshot.ancsAuthStatus} />
+          {snapshot.libraryProvider ? (
+            <Row label="library" value={snapshot.libraryProvider} />
           ) : null}
         </Section>
       ) : null}

@@ -81,6 +81,10 @@ impl Client {
   pub fn webapp(&self) -> WebappSurface<'_> {
     WebappSurface(self)
   }
+  /// The `Lyrics` surface.
+  pub fn lyrics(&self) -> LyricsSurface<'_> {
+    LyricsSurface(self)
+  }
   /// The `Store` surface.
   pub fn store(&self) -> StoreSurface<'_> {
     StoreSurface(self)
@@ -373,6 +377,12 @@ impl<'a> LibrarySurface<'a> {
   ) -> Result<LibraryRecommendationsReply, RequestFailure<LibraryErrorReply>> {
     self.0.request(request).await
   }
+  pub async fn resolve_context(
+    &self,
+    request: LibraryResolveContext,
+  ) -> Result<LibraryResolveContextReply, RequestFailure<LibraryErrorReply>> {
+    self.0.request(request).await
+  }
   pub async fn favorites_list(
     &self,
     request: LibraryFavoritesList,
@@ -589,11 +599,20 @@ impl<'a> PlayerSurface<'a> {
       .command(ClientToBridgePlayerMsgCommand::SetCrossfade(payload))
       .await
   }
+  pub async fn transfer_to(&self, payload: TransferTo) -> Result<(), SdkError> {
+    self
+      .0
+      .command(ClientToBridgePlayerMsgCommand::TransferTo(payload))
+      .await
+  }
   pub async fn state_get(&self) -> Result<PlayerStateReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(PlayerStateGet).await
   }
   pub async fn queue_get(&self) -> Result<PlayerQueueReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(PlayerQueueGet).await
+  }
+  pub async fn targets_get(&self) -> Result<PlayerTargetsReply, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(PlayerTargetsGet).await
   }
   /// Stream of `Player` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientPlayerMsgEvent> + 'static {
@@ -744,6 +763,15 @@ impl<'a> WebappSurface<'a> {
         Err(_) => None,
       })
     })
+  }
+}
+
+/// Methods scoped to the `Lyrics` wire surface.
+pub struct LyricsSurface<'a>(&'a Client);
+
+impl<'a> LyricsSurface<'a> {
+  pub async fn get(&self) -> Result<LyricsReply, RequestFailure<LyricsErrorReply>> {
+    self.0.request(LyricsGet).await
   }
 }
 

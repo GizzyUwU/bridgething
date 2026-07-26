@@ -2,11 +2,8 @@ import type {
   BridgethingActiveWebapp,
   BridgethingAncsAuthStatus,
   BridgethingAncsSetupResult,
-  BridgethingAuthState,
   BridgethingBtDevice,
   BridgethingCapabilityFlags,
-  BridgethingCatalogEvent,
-  BridgethingCatalogPollConfig,
   BridgethingCompanionDebug,
   BridgethingConfigEntry,
   BridgethingDeviceLogLine,
@@ -18,7 +15,6 @@ import type {
   BridgethingOtaManifest,
   BridgethingOtaPollConfig,
   BridgethingProviderInfo,
-  BridgethingServiceHealth,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
   BridgethingWebappIcon,
@@ -36,9 +32,6 @@ export type {
   BridgethingBtBondState,
   BridgethingBtDevice,
   BridgethingCapabilityFlags,
-  BridgethingCatalogEvent,
-  BridgethingCatalogEventKind,
-  BridgethingCatalogPollConfig,
   BridgethingCompanionDebug,
   BridgethingConfigEntry,
   BridgethingConfigField,
@@ -72,49 +65,8 @@ export type {
   BridgethingWebappInfo,
 } from './specs/BridgethingSession.nitro';
 
-export type CatalogDownload = { url: string; size: number; sha256: string };
-
-export type CatalogVersion = {
-  version: string;
-  released_at: string;
-  download: CatalogDownload;
-  permissions: string[];
-  min_libbridgething_version: string;
-  changelog?: string | null;
-};
-
-export type CatalogApp = {
-  id: string;
-  name: string;
-  description: string;
-  author: string;
-  icon?: string | null;
-  homepage?: string | null;
-  source?: string | null;
-  versions: CatalogVersion[];
-};
-
-export type CatalogListing = {
-  app: CatalogApp;
-  sourceUrl: string;
-  newestCompatible?: CatalogVersion | null;
-  installedVersion?: string | null;
-  updateAvailable: boolean;
-  alsoAvailableFrom: string[];
-};
-
-export type CatalogUpdate = {
-  appId: string;
-  name: string;
-  installedVersion: string;
-  target: CatalogVersion;
-  sourceUrl: string;
-};
-
 export type SessionEvent =
-  | { type: 'providerChanged'; provider: BridgethingProviderInfo | null }
-  | { type: 'authStateChanged'; state: BridgethingAuthState }
-  | { type: 'serviceHealthChanged'; health: BridgethingServiceHealth }
+  | { type: 'providersChanged'; providers: BridgethingProviderInfo[] }
   | { type: 'peerConnected'; peer: BridgethingSessionPeer }
   | { type: 'peerDisconnected'; peerId: string }
   | { type: 'peerLinkFailed'; peer: BridgethingSessionPeer }
@@ -124,7 +76,6 @@ export type SessionEvent =
   | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
-  | { type: 'catalogEvent'; event: BridgethingCatalogEvent }
   | { type: 'log'; level: string; message: string };
 
 export class BridgethingSession {
@@ -169,20 +120,20 @@ export class BridgethingSession {
     return this.native.availableProviders();
   }
 
-  async setActiveProvider(id: string | null): Promise<void> {
-    await this.native.setActiveProvider(id);
+  async connectProvider(id: string): Promise<void> {
+    await this.native.connectProvider(id);
   }
 
-  async cancelAuth(): Promise<void> {
-    await this.native.cancelAuth();
+  async disconnectProvider(id: string): Promise<void> {
+    await this.native.disconnectProvider(id);
   }
 
-  async signOut(): Promise<void> {
-    await this.native.signOut();
+  async cancelAuth(id: string): Promise<void> {
+    await this.native.cancelAuth(id);
   }
 
-  async currentProvider(): Promise<BridgethingProviderInfo | null> {
-    return this.native.currentProvider();
+  async setProviderPriority(ids: string[]): Promise<void> {
+    await this.native.setProviderPriority(ids);
   }
 
   async snapshot(): Promise<BridgethingSessionSnapshot> {
@@ -318,41 +269,14 @@ export class BridgethingSession {
     await this.native.applyOtaUpdate(deviceId, channel, version, rootUrl);
   }
 
-  async catalogSources(): Promise<string[]> {
-    return this.native.catalogSources();
-  }
-
-  async addCatalogSource(url: string): Promise<void> {
-    await this.native.addCatalogSource(url);
-  }
-
-  async removeCatalogSource(url: string): Promise<void> {
-    await this.native.removeCatalogSource(url);
-  }
-
-  async refreshCatalog(): Promise<void> {
-    await this.native.refreshCatalog();
-  }
-
-  async availableApps(deviceId: string): Promise<CatalogListing[]> {
-    return JSON.parse(await this.native.availableCatalogApps(deviceId)) as CatalogListing[];
-  }
-
-  async checkForCatalogUpdates(deviceId: string): Promise<CatalogUpdate[]> {
-    return JSON.parse(await this.native.checkForCatalogUpdates(deviceId)) as CatalogUpdate[];
-  }
-
-  async installCatalogApp(
+  async installWebappFromUrl(
     deviceId: string,
-    appId: string,
-    version: string,
-    sourceUrl: string,
+    url: string,
+    sha256: string,
+    size: number,
+    provenance: string | null = null,
   ): Promise<BridgethingWebappInfo> {
-    return this.native.installCatalogApp(deviceId, appId, version, sourceUrl);
-  }
-
-  async setCatalogPollConfig(config: BridgethingCatalogPollConfig | null): Promise<void> {
-    await this.native.setCatalogPollConfig(config);
+    return this.native.installWebappFromUrl(deviceId, url, sha256, size, provenance);
   }
 
   async reconnectPeer(deviceId: string): Promise<void> {
@@ -418,14 +342,8 @@ export class BridgethingSession {
   }
 
   private wire(): void {
-    this.native.setOnProviderChanged(provider => {
-      this.dispatch({ type: 'providerChanged', provider });
-    });
-    this.native.setOnAuthStateChanged(state => {
-      this.dispatch({ type: 'authStateChanged', state });
-    });
-    this.native.setOnServiceHealthChanged(health => {
-      this.dispatch({ type: 'serviceHealthChanged', health });
+    this.native.setOnProvidersChanged(providers => {
+      this.dispatch({ type: 'providersChanged', providers });
     });
     this.native.setOnPeerConnected(peer => {
       this.dispatch({ type: 'peerConnected', peer });
@@ -453,9 +371,6 @@ export class BridgethingSession {
     });
     this.native.setOnOtaEvent(event => {
       this.dispatch({ type: 'otaEvent', event });
-    });
-    this.native.setOnCatalogEvent(event => {
-      this.dispatch({ type: 'catalogEvent', event });
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });
@@ -496,14 +411,8 @@ export class BridgethingDevice {
   deleteConfigField(webappId: string, key: string) {
     return this.session.deleteWebappConfigField(this.id, webappId, key);
   }
-  availableApps() {
-    return this.session.availableApps(this.id);
-  }
-  installApp(appId: string, version: string, sourceUrl: string) {
-    return this.session.installCatalogApp(this.id, appId, version, sourceUrl);
-  }
-  checkForCatalogUpdates() {
-    return this.session.checkForCatalogUpdates(this.id);
+  installAppFromUrl(url: string, sha256: string, size: number, provenance: string | null) {
+    return this.session.installWebappFromUrl(this.id, url, sha256, size, provenance);
   }
 }
 

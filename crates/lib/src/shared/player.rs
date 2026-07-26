@@ -13,6 +13,7 @@ pub const THUMBNAIL_SIZE: usize = 96;
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 /// A track with resolved album/artist metadata, used by library search
 /// and browse results. For live now-playing state see `MediaItem`.
@@ -51,6 +52,7 @@ pub enum Image {
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 /// An album reference.
 pub struct Album {
@@ -73,6 +75,7 @@ impl From<String> for Album {
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 /// An artist reference.
 pub struct Artist {
@@ -114,6 +117,7 @@ pub struct PlaybackOptions {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 /// Which player controls the current source supports; webapps disable the
 /// UI for any capability that is `false`.
@@ -224,6 +228,7 @@ pub struct Playback {
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct PlayerOptions {
   pub speed: f32,
@@ -241,8 +246,9 @@ impl Default for PlayerOptions {
 
 /// Optional context for `play({ uri })`. `context_uri` is the album /
 /// playlist / show URI the track is being played from; gateways with
-/// playlist support honor it for skip-next semantics. `position` is the
-/// 0-based index inside the context.
+/// playlist support honor it for skip-next semantics. A row inside the
+/// context is addressed by playing that row's own uri within it, so there
+/// is no index here.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -250,7 +256,6 @@ impl Default for PlayerOptions {
 #[ts(export, export_to = "shared.ts")]
 pub struct PlayContext {
   pub context_uri: String,
-  pub position: Option<u32>,
 }
 
 /// Where in the queue a `queue({ uri })` should land. `Append` (default)
@@ -307,6 +312,46 @@ pub struct PlaybackContext {
   pub name: Option<String>,
 }
 
+/// What kind of endpoint a `PlaybackTarget` is. Coarse on purpose: the
+/// provider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in
+/// their long tails, and webapps only pick an icon from this. Anything
+/// unrecognized maps to `Unknown` rather than leaking a provider string.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum PlaybackTargetKind {
+  #[default]
+  Unknown,
+  Phone,
+  Tablet,
+  Computer,
+  Speaker,
+  Tv,
+  GameConsole,
+  Automobile,
+  Wearable,
+}
+
+/// A remote endpoint the current provider can move playback to. Only
+/// meaningful when `SurfaceAvailability::playback_targets` is set.
+///
+/// `volume_percent` is `None` when the endpoint does not report volume.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlaybackTarget {
+  /// Provider-opaque endpoint id; pass back to `transferTo`.
+  pub id: String,
+  pub name: String,
+  pub kind: PlaybackTargetKind,
+  /// Whether this endpoint is the one currently playing.
+  pub is_active: bool,
+  pub volume_percent: Option<u32>,
+}
+
 /// Full player snapshot the daemon broadcasts to webapps. Initial value
 /// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
 /// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
@@ -322,6 +367,8 @@ pub struct PlayerState {
   pub queue: Vec<QueueItem>,
   pub options: PlayerOptions,
   pub context: Option<PlaybackContext>,
+  #[serde(default)]
+  pub target: Option<PlaybackTarget>,
 }
 
 /// Currently-playing track, populated to the extent the gateway/iAP2
@@ -369,6 +416,8 @@ pub enum PlayerError {
   NoGateway,
   /// `skipToIndex` referenced a queue index that doesn't exist.
   NotInQueue { index: u32 },
+  /// `transferTo` named an endpoint that is not in the current target list.
+  UnknownTarget { target_id: String },
 }
 
 #[cfg(test)]

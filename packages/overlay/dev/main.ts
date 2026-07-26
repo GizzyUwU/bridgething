@@ -84,7 +84,7 @@ function notification(
     subtitle: null,
     message,
     timestampUnixS: null,
-    flags: { silent, important: false, preExisting: false },
+    flags: { silent, important: false },
     positiveAction: null,
     negativeAction: null,
   };

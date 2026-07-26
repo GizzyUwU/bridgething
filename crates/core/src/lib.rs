@@ -95,6 +95,17 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let notifier = systemd::init_notifier();
 
   notifier.status("initializing bridgething...");
+
+  let listeners = net::Listeners::bind(
+    config.stock_bind,
+    config.modern_bind,
+    #[cfg(feature = "test-tap")]
+    config.frame_tap_bind,
+  )
+  .await
+  .expect("failed to open client listeners");
+  let modern_port = listeners.modern_addr().port();
+
   let static_meta = state::meta::SuperbirdMeta::read_or_default().await;
   let serial_number = static_meta.serial_number.clone();
   tracing::debug!("metadata: {:?}", &static_meta);
@@ -140,9 +151,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   )
   .await
   .expect("failed to initialize webapp registry");
-  if let Some(examples_dir) = config.examples_dir.clone() {
-    install::seed_examples(&webapps, &examples_dir, &seed_marker).await;
-  }
   meta_store
     .enforce_active_webapp_exists(&webapps)
     .await
@@ -167,6 +175,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
   let player = Player::new(bus.clone(), authority.clone(), assets.clone());
   let audio = AudioManager::new(authority.clone(), bus.clone());
+  let playback_targets = state::PlaybackTargetStore::new(bus.clone());
   let asset_wait = asset::wait::AssetWaitTracker::new();
   let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());
   let iap2_pending_art = handler::iap2::Iap2PendingArt::new();
@@ -176,12 +185,15 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     player.clone(),
     audio.clone(),
     capabilities.clone(),
+    playback_targets.clone(),
     ws_routes.clone(),
     stream_routes.clone(),
     log_tap.clone(),
   );
 
-  let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
+  let chrome = chrome::Chrome::init(format!("http://127.0.0.1:{modern_port}/"))
+    .await
+    .expect("failed to initialize chrome");
 
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
   let bluetooth_deps = BluetoothDeps {
@@ -256,6 +268,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let state = AppState::assemble(StateAssembly {
     client_man: client_man.clone(),
     bus,
+    modern_port,
     meta,
     player,
     chrome,
@@ -266,6 +279,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     spotify_wake_gate,
     authority,
     capabilities,
+    playback_targets,
     peers,
     telephony,
     time,
@@ -291,6 +305,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   spawn_ota_event_forwarder(bluetooth.clone(), state.client_man.clone(), ota_events_rx);
   spawn_nickname_observer(state.meta.subscribe(), bluetooth.clone(), state.bus.clone());
   spawn_next_art_warmer(state.clone(), bluetooth.clone());
+  spawn_asset_event_forwarder(state.assets.subscribe(), state.bus.clone());
 
   let transport = TransportController::new(
     state.authority.clone(),
@@ -299,25 +314,24 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     bluetooth.iap2.transport.clone(),
   );
 
-  notifier.status("initializing server binds...");
-  let server = net::Server::bind(
-    state.clone(),
-    config.stock_bind,
-    config.modern_bind,
-    #[cfg(feature = "test-tap")]
-    config.frame_tap_bind,
-  )
-  .await
-  .expect("failed to bind client servers");
+  notifier.status("starting servers...");
+  #[cfg(feature = "test-tap")]
+  let server_addrs = ServerAddrs {
+    stock: listeners.stock_addr(),
+    modern: listeners.modern_addr(),
+    frame_tap: listeners.frame_tap_addr(),
+  };
+  let server = net::Server::serve(state.clone(), listeners);
+
+  if let Err(err) = state.chrome.send(chrome::ChromeCommand::NoteServing).await {
+    tracing::warn!("failed to tell the chrome worker we are serving: {err:?}");
+  }
 
   state.sync_overlay(true).await;
 
-  #[cfg(feature = "test-tap")]
-  let server_addrs = ServerAddrs {
-    stock: server.stock_addr(),
-    modern: server.modern_addr(),
-    frame_tap: server.frame_tap_addr(),
-  };
+  if let Some(examples_dir) = config.examples_dir.clone() {
+    install::seed_examples(&state.webapps, &examples_dir, &seed_marker).await;
+  }
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota);
@@ -501,6 +515,33 @@ fn spawn_ota_event_forwarder(
       }
       if let Some(mirror) = client_mirror {
         let _ = client_man.broadcast_event(mirror).await;
+      }
+    }
+  });
+}
+
+fn spawn_asset_event_forwarder(
+  mut rx: tokio::sync::broadcast::Receiver<asset::AssetCacheEvent>,
+  bus: net::WireEventBus,
+) {
+  use libbridgething::client::{AssetCleared, AssetReady, BridgeToClientAssetMsgEvent};
+  use tokio::sync::broadcast::error::RecvError;
+  tokio::spawn(async move {
+    loop {
+      let event = match rx.recv().await {
+        Ok(event) => event,
+        Err(RecvError::Lagged(skipped)) => {
+          tracing::debug!(skipped, "asset event forwarder lagged");
+          continue;
+        }
+        Err(RecvError::Closed) => break,
+      };
+      let client_event = match event {
+        asset::AssetCacheEvent::Ready { id } => BridgeToClientAssetMsgEvent::Ready(AssetReady { id }),
+        asset::AssetCacheEvent::Cleared { id } => BridgeToClientAssetMsgEvent::Cleared(AssetCleared { id }),
+      };
+      if let Err(errs) = bus.broadcast_event(client_event).await {
+        tracing::debug!(count = errs.len(), "asset-event client broadcast non-fatal errors");
       }
     }
   });

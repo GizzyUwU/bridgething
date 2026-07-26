@@ -75,6 +75,8 @@ import type {
   LibraryFavoritesListReply,
   LibraryRecommendations,
   LibraryRecommendationsReply,
+  LibraryResolveContext,
+  LibraryResolveContextReply,
   LibrarySearch,
   LibrarySearchReply,
   LogsSubscribe,
@@ -82,6 +84,8 @@ import type {
   LogsTail,
   LogsTailReply,
   LogsUnsubscribe,
+  LyricsErrorReply,
+  LyricsReply,
   MicMute,
   MicUnmute,
   NetFetch,
@@ -115,6 +119,7 @@ import type {
   PlayerErrorReply,
   PlayerQueueReply,
   PlayerStateReply,
+  PlayerTargetsReply,
   QueueUri,
   SeekTo,
   SetBluetoothAlias,
@@ -128,6 +133,7 @@ import type {
   SkipToIndex,
   StorageResponse,
   TimeSnapshot,
+  TransferTo,
   Tts,
   TtsCancel,
   TtsEnded,
@@ -210,6 +216,7 @@ export type LibraryInboundHandlers = {
   browseReply: (msg: LibraryBrowseReply) => void;
   searchReply: (msg: LibrarySearchReply) => void;
   recommendationsReply: (msg: LibraryRecommendationsReply) => void;
+  resolveContextReply: (msg: LibraryResolveContextReply) => void;
   favoritesListReply: (msg: LibraryFavoritesListReply) => void;
   favoritesContainsReply: (msg: LibraryFavoritesContainsReply) => void;
   libraryErrorReply: (msg: LibraryErrorReply) => void;
@@ -249,8 +256,10 @@ export type PlayerInboundHandlers = {
   snapshot: (msg: PlayerStateReply) => void;
   delta: (msg: NowPlayingUpdate) => void;
   queueChanged: (msg: PlayerQueueReply) => void;
+  targetsChanged: (msg: PlayerTargetsReply) => void;
   stateReply: (msg: PlayerStateReply) => void;
   queueReply: (msg: PlayerQueueReply) => void;
+  targetsReply: (msg: PlayerTargetsReply) => void;
   errorReply: (msg: PlayerErrorReply) => void;
 };
 
@@ -1390,6 +1399,18 @@ export class LibrarySurface {
     });
   }
 
+  /** Subscribe to `Library::ResolveContextReply` from the daemon. */
+  onResolveContextReply(handler: (msg: LibraryResolveContextReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'resolveContextReply') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Library::FavoritesListReply` from the daemon. */
   onFavoritesListReply(handler: (msg: LibraryFavoritesListReply) => void): () => void {
     return this._client.on(event => {
@@ -1465,6 +1486,10 @@ export class LibrarySurface {
         }
         case 'recommendationsReply': {
           handlers.recommendationsReply?.(inner.data);
+          return;
+        }
+        case 'resolveContextReply': {
+          handlers.resolveContextReply?.(inner.data);
           return;
         }
         case 'favoritesListReply': {
@@ -1566,6 +1591,23 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'recommendationsReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async resolveContext(
+    req: LibraryResolveContext,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibraryResolveContextReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'resolveContext', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'resolveContextReply') return { ok: true, response: inner.data };
       if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -2296,6 +2338,18 @@ export class PlayerSurface {
     });
   }
 
+  /** Subscribe to `Player::TargetsChanged` from the daemon. */
+  onTargetsChanged(handler: (msg: PlayerTargetsReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'targetsChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Player::StateReply` from the daemon. */
   onStateReply(handler: (msg: PlayerStateReply) => void): () => void {
     return this._client.on(event => {
@@ -2316,6 +2370,18 @@ export class PlayerSurface {
       if (data.type !== 'player') return;
       const inner = data.data;
       if (inner.event !== 'queueReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::TargetsReply` from the daemon. */
+  onTargetsReply(handler: (msg: PlayerTargetsReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'targetsReply') return;
       handler(inner.data);
     });
   }
@@ -2361,12 +2427,20 @@ export class PlayerSurface {
           handlers.queueChanged?.(inner.data);
           return;
         }
+        case 'targetsChanged': {
+          handlers.targetsChanged?.(inner.data);
+          return;
+        }
         case 'stateReply': {
           handlers.stateReply?.(inner.data);
           return;
         }
         case 'queueReply': {
           handlers.queueReply?.(inner.data);
+          return;
+        }
+        case 'targetsReply': {
+          handlers.targetsReply?.(inner.data);
           return;
         }
         case 'errorReply': {
@@ -2501,6 +2575,16 @@ export class PlayerSurface {
     await this._client.send(msg);
   }
 
+  /** Send `Player::TransferTo` to the daemon. */
+  async transferTo(payload: TransferTo): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'transferTo', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
   /** Typed request to the daemon: webapp sends, daemon responds. */
   async stateGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<PlayerStateReply, never>> {
     const wireData: ClientToBridgeMsg['data'] = { type: 'player', data: { event: 'stateGet' } };
@@ -2522,6 +2606,19 @@ export class PlayerSurface {
     if (d.type === 'player') {
       const inner = d.data;
       if (inner.event === 'queueReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async targetsGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<PlayerTargetsReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'player', data: { event: 'targetsGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'player') {
+      const inner = d.data;
+      if (inner.event === 'targetsReply') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -3321,6 +3418,24 @@ export class ForwardSurface {
   }
 }
 
+export class LyricsSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async get(options?: { timeoutMs?: number }): Promise<TypedRequestResult<LyricsReply, LyricsErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'lyrics', data: { event: 'get' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'lyrics') {
+      const inner = d.data;
+      if (inner.event === 'lyricsReply') return { ok: true, response: inner.data };
+      if (inner.event === 'lyricsErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
 export class StoreSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
@@ -3453,6 +3568,8 @@ export interface ClientSurfaces {
   readonly webapp: WebappSurface;
   /** Methods scoped to the `Forward` wire surface. */
   readonly forward: ForwardSurface;
+  /** Methods scoped to the `Lyrics` wire surface. */
+  readonly lyrics: LyricsSurface;
   /** Methods scoped to the `Store` wire surface. */
   readonly store: StoreSurface;
   /** Exhaustive subscribe across every inbound wire surface. */
@@ -3480,6 +3597,7 @@ type ClientSurfaceCache = {
   voice?: VoiceSurface;
   webapp?: WebappSurface;
   forward?: ForwardSurface;
+  lyrics?: LyricsSurface;
   store?: StoreSurface;
 };
 
@@ -3648,6 +3766,14 @@ export function applyDispatch(): void {
     get(this: BridgethingClient): ForwardSurface {
       const bucket = bucketFor(this);
       return (bucket.forward ??= new ForwardSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'lyrics', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): LyricsSurface {
+      const bucket = bucketFor(this);
+      return (bucket.lyrics ??= new LyricsSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'store', {
@@ -3924,6 +4050,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.recommendationsReply?.(inner.data);
             return;
           }
+          case 'resolveContextReply': {
+            innerHandlers.resolveContextReply?.(inner.data);
+            return;
+          }
           case 'favoritesListReply': {
             innerHandlers.favoritesListReply?.(inner.data);
             return;
@@ -4097,12 +4227,20 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.queueChanged?.(inner.data);
             return;
           }
+          case 'targetsChanged': {
+            innerHandlers.targetsChanged?.(inner.data);
+            return;
+          }
           case 'stateReply': {
             innerHandlers.stateReply?.(inner.data);
             return;
           }
           case 'queueReply': {
             innerHandlers.queueReply?.(inner.data);
+            return;
+          }
+          case 'targetsReply': {
+            innerHandlers.targetsReply?.(inner.data);
             return;
           }
           case 'errorReply': {

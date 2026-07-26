@@ -164,7 +164,7 @@ internal class SystemMediaSource(
             track = track,
             playback = playback,
             queue = emptyList(),
-            options = PlayerOptions(speed = snap.speed ?: 1.0f, crossfade_ms = null),
+            options = PlayerOptions(speed = snap.speed ?: 1.0f, crossfadeMs = null),
             context = snap.queueTitle?.let { PlaybackContext(uri = "system:$packageName:context", name = it) },
         )
     }

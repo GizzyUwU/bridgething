@@ -74,7 +74,10 @@ public actor BridgethingCompanion {
     private let lyricsResolver: any LyricsResolver
     private var capFlags: CompanionCapabilityFlags
 
-    private var activeGlue: (any BridgethingGlue)?
+    private var glues: [String: any BridgethingGlue] = [:]
+    private var providerPriority: [String] = []
+    private var lastPlayedFromGlueId: String?
+    private let nowPlayingHub: NowPlayingHub
     private var tasks: [Task<Void, Never>] = []
     private var started = false
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
@@ -97,7 +100,6 @@ public actor BridgethingCompanion {
     private let audioDispatcher: AudioDispatcher
     private var timeChangeObservers: [NSObjectProtocol] = []
     public let ota: OtaService
-    public let catalog: CatalogService
     private let transferReceiver = TransferReceiver()
     public let webappResources: WebappResourceService
     #if canImport(CoreLocation)
@@ -120,6 +122,7 @@ public actor BridgethingCompanion {
         self.lyricsResolver = lyricsResolver
         capFlags = capabilities
         gateway = BridgethingGateway(adapter: adapter)
+        nowPlayingHub = NowPlayingHub(gateway: gateway)
         netDispatcher = NetDispatcher()
         tunnelDispatcher = TunnelDispatcher()
         #if canImport(AVFoundation)
@@ -128,7 +131,6 @@ public actor BridgethingCompanion {
             audioDispatcher = AudioDispatcher(backend: audioBackend ?? NoOpAudioBackend())
         #endif
         ota = OtaService()
-        catalog = CatalogService(installer: ota)
         webappResources = WebappResourceService(receiver: transferReceiver)
         #if canImport(CoreLocation)
             geoController = GeoController(provider: geoProvider)
@@ -141,6 +143,7 @@ public actor BridgethingCompanion {
         started = true
         log(.info, "companion started")
 
+        nowPlayingHub.start()
         spawnDispatchers()
 
         #if canImport(Darwin)
@@ -184,13 +187,14 @@ public actor BridgethingCompanion {
         await tunnelDispatcher.stop()
         await audioDispatcher.stop()
         await ota.stop()
-        await catalog.stop()
         await transferReceiver.stop()
 
-        if let glue = activeGlue {
+        for glue in glues.values {
             await glue.detach()
+            await glue.setNowPlayingSink(nil)
         }
-        activeGlue = nil
+        glues.removeAll()
+        nowPlayingHub.stop()
 
         await gateway.stop()
         started = false
@@ -201,35 +205,95 @@ public actor BridgethingCompanion {
         emitLog(level, message, observer: logObserver)
     }
 
-    public func setActive(_ glue: (any BridgethingGlue)?) async throws {
-        if let activeGlue {
-            log(.info, "detaching glue \(type(of: activeGlue).name)")
-            await activeGlue.detach()
-            nowPlayingObserver?(nil)
+    public func attach(_ glue: any BridgethingGlue) async throws {
+        let id = type(of: glue).name
+        if glues[id] != nil { await detach(id: id) }
+        if let observer = nowPlayingObserver {
+            await glue.setNowPlayingObserver(observer)
         }
-        activeGlue = glue
-        if let glue {
-            if let observer = nowPlayingObserver {
-                await glue.setNowPlayingObserver(observer)
-            }
-            do {
-                try await glue.attach(gateway: gateway)
-                log(.info, "attached glue \(type(of: glue).name)")
-            } catch {
-                log(.error, "glue \(type(of: glue).name) attach failed: \(error.localizedDescription)")
-                throw error
-            }
+        await glue.setNowPlayingSink(nowPlayingHub)
+        do {
+            try await glue.attach(gateway: gateway)
+            glues[id] = glue
+            nowPlayingHub.register(sourceId: id, transport: glue)
+            log(.info, "attached glue \(id)")
+        } catch {
+            await glue.setNowPlayingSink(nil)
+            log(.error, "glue \(id) attach failed: \(error.localizedDescription)")
+            throw error
         }
         await announceCapabilities()
     }
 
-    public func current() -> (any BridgethingGlue)? {
-        activeGlue
+    public func detach(id: String) async {
+        guard let glue = glues.removeValue(forKey: id) else { return }
+        log(.info, "detaching glue \(id)")
+        nowPlayingHub.unregister(sourceId: id)
+        nowPlayingHub.clearSource(sourceId: id)
+        await glue.detach()
+        await glue.setNowPlayingSink(nil)
+        if lastPlayedFromGlueId == id { lastPlayedFromGlueId = nil }
+        if glues.isEmpty { nowPlayingObserver?(nil) }
+        await announceCapabilities()
+    }
+
+    public func detachAll() async {
+        for id in glues.keys { await detach(id: id) }
+    }
+
+    public func attachedProviderIds() -> [String] {
+        Array(glues.keys)
+    }
+
+    public func setProviderPriority(_ ids: [String]) async {
+        providerPriority = ids
+        await announceCapabilities()
+    }
+
+    public func libraryGlue() -> (any BridgethingGlue)? {
+        if let id = lastPlayedFromGlueId, let glue = glues[id] { return glue }
+        for id in providerPriority {
+            if let glue = glues[id] { return glue }
+        }
+        return glues.values.first
+    }
+
+    public func audibleGlue() -> (any BridgethingGlue)? {
+        guard let id = nowPlayingHub.currentSource() else { return nil }
+        return glues[id]
+    }
+
+    private func orderedGlueIds() -> [String] {
+        let ranked = providerPriority.filter { glues[$0] != nil }
+        let rest = glues.keys.filter { !ranked.contains($0) }.sorted()
+        return ranked + rest
+    }
+
+    private func attachedSchemes() -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for id in orderedGlueIds() {
+            guard let glue = glues[id] else { continue }
+            for scheme in glue.uriSchemes where seen.insert(scheme).inserted {
+                out.append(scheme)
+            }
+        }
+        return out
+    }
+
+    private func glue(forUri uri: String) -> (any BridgethingGlue)? {
+        guard let scheme = uri.split(separator: ":", maxSplits: 1).first.map({ String($0).lowercased() })
+        else { return nil }
+        for id in orderedGlueIds() {
+            guard let glue = glues[id] else { continue }
+            if glue.uriSchemes.contains(where: { $0.lowercased() == scheme }) { return glue }
+        }
+        return nil
     }
 
     public func setNowPlayingObserver(_ observer: (@Sendable (GlueNowPlaying?) -> Void)?) async {
         nowPlayingObserver = observer
-        if let glue = activeGlue {
+        for glue in glues.values {
             await glue.setNowPlayingObserver(observer ?? { _ in })
         }
     }
@@ -465,7 +529,7 @@ public actor BridgethingCompanion {
     }
 
     private func composeCapabilities() -> GatewayCapabilities {
-        let glue = activeGlue
+        let glue = libraryGlue()
         let info = GatewayInfo(
             address: host.address,
             name: host.appName,
@@ -482,11 +546,12 @@ public actor BridgethingCompanion {
             netFetch: capFlags.netFetch,
             netWs: capFlags.netWs,
             audioTts: capFlags.audioTts,
-            lyrics: true
+            lyrics: true,
+            playbackTargets: glues.values.contains { $0.supportsPlaybackTargets }
         )
         return GatewayCapabilities(
             gateway: info,
-            uriSchemes: glue?.uriSchemes ?? [],
+            uriSchemes: attachedSchemes(),
             network: NetworkInfo(kind: .unknown, metered: false),
             available: avail,
             audio: AudioCapabilities(earcons: [], voices: []),
@@ -531,7 +596,11 @@ public actor BridgethingCompanion {
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }
-            await audioDispatcher.setGlueProvider { [weak self] in await self?.current() }
+            await audioDispatcher.setGlueProvider { [weak self] in
+                guard let self else { return nil }
+                if let audible = await audibleGlue() { return audible }
+                return await libraryGlue()
+            }
             await audioDispatcher.start(gateway: gateway)
         })
         tasks.append(Task { [weak self] in
@@ -542,10 +611,6 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in
             guard let self else { return }
             await ota.start(gateway: gateway)
-        })
-        tasks.append(Task { [weak self] in
-            guard let self else { return }
-            await catalog.start(gateway: gateway)
         })
         #if canImport(CoreLocation)
             tasks.append(Task { [weak self] in
@@ -565,7 +630,8 @@ public actor BridgethingCompanion {
                 if deviceLogStreaming { await subscribeDeviceLogs(device.id) }
                 await announceCapabilities()
                 await emitTimeSnapshot()
-                await activeGlue?.handlePeerConnected(allowAutoResume: allowAutoResume(device.id))
+                nowPlayingHub.onConnect()
+                await notifyPeerConnected(deviceId: device.id)
                 #if os(iOS)
                     Task { [weak self] in await self?.ensureAncsPairing() }
                     if wasEmpty { await audioKeepAlive.activate() }
@@ -581,6 +647,20 @@ public actor BridgethingCompanion {
                 continue
             }
         }
+    }
+
+    private func notifyPeerConnected(deviceId: String) async {
+        let allowResume = allowAutoResume(deviceId)
+        let winner = resumeWinnerId()
+        for (id, glue) in glues {
+            await glue.handlePeerConnected(allowAutoResume: allowResume && id == winner)
+        }
+    }
+
+    private func resumeWinnerId() -> String? {
+        if let id = nowPlayingHub.currentSource(), glues[id] != nil { return id }
+        if let id = lastPlayedFromGlueId, glues[id] != nil { return id }
+        return orderedGlueIds().first
     }
 
     private func handlePeerGone(_ id: String, reason: String) async {
@@ -602,7 +682,9 @@ public actor BridgethingCompanion {
         for await (_, changed) in gateway.webapp.activeChanged {
             let hero = changed.art.map { Int($0.heroPx) } ?? 248
             let thumb = changed.art.map { Int($0.thumbPx) } ?? 96
-            await activeGlue?.setArtProfile(heroPx: hero, thumbPx: thumb)
+            for glue in glues.values {
+                await glue.setArtProfile(heroPx: hero, thumbPx: thumb)
+            }
         }
     }
 
@@ -611,39 +693,59 @@ public actor BridgethingCompanion {
             guard case let .message(_, msg) = event,
                   case let .player(player) = msg.data
             else { continue }
-            let glue = activeGlue
-            guard let glue else { continue }
-            let observer = logObserver
-            await dispatchPlayer(player, to: glue, logObserver: observer)
+            await dispatchPlayer(player)
         }
     }
 
-    private nonisolated func dispatchPlayer(
-        _ player: BridgeToGatewayPlayerMsg,
-        to glue: any BridgethingGlue,
-        logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
-    ) async {
+    private func dispatchPlayer(_ player: BridgeToGatewayPlayerMsg) async {
+        let observer = logObserver
         do {
             switch player {
-            case let .play(p): try await glue.play(p)
-            case let .queue(q): try await glue.queue(q)
-            case .pause: try await glue.pause()
-            case .resume: try await glue.resume()
-            case .skipNext: try await glue.skipNext()
-            case .skipPrev: try await glue.skipPrev()
-            case let .skipToIndex(s): try await glue.skipToIndex(s.index)
-            case let .seekTo(s): try await glue.seekTo(s.positionMs)
-            case let .setShuffle(s): try await glue.setShuffle(s.on)
-            case let .setRepeat(r): try await glue.setRepeat(r.mode)
-            case let .setSpeed(s): try await glue.setSpeed(s.speed)
-            case let .setCrossfade(s): try await glue.setCrossfade(s.durationMs)
+            case let .play(p):
+                guard let glue = glue(forUri: p.uri) else {
+                    log(.warn, "play dropped: no provider claims \(p.uri)")
+                    return
+                }
+                lastPlayedFromGlueId = type(of: glue).name
+                try await glue.play(p)
+            case let .queue(q):
+                guard let glue = glue(forUri: q.uri) else {
+                    log(.warn, "queue dropped: no provider claims \(q.uri)")
+                    return
+                }
+                try await glue.queue(q)
+            case let .transferTo(t):
+                guard let glue = audibleGlue() ?? libraryGlue() else { return }
+                try await glue.transferTo(targetId: t.targetId)
+            default:
+                guard let transport = nowPlayingHub.currentTransport() ?? libraryGlue() else { return }
+                try await dispatchTransport(player, to: transport)
             }
         } catch {
             emitLog(
                 .warn,
                 "player verb \(String(describing: player)) failed: \(error.localizedDescription)",
-                observer: logObserver
+                observer: observer
             )
+        }
+    }
+
+    private nonisolated func dispatchTransport(
+        _ player: BridgeToGatewayPlayerMsg,
+        to transport: any NowPlayingTransport
+    ) async throws {
+        switch player {
+        case .pause: try await transport.pause()
+        case .resume: try await transport.resume()
+        case .skipNext: try await transport.skipNext()
+        case .skipPrev: try await transport.skipPrev()
+        case let .skipToIndex(s): try await transport.skipToIndex(s.index)
+        case let .seekTo(s): try await transport.seekTo(s.positionMs)
+        case let .setShuffle(s): try await transport.setShuffle(s.on)
+        case let .setRepeat(r): try await transport.setRepeat(r.mode)
+        case let .setSpeed(s): try await transport.setSpeed(s.speed)
+        case let .setCrossfade(s): try await transport.setCrossfade(s.durationMs)
+        case .play, .queue, .transferTo: break
         }
     }
 
@@ -658,10 +760,21 @@ public actor BridgethingCompanion {
     private static let transferWindowBytes = 64 * 1024
     private static let transferAckTimeoutSeconds: Double = 15
 
+    private func resolveAsset(id: String) async throws -> AssetBytes? {
+        let owner = id.split(separator: "/", maxSplits: 1).first.map(String.init)
+        if let owner, let glue = glues[owner], let bytes = try await glue.asset(id: id) {
+            return bytes
+        }
+        for (glueId, glue) in glues where glueId != owner {
+            if let bytes = try await glue.asset(id: id) { return bytes }
+        }
+        return nil
+    }
+
     private func handleAsset(handle: AssetRequestHandle, id: String, requestId: UUID) async {
         let bytes: AssetBytes?
         do {
-            bytes = try await activeGlue?.asset(id: id)
+            bytes = try await resolveAsset(id: id)
         } catch {
             log(.warn, "asset \(id) glue resolve failed: \(error.localizedDescription)")
             try? await handle.respondErr(AssetNotFoundReply(id: id))
@@ -754,7 +867,7 @@ public actor BridgethingCompanion {
     private func runLibraryBrowse() async {
         for await (handle, req) in gateway.library.browseRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -774,7 +887,7 @@ public actor BridgethingCompanion {
     private func runLibraryResolveContext() async {
         for await (handle, req) in gateway.library.resolveContextRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -789,7 +902,7 @@ public actor BridgethingCompanion {
     private func runLibrarySearch() async {
         for await (handle, req) in gateway.library.searchRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -804,7 +917,7 @@ public actor BridgethingCompanion {
     private func runLibraryRecommendations() async {
         for await (handle, req) in gateway.library.recommendationsRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -819,7 +932,7 @@ public actor BridgethingCompanion {
     private func runLibraryFavoritesList() async {
         for await (handle, req) in gateway.library.favoritesListRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -834,7 +947,7 @@ public actor BridgethingCompanion {
     private func runLibraryFavoritesContains() async {
         for await (handle, req) in gateway.library.favoritesContainsRequests {
             Task { [weak self] in
-                guard let glue = await self?.activeGlue else {
+                guard let glue = await self?.libraryGlue() else {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
@@ -848,7 +961,7 @@ public actor BridgethingCompanion {
 
     private func runLibraryFavoritesToggle() async {
         for await (_, msg) in gateway.library.favoritesToggle {
-            guard let glue = activeGlue else { continue }
+            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else { continue }
             do { try await glue.favoritesToggle(msg.item) } catch {
                 log(.warn, "favoritesToggle failed: \(error.localizedDescription)")
             }
@@ -857,7 +970,7 @@ public actor BridgethingCompanion {
 
     private func runLibraryFavoritesSet() async {
         for await (_, msg) in gateway.library.favoritesSet {
-            guard let glue = activeGlue else { continue }
+            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else { continue }
             do { try await glue.favoritesSet(msg.item, liked: msg.liked) } catch {
                 log(.warn, "favoritesSet failed: \(error.localizedDescription)")
             }
@@ -866,9 +979,16 @@ public actor BridgethingCompanion {
 
     private func runLibraryFavoritesSetMany() async {
         for await (_, msg) in gateway.library.favoritesSetMany {
-            guard let glue = activeGlue else { continue }
-            do { try await glue.favoritesSetMany(msg.entries) } catch {
-                log(.warn, "favoritesSetMany failed: \(error.localizedDescription)")
+            var byProvider: [String: [FavoritesSet]] = [:]
+            for entry in msg.entries {
+                guard let owner = glue(forUri: entry.item.uri) ?? libraryGlue() else { continue }
+                byProvider[type(of: owner).name, default: []].append(entry)
+            }
+            for (id, entries) in byProvider {
+                guard let glue = glues[id] else { continue }
+                do { try await glue.favoritesSetMany(entries) } catch {
+                    log(.warn, "favoritesSetMany failed for \(id): \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -933,7 +1053,7 @@ public actor BridgethingCompanion {
 
         let resolved: BridgethingLyrics.Lyrics?
         do {
-            if let glue = activeGlue, let provided = try await glue.lyrics(for: identity) {
+            if let glue = audibleGlue() ?? libraryGlue(), let provided = try await glue.lyrics(for: identity) {
                 resolved = provided
             } else {
                 resolved = await lyricsResolver.lyrics(for: identity)

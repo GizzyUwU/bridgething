@@ -20,6 +20,7 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
     func setVolume(percent: Double) async throws
     func volumeStep(deltaPercent: Double) async throws -> Double
     func activeDeviceVolumePercent() async -> Double?
+    func transfer(deviceId: String) async throws
 
     func product() async throws -> ProductState
     func rootBrowse(sections: UInt32?, preview: UInt32?) async throws -> [Shelf]

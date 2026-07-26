@@ -40,9 +40,9 @@ export function getSession(): BridgethingSession {
 type SessionState = {
   started: boolean;
 
-  provider: BridgethingProviderInfo | null;
-  authState: BridgethingAuthState;
-  serviceHealth: BridgethingServiceHealth;
+  providers: BridgethingProviderInfo[];
+  providerPriority: string[];
+  libraryProvider: string | null;
   peers: BridgethingSessionPeer[];
   ancsAuthStatus: BridgethingAncsAuthStatus;
   nowPlaying: BridgethingNowPlaying | null;
@@ -54,18 +54,14 @@ type SessionState = {
 
   apply(event: SessionEvent): void;
   reconcile(snapshot: BridgethingSessionSnapshot): void;
-  setAuthState(state: BridgethingAuthState): void;
   reset(): void;
 };
 
-const initial: Omit<
-  SessionState,
-  'apply' | 'reconcile' | 'reset' | 'setAuthState'
-> = {
+const initial: Omit<SessionState, 'apply' | 'reconcile' | 'reset'> = {
   started: false,
-  provider: null,
-  authState: { kind: 'idle' },
-  serviceHealth: { kind: 'ok' },
+  providers: [],
+  providerPriority: [],
+  libraryProvider: null,
   peers: [],
   ancsAuthStatus: 'unknown',
   nowPlaying: null,
@@ -80,14 +76,8 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
   ...initial,
   apply: event => {
     switch (event.type) {
-      case 'providerChanged':
-        set({ provider: event.provider });
-        return;
-      case 'authStateChanged':
-        set({ authState: event.state });
-        return;
-      case 'serviceHealthChanged':
-        set({ serviceHealth: event.health });
+      case 'providersChanged':
+        set({ providers: event.providers });
         return;
       case 'peerConnected':
         set(s => {
@@ -146,9 +136,9 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       }
     }
     set({
-      provider: snapshot.provider ?? null,
-      authState: snapshot.authState,
-      serviceHealth: snapshot.serviceHealth,
+      providers: snapshot.providers,
+      providerPriority: snapshot.providerPriority,
+      libraryProvider: snapshot.libraryProvider ?? null,
       peers: snapshot.peers,
       ancsAuthStatus: snapshot.ancsAuthStatus,
       nowPlaying: snapshot.nowPlaying ?? null,
@@ -161,7 +151,6 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       ledger,
     });
   },
-  setAuthState: state => set({ authState: state }),
   reset: () => set({ ...initial }),
 }));
 
@@ -186,10 +175,8 @@ export async function bootstrapSession(): Promise<void> {
   await startDiagnostics();
   startOta();
   startWebapps();
-  // seed peers already connected before the subscription was wired
-  for (const peer of useSessionStore.getState().peers) {
+  for (const peer of useSessionStore.getState().peers)
     if (peer.status === 'connected') void refreshWebapps(peer.id);
-  }
 }
 
 export async function reconcileSnapshot(): Promise<void> {

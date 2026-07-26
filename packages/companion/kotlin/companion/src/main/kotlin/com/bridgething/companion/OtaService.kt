@@ -179,7 +179,7 @@ public sealed class OtaPollEvent {
 public class OtaService(
     private val httpClient: OkHttpClient = OkHttpClient(),
     private val json: Json = defaultJson,
-) : WebappInstaller {
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     internal val transferAcks = TransferAckWindow()
@@ -340,7 +340,27 @@ public class OtaService(
         }
     }
 
-    override suspend fun installWebapp(
+    public suspend fun installWebappFromUrl(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        url: String,
+        sha256: String,
+        size: Long,
+        provenance: String?,
+        cacheDir: File,
+    ): WebappInstallResult {
+        val bundle = try {
+            val expected = OtaArtifactDigest(size = size, sha256 = sha256)
+            downloadIfNeeded(url, File(cacheDir, "bridgething-webapp-bundles"), "webapp", url.substringAfterLast('/'), expected, null)
+        } catch (e: Throwable) {
+            return WebappInstallResult.Failed("bundle download failed: ${e.message ?: e.toString()}")
+        }
+        val result = installWebapp(gateway, deviceId, bundle, provenance)
+        runCatching { bundle.delete() }
+        return result
+    }
+
+    public suspend fun installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
         bundlePath: File,

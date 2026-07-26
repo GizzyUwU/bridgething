@@ -26,6 +26,7 @@ import type {
   LogEntry,
   LogLevel,
   LogSource,
+  Lyrics,
   NetError,
   NetFetchRequest,
   NetFetchResponse,
@@ -38,6 +39,7 @@ import type {
   PhoneCallService,
   PhoneState,
   PlayContext,
+  PlaybackTarget,
   PlayerState,
   Position,
   QueueItem,
@@ -173,7 +175,8 @@ export type BridgeToGatewayPlayerMsg =
   | { event: 'setShuffle'; data: SetShuffle }
   | { event: 'setRepeat'; data: SetRepeat }
   | { event: 'setSpeed'; data: SetSpeed }
-  | { event: 'setCrossfade'; data: SetCrossfade };
+  | { event: 'setCrossfade'; data: SetCrossfade }
+  | { event: 'transferTo'; data: TransferTo };
 
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
@@ -345,6 +348,7 @@ export type GatewayToBridgePhoneMsg =
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
   | { event: 'queueChanged'; data: QueueSnapshot }
+  | { event: 'targetsChanged'; data: PlaybackTargets }
   | { event: 'requestSpotifyWake' };
 
 export type GatewayToBridgeSystemMsg =
@@ -445,10 +449,6 @@ export type LogsTailReply = { entries: Array<LogEntry> };
 
 export type LogsUnsubscribe = { token: string };
 
-export type LyricLine = { startMs: number; text: string };
-
-export type Lyrics = { synced: Array<LyricLine> | null; plain: string | null; source: string };
-
 export type LyricsErrorReply = { message: string };
 
 export type LyricsReply = { lyrics: Lyrics | null };
@@ -542,6 +542,13 @@ export type PhoneStateReply = { state: PhoneState };
 
 export type PlayUri = { uri: string; context: PlayContext | null };
 
+/**
+ * Complete replacement list of the provider's remote endpoints. The
+ * companion pushes one whenever its endpoint set changes; there is no
+ * delta and no daemon-side poll.
+ */
+export type PlaybackTargets = { targets: Array<PlaybackTarget> };
+
 export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 
 export type QueueUri = { uri: string; position: QueuePosition };
@@ -583,6 +590,8 @@ export type TransferBody = { type: 'inline'; data: Uint8Array } | { type: 'strea
 export type TransferFragment = { transferId: string; offset: number; bytes: Uint8Array };
 
 export type TransferRef = { id: string; totalSize: number; sha256: string | null };
+
+export type TransferTo = { targetId: string };
 
 export type Tts = { id: string; text: string; voice: string | null };
 

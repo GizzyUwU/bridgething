@@ -63,7 +63,7 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
 
     private let stateLock = NSLock()
     private var gateway: BridgethingGateway?
-    private var heldScopes: Set<CompanionAuthorityScope> = []
+    private var nowPlayingSink: (any NowPlayingSink)?
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
     private var authObserver: (@Sendable (GlueAuthState) -> Void)?
     private var serviceHealthObserver: (@Sendable (GlueServiceHealth) -> Void)?
@@ -189,7 +189,7 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
         foregroundTask = nil
         likedTask?.cancel()
         likedTask = nil
-        await releaseAllAuthority()
+        stateLock.withLock { nowPlayingSink }?.clearSource(sourceId: Self.name)
         let npObs = stateLock.withLock { nowPlayingObserver }
         npObs?(nil)
         stopEmitter()
@@ -231,15 +231,17 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     private func handleEmit(_ job: EmitJob) async {
-        guard let gateway = currentGateway() else { return }
+        guard currentGateway() != nil else { return }
+        let sink = stateLock.withLock { nowPlayingSink }
         switch job {
         case let .player(snapshot, hasItem):
-            if hasItem {
-                await claimAuthority([.nowPlayingPlayback, .nowPlayingMetadata])
-            } else {
-                await releaseAllAuthority()
-            }
-            try? await gateway.player.snapshot(snapshot)
+            sink?.submitPlayer(
+                sourceId: Self.name,
+                snapshot: snapshot,
+                appBundle: appleMusicAppBundle,
+                hasItem: hasItem,
+                wantsVolume: false
+            )
         }
     }
 
@@ -292,6 +294,10 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
         stateLock.withLock { nowPlayingObserver = observer }
     }
 
+    public func setNowPlayingSink(_ sink: (any NowPlayingSink)?) async {
+        stateLock.withLock { nowPlayingSink = sink }
+    }
+
     public func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
         stateLock.withLock { authObserver = observer }
     }
@@ -314,7 +320,7 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
 
     public func handlePeerConnected(allowAutoResume: Bool) async {
         guard currentGateway() != nil else { return }
-        stateLock.withLock { heldScopes.removeAll() }
+        if stateLock.withLock({ authorized }) { startObservation() }
         if stateLock.withLock({ authorized && lastSnapshot?.entry != nil }) {
             await emitCurrent()
         }
@@ -333,10 +339,8 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
 
     public func debugState() async -> GlueDebugState {
         stateLock.withLock {
-            GlueDebugState(
-                authorityPlaybackHeld: heldScopes.contains(.nowPlayingPlayback),
-                authorityMetadataHeld: heldScopes.contains(.nowPlayingMetadata)
-            )
+            let hasItem = lastSnapshot?.entry != nil
+            return GlueDebugState(authorityPlaybackHeld: hasItem, authorityMetadataHeld: hasItem)
         }
     }
 
@@ -590,31 +594,6 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
         return imageCodec.assetId(url: sizedArtworkUrl(template, edge: edge), maxEdge: edge)
     }
 
-    // MARK: - authority
-
-    private func claimAuthority(_ scopes: Set<CompanionAuthorityScope>) async {
-        guard let gateway = currentGateway() else { return }
-        for scope in scopes {
-            let needs = stateLock.withLock { !heldScopes.contains(scope) }
-            if needs {
-                do {
-                    try await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: appleMusicAppBundle))
-                    stateLock.withLock { _ = heldScopes.insert(scope) }
-                } catch {}
-            }
-        }
-    }
-
-    private func releaseAllAuthority() async {
-        guard let gateway = currentGateway() else { return }
-        let scopes = stateLock.withLock { () -> [CompanionAuthorityScope] in
-            let s = Array(heldScopes)
-            heldScopes.removeAll()
-            return s
-        }
-        for scope in scopes { try? await gateway.authority.release(AuthorityRelease(scope: scope)) }
-    }
-
     // MARK: - wire mapping
 
     private func makeSnapshot(from snap: AmPlayerSnapshot, heroEdge: Int, liked: Bool?) -> BridgethingSchema.PlayerState {
@@ -656,7 +635,7 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
         )
         return BridgethingSchema.PlayerState(
             track: track, playback: playback, queue: [],
-            options: PlayerOptions(speed: 1.0, crossfade_ms: nil), context: nil
+            options: PlayerOptions(speed: 1.0, crossfadeMs: nil), context: nil, target: nil
         )
     }
 
@@ -718,17 +697,17 @@ public final class AppleMusicGlue: BridgethingGlue, @unchecked Sendable {
             return .track(BridgethingSchema.Track(
                 id: item.uri,
                 name: item.title,
-                album: BridgethingSchema.Album(id: item.albumUri ?? "", name: item.albumName ?? "", artwork_id: nil),
-                artist: BridgethingSchema.Artist(id: item.artistUri ?? "", name: item.artistName ?? "", artwork_id: nil),
-                artists: item.artistName.map { [BridgethingSchema.Artist(id: item.artistUri ?? "", name: $0, artwork_id: nil)] } ?? [],
-                duration_ms: item.durationMs ?? 0,
-                image_id: artAssetId(item.artworkUrl, edge: artEdges().thumb) ?? "",
+                album: BridgethingSchema.Album(id: item.albumUri ?? "", name: item.albumName ?? "", artworkId: nil),
+                artist: BridgethingSchema.Artist(id: item.artistUri ?? "", name: item.artistName ?? "", artworkId: nil),
+                artists: item.artistName.map { [BridgethingSchema.Artist(id: item.artistUri ?? "", name: $0, artworkId: nil)] } ?? [],
+                durationMs: item.durationMs ?? 0,
+                imageId: artAssetId(item.artworkUrl, edge: artEdges().thumb) ?? "",
                 saved: false
             ))
         case .album:
-            return .album(BridgethingSchema.Album(id: item.uri, name: item.title, artwork_id: art))
+            return .album(BridgethingSchema.Album(id: item.uri, name: item.title, artworkId: art))
         case .artist:
-            return .artist(BridgethingSchema.Artist(id: item.uri, name: item.title, artwork_id: art))
+            return .artist(BridgethingSchema.Artist(id: item.uri, name: item.title, artworkId: art))
         case .playlist:
             return .playlist(Playlist(uri: item.uri, name: item.title, ownerName: item.subtitle, trackCount: item.trackCount, artworkId: art))
         case .station:

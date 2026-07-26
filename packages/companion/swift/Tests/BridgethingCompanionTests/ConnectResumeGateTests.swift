@@ -18,7 +18,7 @@ final class ConnectResumeGateTests: XCTestCase {
             host: HostInfo(appName: "test-companion", appVersion: "0.0.1", osName: "macOS")
         )
         await companion.setAutoResumeCooldown(cooldown)
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         return (companion, adapter, glue)
     }

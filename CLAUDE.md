@@ -9,7 +9,7 @@ to keep that split intact.
 The repo splits into two top-level workspace roots:
 
 - `crates/` — Rust workspace members (`crates/lib`, `crates/core`, `crates/client-rs`, `crates/mfi`, `crates/mfi-proxy`, ...). The cargo workspace also pulls in `tools/codegen/`.
-- `packages/` — Bun/turbo workspace members (`packages/gateway/typescript`, `packages/client-ts`, `packages/adapter-network`, `packages/adapter-rn`, `packages/examples/*`).
+- `packages/` — Bun/turbo workspace members (`packages/gateway/typescript`, `packages/client-ts`, `packages/adapter-network`, `packages/adapter-rn`, `packages/webapps/{builtin,catalog}/*`). `builtin` rides the daemon release and is never published to the catalog; `catalog` is what the store distributes.
 - `mobile/` — RN app, consumer of the packages.
 
 The lib/core split below is the load-bearing one. Naming convention: Rust crates use kebab-case package names (`bridgething-mfi`); TS packages use scoped names (`@bridgething/lib`).

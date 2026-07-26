@@ -1,0 +1,398 @@
+name: release-companion
+
+on:
+  workflow_dispatch:
+    inputs:
+      android:
+        description: Build the android apk
+        type: boolean
+        default: true
+      ios:
+        description: Build the ios app
+        type: boolean
+        default: true
+      publish:
+        description: Ship the builds (apk to R2, ipa to TestFlight); off = build and hash only
+        type: boolean
+        default: false
+      testflight_groups:
+        description: TestFlight beta groups to distribute to, comma separated
+        type: string
+      testflight_submit:
+        description: Submit the build for beta app review (external groups need it before testers see it)
+        type: boolean
+        default: false
+      force:
+        description: Ship even when this companion version is already published
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      android:
+        type: boolean
+        default: true
+      ios:
+        type: boolean
+        default: true
+      publish:
+        type: boolean
+        default: false
+      testflight_groups:
+        type: string
+      testflight_submit:
+        type: boolean
+        default: false
+      force:
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-companion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # mobile/package.json is the companion version for both platforms. android bakes it into the apk
+  # as versionName, but ios cannot: its marketing version is pinned, so there is nothing in a
+  # TestFlight build that says which companion version it is. Both platforms therefore decide by
+  # comparing this version against what R2 says was last published.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      android: ${{ steps.plan.outputs.android }}
+      ios: ${{ steps.plan.outputs.ios }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve the companion version and what is already published
+        id: plan
+        env:
+          OTA_PUBLIC_BASE: https://ota.bridgething.com
+          WANT_ANDROID: ${{ inputs.android }}
+          WANT_IOS: ${{ inputs.ios }}
+          PUBLISHING: ${{ inputs.publish }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.version' mobile/package.json)
+          [[ -n "$version" && "$version" != null ]] || { echo "mobile/package.json has no version" >&2; exit 1; }
+
+          # the bump script keeps these in step; a drift here means the apk would ship under a
+          # different version than the one this run reasons about.
+          gradle=$(grep -m1 'versionName' mobile/android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          [[ "$gradle" == "$version" ]] || {
+            echo "build.gradle versionName is '$gradle' but mobile/package.json says '$version'" >&2; exit 1; }
+
+          published_android=$(curl -fsS --max-time 20 "${OTA_PUBLIC_BASE}/companion.json" 2>/dev/null \
+            | jq -r '.android.version // empty' || true)
+          published_ios=$(curl -fsS --max-time 20 "${OTA_PUBLIC_BASE}/companion/ios/published.json" 2>/dev/null \
+            | jq -r '.version // empty' || true)
+
+          # a build with nothing to publish is a smoke test, so it always runs; only a real publish
+          # is skipped for being redundant.
+          decide() {
+            local want="$1" published="$2"
+            if [[ "$want" != "true" ]]; then echo false
+            elif [[ "$PUBLISHING" != "true" || "$FORCE" == "true" ]]; then echo true
+            elif [[ "$published" == "$version" ]]; then echo false
+            else echo true
+            fi
+          }
+
+          {
+            echo "version=$version"
+            echo "android=$(decide "$WANT_ANDROID" "$published_android")"
+            echo "ios=$(decide "$WANT_IOS" "$published_ios")"
+          } >>"$GITHUB_OUTPUT"
+
+          echo "companion $version | published: android ${published_android:-none}, ios ${published_ios:-none}"
+
+  android:
+    needs: decide
+    if: needs.decide.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: bridgething-ota
+      PUBLIC_BASE: https://ota.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: install rclone (R2 client)
+        if: inputs.publish
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          # no_check_bucket: rclone otherwise issues CreateBucket before an upload,
+          # which an R2 object-read-write token denies with a 403.
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the workspace packages the app imports
+        run: bunx turbo run build --filter="@bridgething/mobile^..."
+
+      - name: build the spotify client for android
+        run: |
+          set -euo pipefail
+          cargo install cargo-ndk --locked
+          bash crates/spotify/scripts/build-jnilibs.sh
+
+      - name: build the release apk
+        env:
+          BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
+          bash mobile/scripts/build-apk.sh
+
+      - name: describe the artifact
+        id: apk
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          apk="mobile/android/app/build/outputs/apk/release/app-release.apk"
+          [ -f "$apk" ] || { echo "apk missing at $apk" >&2; exit 1; }
+
+          {
+            echo "version=$VERSION"
+            echo "size=$(stat -c%s "$apk")"
+            echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)"
+            echo "path=$apk"
+          } >>"$GITHUB_OUTPUT"
+          echo "built companion $version"
+
+      - name: upload the apk and refresh companion.json
+        if: inputs.publish
+        env:
+          VERSION: ${{ steps.apk.outputs.version }}
+          SIZE: ${{ steps.apk.outputs.size }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          set -euo pipefail
+          key="companion/android/${VERSION}/bridgething-${VERSION}.apk"
+          scripts/r2-put "$APK" "$key" application/vnd.android.package-archive
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg url "${PUBLIC_BASE}/${key}" \
+            --argjson size "$SIZE" \
+            --arg sha256 "$SHA256" \
+            --arg released_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{android: {version: $version, url: $url, size: $size, sha256: $sha256, released_at: $released_at}}' \
+            >companion.json
+          cat companion.json
+          scripts/r2-put companion.json companion.json application/json \
+            "public, max-age=300, must-revalidate"
+
+      - name: purge the cloudflare edge
+        if: always() && inputs.publish
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: scripts/cf-purge
+
+  ios:
+    needs: decide
+    if: needs.decide.outputs.ios == 'true'
+    runs-on: macos-15
+    env:
+      R2_BUCKET: bridgething-ota
+      PUBLIC_BASE: https://ota.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+      COMPANION_VERSION: ${{ needs.decide.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install asc
+        run: brew install asc
+
+      - name: stage the app store connect api key
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ASC_PRIVATE_KEY" ]] || { echo "ASC_PRIVATE_KEY is unset" >&2; exit 1; }
+          umask 077
+          printf '%s\n' "$ASC_PRIVATE_KEY" >"$RUNNER_TEMP/asc-key.p8"
+
+      - name: import the distribution certificate
+        env:
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CERT_P12" ]] || { echo "IOS_DIST_CERT_P12 is unset" >&2; exit 1; }
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          password=$(uuidgen)
+          printf '%s' "$CERT_P12" | base64 --decode >"$RUNNER_TEMP/dist.p12"
+
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/dist.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          # prepend rather than replace: dropping the runner's existing keychains off the search
+          # list breaks anything else that reads from them.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$keychain"
+          rm -f "$RUNNER_TEMP/dist.p12"
+
+      - name: write ios/Local.xcconfig
+        env:
+          BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
+          [[ -n "$IOS_TEAM_ID" ]] || { echo "IOS_TEAM_ID is unset; nothing would sign the archive" >&2; exit 1; }
+          cat >mobile/ios/Local.xcconfig <<EOF
+          DEVELOPMENT_TEAM = ${IOS_TEAM_ID}
+          PRODUCT_BUNDLE_IDENTIFIER = com.bridgething.gateway
+          CODE_SIGN_STYLE = Automatic
+
+          BRIDGETHING_AUTH_PSK = ${BRIDGETHING_AUTH_PSK}
+          EOF
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the workspace packages the app imports
+        run: bunx turbo run build --filter="@bridgething/mobile^..."
+
+      - name: build the spotify client for ios
+        run: bash crates/spotify/scripts/build-xcframework.sh
+
+      - name: nitro codegen
+        working-directory: packages/session-rn
+        run: bun run nitro:codegen
+
+      - name: pod install
+        working-directory: mobile/ios
+        run: pod install
+
+      - name: resolve the next build number
+        id: build_number
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+        run: |
+          set -euo pipefail
+          export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
+          [[ -n "$ASC_APP_ID" ]] || { echo "ASC_APP_ID is unset" >&2; exit 1; }
+          highest=$(asc builds list --app "$ASC_APP_ID" --output json \
+            | jq '[.data[].attributes.version | tonumber] | max // 0')
+          echo "number=$((highest + 1))" >>"$GITHUB_OUTPUT"
+          echo "highest on app store connect: $highest"
+
+      - name: build the signed app-store ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
+        run: |
+          set -euo pipefail
+          export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
+          bash mobile/scripts/build-testflight.sh
+
+      - name: describe the artifact
+        id: ipa
+        run: |
+          set -euo pipefail
+          ipa="mobile/ios/build/bridgething.ipa"
+          [ -f "$ipa" ] || { echo "ipa missing at $ipa" >&2; exit 1; }
+          echo "path=$ipa" >>"$GITHUB_OUTPUT"
+          echo "size=$(stat -f%z "$ipa")" >>"$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$ipa" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+
+      - name: upload to testflight
+        if: inputs.publish
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          IPA: ${{ steps.ipa.outputs.path }}
+          GROUPS: ${{ inputs.testflight_groups }}
+          SUBMIT: ${{ inputs.testflight_submit }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
+        run: |
+          set -euo pipefail
+          export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
+          args=(publish testflight --app "$ASC_APP_ID" --ipa "$IPA" --build-number "$BUILD_NUMBER" --wait)
+          [[ -n "$GROUPS" ]] && args+=(--group "$GROUPS")
+          [[ "$SUBMIT" == "true" ]] && args+=(--submit --confirm)
+          asc "${args[@]}"
+
+      # nothing in a TestFlight build records which companion version it is, so the record lives
+      # here. it is a key of its own rather than a field on companion.json, which the android job
+      # writes concurrently and the site parses to a fixed shape.
+      - name: record what was published
+        if: inputs.publish
+        env:
+          BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
+          SIZE: ${{ steps.ipa.outputs.size }}
+          SHA256: ${{ steps.ipa.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+          jq -n \
+            --arg version "$COMPANION_VERSION" \
+            --arg build_number "$BUILD_NUMBER" \
+            --argjson size "$SIZE" \
+            --arg sha256 "$SHA256" \
+            --arg released_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $version, build_number: $build_number, size: $size,
+              sha256: $sha256, released_at: $released_at}' \
+            >/tmp/ios-published.json
+          cat /tmp/ios-published.json
+          scripts/r2-put /tmp/ios-published.json companion/ios/published.json application/json \
+            "public, max-age=300, must-revalidate"
+
+      - name: purge the cloudflare edge
+        if: always() && inputs.publish
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: scripts/cf-purge

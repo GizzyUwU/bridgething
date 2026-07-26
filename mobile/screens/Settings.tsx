@@ -92,9 +92,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 export function SettingsScreen({ navigation }: Props) {
   const session = getSession();
 
-  const provider = useSession(s => s.provider);
+  const providers = useSession(s => s.providers);
+  const priority = useSession(s => s.providerPriority);
+  const libraryProvider = useSession(s => s.libraryProvider);
   const peers = useSession(s => s.peers);
-  const authState = useSession(s => s.authState);
   const flags = useSession(s => s.capabilityFlags);
   const pollConfig = useSession(s => s.otaPollConfig);
   const ledger = useSession(s => s.ledger);
@@ -107,7 +108,6 @@ export function SettingsScreen({ navigation }: Props) {
 
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
-  const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [signInBusy, setSignInBusy] = useState<string | null>(null);
   const lastSignInId = useRef<string | null>(null);
   const [addDeviceBusy, setAddDeviceBusy] = useState(false);
@@ -127,14 +127,6 @@ export function SettingsScreen({ navigation }: Props) {
       setAddDeviceBusy(false);
     }
   };
-
-  const refresh = useCallback(async () => {
-    setProviders(await session.availableProviders());
-  }, [session]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   const writeFlags = async (next: BridgethingCapabilityFlags) => {
     try {
@@ -192,23 +184,23 @@ export function SettingsScreen({ navigation }: Props) {
     lastSignInId.current = id;
     setSignInBusy(id);
     try {
-      await session.setActiveProvider(id);
+      await session.connectProvider(id);
     } catch {
-      // failures surface via authState
+      // failures surface via the provider's authState
     } finally {
       setSignInBusy(null);
     }
   };
 
-  const cancelAuth = () => {
-    void session.cancelAuth();
+  const cancelAuth = (id: string) => {
+    void session.cancelAuth(id);
     setSignInBusy(null);
   };
 
-  const signOut = async () => {
+  const signOut = async (p: BridgethingProviderInfo) => {
     Alert.alert(
       'sign out?',
-      `${provider?.displayName ?? 'this provider'} will be signed out on this phone.`,
+      `${p.displayName} will be signed out on this phone.`,
       [
         { text: 'cancel', style: 'cancel' },
         {
@@ -217,7 +209,7 @@ export function SettingsScreen({ navigation }: Props) {
           onPress: async () => {
             setSignOutBusy(true);
             try {
-              await session.signOut();
+              await session.disconnectProvider(p.id);
             } catch (err) {
               Alert.alert(
                 'sign-out failed',
@@ -232,40 +224,43 @@ export function SettingsScreen({ navigation }: Props) {
     );
   };
 
+  const promote = async (id: string) => {
+    const rest = providers.map(p => p.id).filter(x => x !== id);
+    await session.setProviderPriority([id, ...rest]);
+  };
+
   return (
     <ScrollScreen>
       <ScreenHeader title="settings" />
       <ServiceHealthBanner />
 
       <View className="mb-7">
-        <SectionHeader title="account" />
+        <SectionHeader title="accounts" />
         <ListGroup>
-          <ListRow
-            icon={UserRound}
-            iconTint="primary"
-            title={provider?.displayName ?? 'no provider'}
-            subtitle={provider ? 'signed in' : 'not signed in'}
-            trailing={
-              provider ? (
-                <Pill tone="success" dot={false}>
-                  active
-                </Pill>
-              ) : null
-            }
-          />
-          {provider ? (
-            <ListRow
-              icon={LogOut}
-              iconTint="destructive"
-              title={signOutBusy ? 'signing out…' : 'sign out'}
-              destructive
-              onPress={signOut}
-              loading={signOutBusy}
-            />
-          ) : (
-            providers
-              .filter(p => p.available)
-              .map(p => (
+          {providers
+            .filter(p => p.available)
+            .map(p =>
+              p.connected ? (
+                <ListRow
+                  key={p.id}
+                  icon={UserRound}
+                  iconTint="primary"
+                  title={p.displayName}
+                  subtitle={
+                    libraryProvider === p.id
+                      ? 'signed in · browsing'
+                      : 'signed in'
+                  }
+                  trailing={
+                    priority[0] === p.id ? (
+                      <Pill tone="success" dot={false}>
+                        preferred
+                      </Pill>
+                    ) : null
+                  }
+                  onPress={() => promote(p.id)}
+                />
+              ) : (
                 <ListRow
                   key={p.id}
                   icon={LogIn}
@@ -275,29 +270,53 @@ export function SettingsScreen({ navigation }: Props) {
                   onPress={() => signIn(p.id)}
                   loading={signInBusy === p.id}
                 />
-              ))
-          )}
+              ),
+            )}
+          {providers
+            .filter(p => p.connected)
+            .map(p => (
+              <ListRow
+                key={`out-${p.id}`}
+                icon={LogOut}
+                iconTint="destructive"
+                title={
+                  signOutBusy ? 'signing out…' : `sign out of ${p.displayName}`
+                }
+                destructive
+                onPress={() => signOut(p)}
+                loading={signOutBusy}
+              />
+            ))}
         </ListGroup>
-        {!provider &&
-        (authState.kind === 'pending' || authState.kind === 'failed') ? (
-          <View className="mt-3">
-            <PendingAuth
-              state={authState}
-              onCancel={authState.kind === 'pending' ? cancelAuth : undefined}
-              onRetry={
-                authState.kind === 'failed' && signInBusy === null
-                  ? () => {
-                      const target =
-                        providers.find(
-                          p => p.id === lastSignInId.current && p.available,
-                        ) ?? providers.find(p => p.available);
-                      if (target) signIn(target.id);
-                    }
-                  : undefined
-              }
-            />
-          </View>
+        {providers.length > 1 ? (
+          <Text className="mt-2 px-4 text-[12px] leading-[17px] text-muted-foreground">
+            whatever you play takes over the now-playing card on its own. tap a
+            signed-in account to prefer it for browsing and when nothing is
+            playing.
+          </Text>
         ) : null}
+        {providers
+          .filter(
+            p =>
+              p.authState.kind === 'pending' || p.authState.kind === 'failed',
+          )
+          .map(p => (
+            <View className="mt-3" key={`auth-${p.id}`}>
+              <PendingAuth
+                state={p.authState}
+                onCancel={
+                  p.authState.kind === 'pending'
+                    ? () => cancelAuth(p.id)
+                    : undefined
+                }
+                onRetry={
+                  p.authState.kind === 'failed' && signInBusy === null
+                    ? () => signIn(p.id)
+                    : undefined
+                }
+              />
+            </View>
+          ))}
       </View>
 
       <View className="mb-7">
@@ -690,7 +709,6 @@ function GeoFlagRow({
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
-  // using the wrong permission constant causes the toggle to silently spring back.
   const permission =
     Platform.OS === 'android'
       ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
@@ -824,7 +842,6 @@ function BackgroundLocationRow() {
                   'restarting bridgething…',
                   ToastAndroid.SHORT,
                 );
-                // give the toast a beat to render before killing the process
                 setTimeout(() => {
                   session.killApp().catch(() => {});
                 }, 500);

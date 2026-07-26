@@ -1,31 +1,16 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 
-/// Orchestrates the voice-NLU pipeline on the companion. Given a
-/// transcript + the list of currently-installed/active webapps, returns
-/// an `NluResolvedIntent` ready to ship over the `voice.dispatch` wire
-/// surface.
-///
-/// Stage chain:
-///   1. `NluFastPath` regex match: bare PLAY/STOP/NEXT/VOLUME_*/PRESET.
-///   2. LLM (`NluOpenRouterClient` against Gemma + json_schema grammar).
-///   3. `NluIntentValidator.snapPrediction`: snap intent + filler-strip
-///      raw_query.
-///   4. SpotifyResolver decoration (Spotify Search -> uri). Wired
-///      separately; resolver is opt-in.
 public actor VoiceController {
     public struct Config: Sendable {
         public let model: String
-        public let grammarSchema: [String: Any]?
+        public let grammarSchema: Data?
         public let useFastPath: Bool
         public let useSnap: Bool
 
         public init(
             model: String = "google/gemma-4-26b-a4b-it",
-            grammarSchema: [String: Any]? = nil,
+            grammarSchema: Data? = nil,
             useFastPath: Bool = true,
             useSnap: Bool = true
         ) {
@@ -78,9 +63,6 @@ public actor VoiceController {
         self.config = config
     }
 
-    /// Run the pipeline against a transcript with the currently-active
-    /// webapps (system prompt context). On success the resolved intent
-    /// is ready to send via the `voice.dispatch` wire surface.
     public func resolve(transcript: String, activeWebapps: [NluSystemPrompt.ActiveWebapp] = []) async throws -> Resolution {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -101,14 +83,13 @@ public actor VoiceController {
                 model: config.model,
                 systemPrompt: NluSystemPrompt.build(activeWebapps: activeWebapps),
                 utterance: trimmed,
-                responseFormat: config.grammarSchema.map { schema in
-                    [
+                responseFormat: config.grammarSchema.flatMap { data -> [String: Any]? in
+                    guard let schema = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        return nil
+                    }
+                    return [
                         "type": "json_schema",
-                        "json_schema": [
-                            "name": "intent_output",
-                            "strict": true,
-                            "schema": schema,
-                        ],
+                        "json_schema": ["name": "intent_output", "strict": true, "schema": schema],
                     ]
                 }
             )
@@ -137,11 +118,7 @@ public actor VoiceController {
     }
 }
 
-/// Static helpers split out to keep the actor's `self` surface clean.
 public enum NluController {
-    /// Parse the LLM's JSON response into an `NluPrediction`. Tolerates
-    /// the chat-completion model occasionally wrapping the JSON in
-    /// markdown fences or stray text before/after.
     public static func parsePrediction(text: String, transcript: String) -> NluPrediction? {
         let cleaned = stripJsonFences(text)
         guard let data = cleaned.data(using: .utf8) else { return nil }
@@ -243,5 +220,3 @@ public enum NluController {
         return s
     }
 }
-
-#endif

@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Store as StoreIcon,
   TriangleAlert,
 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -42,13 +43,13 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
 export function DashboardScreen({ navigation }: Props) {
   const peers = useSession(s => s.peers);
-  const provider = useSession(s => s.provider);
+  const providers = useSession(s => s.providers);
   const ledger = useSession(s => s.ledger);
 
   const live = connectedPeers(peers);
   const linkFailed = peers.filter(p => p.status === 'linkFailed');
   const hasPeer = live.length > 0;
-  const signedIn = provider != null;
+  const signedIn = providers.some(p => p.connected);
 
   const status = describeStatus({ signedIn, hasPeer });
   const [pairBusy, setPairBusy] = useState(false);
@@ -88,7 +89,9 @@ export function DashboardScreen({ navigation }: Props) {
         />
       </View>
 
-      {peers.length === 0 ? <NoDeviceHero /> : null}
+      {peers.length === 0 ? (
+        <NoDeviceHero onBrowseApps={() => navigation.navigate('Store')} />
+      ) : null}
       {linkFailed.map(peer => (
         <LinkFailedCard key={peer.id} peer={peer} />
       ))}
@@ -152,7 +155,7 @@ function describeStatus({
   };
 }
 
-function NoDeviceHero() {
+function NoDeviceHero({ onBrowseApps }: { onBrowseApps: () => void }) {
   return (
     <View className="mb-8 items-center px-2 py-10">
       <HeroPulse tint="primary" />
@@ -170,6 +173,11 @@ function NoDeviceHero() {
       <Text className="mt-2 text-center text-[14px] leading-[20px] text-muted-foreground">
         the bridge auto-connects when it’s within Bluetooth range
       </Text>
+      <View className="mt-6 w-full px-4">
+        <Button onPress={onBrowseApps} icon={StoreIcon} variant="tonal">
+          browse the app store
+        </Button>
+      </View>
     </View>
   );
 }

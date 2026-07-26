@@ -27,6 +27,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import com.bridgething.schema.PlaybackTargets
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -35,13 +36,24 @@ class SystemMediaSourceTest {
     private class RecordingSink : NowPlayingSink {
         data class Submission(val sourceId: String, val snapshot: PlayerState, val appBundle: String, val hasItem: Boolean)
         data class QueueSubmission(val sourceId: String, val queue: QueueSnapshot)
+        data class TargetSubmission(val sourceId: String, val targets: PlaybackTargets)
         val players = CopyOnWriteArrayList<Submission>()
         val queues = CopyOnWriteArrayList<QueueSubmission>()
+        val targets = CopyOnWriteArrayList<TargetSubmission>()
         val cleared = CopyOnWriteArrayList<String>()
-        override fun submitPlayer(sourceId: String, snapshot: PlayerState, appBundle: String, hasItem: Boolean) {
+        override fun submitPlayer(
+            sourceId: String,
+            snapshot: PlayerState,
+            appBundle: String,
+            hasItem: Boolean,
+            wantsVolume: Boolean,
+        ) {
             players.add(Submission(sourceId, snapshot, appBundle, hasItem))
         }
         override fun submitQueue(sourceId: String, queue: QueueSnapshot) { queues.add(QueueSubmission(sourceId, queue)) }
+        override fun submitTargets(sourceId: String, targets: PlaybackTargets) {
+            this.targets.add(TargetSubmission(sourceId, targets))
+        }
         override fun clearSource(sourceId: String) { cleared.add(sourceId) }
     }
 
@@ -348,7 +360,7 @@ class SystemMediaSourceTest {
             audio = NoOpAudioBackend,
             mediaSessions = gw,
         )
-        if (withGlue) companion.setActive(FakeGlue())
+        if (withGlue) companion.attach(FakeGlue())
         companion.start()
         val driver = WireDriver(adapter)
         driver.start(scope)
@@ -450,7 +462,6 @@ class SystemMediaSourceTest {
         withTimeout(20.seconds) { while (yt.calls.isEmpty()) delay(10) }
         assertEquals("setLiked:true", yt.calls.first())
 
-        // the app confirms the like through its metadata, as a real session would
         yt.snap = yt.snap!!.copy(liked = true)
         gw.emit(listOf(yt))
         driver.send(

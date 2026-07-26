@@ -27,6 +27,7 @@ import com.bridgething.schema.LibraryFavoritesListRequest
 import com.bridgething.schema.LibraryItem
 import com.bridgething.schema.LibraryRecommendationsRequest
 import com.bridgething.schema.LibrarySearchRequest
+import kotlin.math.roundToInt
 import com.bridgething.schema.MediaItem
 import com.bridgething.schema.MediaItemUpdate
 import com.bridgething.schema.MusicProvider
@@ -34,6 +35,9 @@ import com.bridgething.schema.NowPlayingUpdate
 import com.bridgething.schema.Playback
 import com.bridgething.schema.PlaybackContext
 import com.bridgething.schema.PlaybackState
+import com.bridgething.schema.PlaybackTarget
+import com.bridgething.schema.PlaybackTargetKind
+import com.bridgething.schema.PlaybackTargets
 import com.bridgething.schema.PlaybackUpdate
 import com.bridgething.schema.PlayUri
 import com.bridgething.schema.PlayerOptions
@@ -86,6 +90,7 @@ import uniffi.spotify.WakeReason
 import uniffi.spotify.initLogging
 import uniffi.spotify.Track as SpTrack
 import uniffi.spotify.Device as SpDevice
+import uniffi.spotify.DeviceKind as SpDeviceKind
 import uniffi.spotify.TokenStore as SpTokenStore
 
 private const val ASSET_ID_PREFIX = "spotify/img/"
@@ -134,6 +139,7 @@ class SpotifyGlue(
     override val uriSchemes: List<String> = listOf("spotify")
     override val musicProvider: MusicProvider = MusicProvider.Spotify
     override val lyricsSupported: Boolean = false
+    override val supportsPlaybackTargets: Boolean = true
     override val appBundles: List<String> = listOf(SPOTIFY_ANDROID_PACKAGE)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -156,6 +162,7 @@ class SpotifyGlue(
     @Volatile private var lastState: SpPlayerState? = null
     @Volatile private var lastStateAtMs: Long? = null
     @Volatile private var lastQueueItems: List<QueueItem> = emptyList()
+    @Volatile private var lastDevices: List<SpDevice> = emptyList()
     @Volatile private var lastSentQueueOrder: List<String> = emptyList()
     @Volatile private var lastSentThumbEdge = DEFAULT_THUMB_EDGE
     @Volatile private var lastHadItem = false
@@ -257,6 +264,12 @@ class SpotifyGlue(
         val hasItem = state.track != null
         lastHadItem = hasItem
         sink?.submitPlayer(name, makeSnapshot(state, heroEdge, liked, likeSupported), SPOTIFY_APP_BUNDLE, hasItem)
+    }
+
+    private fun onDevices(devices: List<SpDevice>) {
+        if (gateway == null) return
+        lastDevices = devices
+        sink?.submitTargets(name, PlaybackTargets(targets = devices.map(::playbackTarget)))
     }
 
     private fun onQueue(queue: SpQueue) {
@@ -493,13 +506,13 @@ class SpotifyGlue(
         }
 
     private fun libraryItemArtworkId(item: LibraryItem): String? = when (item) {
-        is LibraryItem.Track -> item.data.image_id.ifEmpty { null }
+        is LibraryItem.Track -> item.data.imageId.ifEmpty { null }
         is LibraryItem.Playlist -> item.data.artworkId
         is LibraryItem.PodcastEpisode -> item.data.artworkId
         is LibraryItem.Show -> item.data.artworkId
         is LibraryItem.Station -> item.data.artworkId
-        is LibraryItem.Album -> item.data.artwork_id
-        is LibraryItem.Artist -> item.data.artwork_id
+        is LibraryItem.Album -> item.data.artworkId
+        is LibraryItem.Artist -> item.data.artworkId
     }
 
     // MARK: - outbound snapshot / queue
@@ -563,10 +576,39 @@ class SpotifyGlue(
             track = track,
             playback = playback,
             queue = emptyList(),
-            options = PlayerOptions(speed = 1.0f, crossfade_ms = null),
+            options = PlayerOptions(speed = 1.0f, crossfadeMs = null),
             context = context,
+            target = activeTarget(state),
         )
     }
+
+    private fun activeTarget(state: SpPlayerState): PlaybackTarget? {
+        if (!state.playingRemotely || state.remoteDeviceId.isEmpty()) return null
+        val device = lastDevices.firstOrNull { it.id == state.remoteDeviceId } ?: return null
+        return playbackTarget(device)
+    }
+
+    private fun playbackTarget(device: SpDevice) = PlaybackTarget(
+        id = device.id,
+        name = device.name,
+        kind = targetKind(device.kind),
+        isActive = device.isActive,
+        volumePercent = if (device.volume > 0f) (device.volume * 100f).roundToInt().toUInt() else null,
+    )
+
+    private fun targetKind(kind: SpDeviceKind) = when (kind) {
+        SpDeviceKind.PHONE -> PlaybackTargetKind.Phone
+        SpDeviceKind.TABLET -> PlaybackTargetKind.Tablet
+        SpDeviceKind.COMPUTER -> PlaybackTargetKind.Computer
+        SpDeviceKind.SPEAKER -> PlaybackTargetKind.Speaker
+        SpDeviceKind.TV -> PlaybackTargetKind.Tv
+        SpDeviceKind.GAME_CONSOLE -> PlaybackTargetKind.GameConsole
+        SpDeviceKind.AUTOMOBILE -> PlaybackTargetKind.Automobile
+        SpDeviceKind.WEARABLE -> PlaybackTargetKind.Wearable
+        SpDeviceKind.UNKNOWN -> PlaybackTargetKind.Unknown
+    }
+
+    override suspend fun transferTo(targetId: String) { require().transfer(targetId) }
 
     private fun sendQueueChangedIfNeeded(entries: List<QueueItem>, thumb: Int) {
         val sink = sink ?: return
@@ -627,7 +669,7 @@ class SpotifyGlue(
         private val glue = WeakReference(glue)
         override fun onPlayer(state: SpPlayerState) { glue.get()?.onPlayer(state) }
         override fun onQueue(queue: SpQueue) { glue.get()?.onQueue(queue) }
-        override fun onDevices(devices: List<SpDevice>) {}
+        override fun onDevices(devices: List<SpDevice>) { glue.get()?.onDevices(devices) }
         override fun onAuth(state: SpAuthState) { glue.get()?.onAuth(state) }
         override fun onLibraryChanged(scope: SpLibraryScope) { glue.get()?.onLibraryChanged(scope) }
     }
@@ -667,11 +709,11 @@ class SpotifyGlue(
         fun mapTrack(b: SpBrowseItem, edge: Int): WireTrack = WireTrack(
             id = b.uri,
             name = b.title,
-            album = WireAlbum(id = b.album.uri, name = b.album.name, artwork_id = null),
-            artist = WireArtist(id = b.artists.firstOrNull()?.uri ?: "", name = b.artists.firstOrNull()?.name ?: "", artwork_id = null),
-            artists = b.artists.map { WireArtist(id = it.uri, name = it.name, artwork_id = null) },
-            duration_ms = b.durationMs,
-            image_id = artAssetId(b.imageId, edge) ?: "",
+            album = WireAlbum(id = b.album.uri, name = b.album.name, artworkId = null),
+            artist = WireArtist(id = b.artists.firstOrNull()?.uri ?: "", name = b.artists.firstOrNull()?.name ?: "", artworkId = null),
+            artists = b.artists.map { WireArtist(id = it.uri, name = it.name, artworkId = null) },
+            durationMs = b.durationMs,
+            imageId = artAssetId(b.imageId, edge) ?: "",
             saved = b.saved,
         )
 
@@ -679,8 +721,8 @@ class SpotifyGlue(
             val art = artAssetId(b.imageId, edge)
             return when (kindOf(b.uri)) {
                 "track" -> LibraryItem.Track(mapTrack(b, edge))
-                "album" -> LibraryItem.Album(WireAlbum(id = b.uri, name = b.title, artwork_id = art))
-                "artist" -> LibraryItem.Artist(WireArtist(id = b.uri, name = b.title, artwork_id = art))
+                "album" -> LibraryItem.Album(WireAlbum(id = b.uri, name = b.title, artworkId = art))
+                "artist" -> LibraryItem.Artist(WireArtist(id = b.uri, name = b.title, artworkId = art))
                 "playlist" -> LibraryItem.Playlist(WirePlaylist(uri = b.uri, name = b.title, ownerName = null, trackCount = null, artworkId = art))
                 "user" -> if (b.uri.endsWith(":collection")) {
                     LibraryItem.Playlist(WirePlaylist(uri = b.uri, name = b.title, ownerName = null, trackCount = null, artworkId = art))
@@ -811,7 +853,6 @@ class SpotifyGlue(
 private class IntentDeviceWaker(context: android.content.Context) : DeviceWaker {
     private val appContext = context.applicationContext
 
-    // a broadcast media keypress never steals foreground on android, so every reason fires.
     override fun wakeDevice(reason: WakeReason) {
         for (action in intArrayOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
             val intent = android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON).apply {

@@ -46,7 +46,7 @@ class OtaStreamTest {
             volume = NoOpVolumeSource,
             audio = NoOpAudioBackend,
         )
-        companion.setActive(FakeGlue())
+        companion.attach(FakeGlue())
         companion.start()
         val driver = WireDriver(adapter)
         driver.start(scope)

@@ -9,7 +9,9 @@ use std::{
 use bridgething_iap2::HidCommand;
 use libbridgething::{
   PlayerState,
-  gateway::{GatewayToBridgePlayerMsgCommandDispatch, GatewayToBridgePlayerMsgEventDispatch, QueueSnapshot},
+  gateway::{
+    GatewayToBridgePlayerMsgCommandDispatch, GatewayToBridgePlayerMsgEventDispatch, PlaybackTargets, QueueSnapshot,
+  },
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -62,6 +64,16 @@ impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
 
   async fn queue_changed(&self, params: QueueSnapshot) -> HandlerResult {
     self.handle.state.player.apply_companion_queue(params).await?;
+    Ok(())
+  }
+
+  async fn targets_changed(&self, params: PlaybackTargets) -> HandlerResult {
+    self
+      .handle
+      .state
+      .playback_targets
+      .apply_companion(params.targets)
+      .await?;
     Ok(())
   }
 }

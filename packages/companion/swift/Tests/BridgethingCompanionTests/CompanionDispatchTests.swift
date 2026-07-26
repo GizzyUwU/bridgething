@@ -6,8 +6,6 @@ import XCTest
 
 @testable import BridgethingCompanion
 
-/// Boots the real `BridgethingCompanion` over an `InMemoryAdapter` and drives
-/// wire requests through it exactly as the daemon would over the BT transport.
 final class CompanionDispatchTests: XCTestCase {
     struct Harness {
         let companion: BridgethingCompanion
@@ -23,7 +21,7 @@ final class CompanionDispatchTests: XCTestCase {
             lyricsResolver: FakeLyricsResolver(),
             host: HostInfo(appName: "test-companion", appVersion: "0.0.1", osName: "macOS")
         )
-        try await companion.setActive(glue)
+        try await companion.attach(glue)
         try await companion.start()
         let driver = WireDriver(adapter: adapter)
         await driver.start()
@@ -104,7 +102,6 @@ final class CompanionDispatchTests: XCTestCase {
             return XCTFail("nickname change never patched the cached meta")
         }
 
-        // both updates were buffered on the single-consumer stream; reads are instant
         let driverDeviceId = await h.driver.deviceId
         var updates = ota.metaChanged.makeAsyncIterator()
         let announced = await updates.next()

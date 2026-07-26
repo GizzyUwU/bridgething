@@ -43,14 +43,10 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         return sbn.notification?.actions?.getOrNull(if (positive) 0 else 1)?.actionIntent
     }
 
-    /** the current shade as wire notifications, flagged preExisting for connect-time backfill. */
-    fun activeWireNotifications(): List<WireNotification> =
-        activeNotifications?.filterNot { shouldSkip(it) }?.map { toWireNotification(it, preExisting = true) } ?: emptyList()
-
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val sbnIt = sbn ?: return
         if (shouldSkip(sbnIt)) return
-        NotificationBridgeRegistry.backend?.emitPosted(toWireNotification(sbnIt, preExisting = false))
+        NotificationBridgeRegistry.backend?.emitPosted(toWireNotification(sbnIt))
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
@@ -84,7 +80,7 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         }
     }.takeIf { it.isNotEmpty() }
 
-    private fun toWireNotification(sbn: StatusBarNotification, preExisting: Boolean): WireNotification {
+    private fun toWireNotification(sbn: StatusBarNotification): WireNotification {
         val n = sbn.notification
         val extras = n.extras
         val title = extras?.let {
@@ -98,7 +94,6 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         val flags = NotificationFlags(
             silent = importance < NotificationManager.IMPORTANCE_DEFAULT,
             important = importance >= NotificationManager.IMPORTANCE_HIGH,
-            preExisting = preExisting,
         )
 
         val actions = n.actions
@@ -146,7 +141,6 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }
 }
 
-/** bridges the OS-constructed listener to the running companion + its notification backend. */
 public object NotificationBridgeRegistry {
     @Volatile
     public var companion: BridgethingCompanion? = null

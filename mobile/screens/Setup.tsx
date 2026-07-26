@@ -53,36 +53,24 @@ export function SetupScreen({ navigation, route }: Props) {
     navigation.setParams({ step });
   }, [step, navigation]);
 
-  const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
 
-  const provider = useSession(s => s.provider);
-  const authState = useSession(s => s.authState);
+  const providers = useSession(s => s.providers);
   const peers = useSession(s => s.peers);
 
   const paired = peers.some(p => p.status === 'connected');
-  const signedIn = authState.kind === 'authenticated' && provider != null;
+  const signedIn = providers.some(p => p.connected);
+  const busyState = providers.find(p => p.id === busyProviderId)?.authState;
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const list = await session.availableProviders();
-      if (!cancelled) setProviders(list);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [session]);
-
-  useEffect(() => {
-    if (authState.kind === 'idle') setBusyProviderId(null);
-    if (authState.kind === 'authenticated' && step === 0) {
+    if (busyState?.kind === 'idle') setBusyProviderId(null);
+    if (signedIn && step === 0) {
       const t = setTimeout(() => setStep(1), 350);
       return () => clearTimeout(t);
     }
     return undefined;
-  }, [authState.kind, step]);
+  }, [busyState?.kind, signedIn, step]);
 
   const offset = useSharedValue(0);
   useEffect(() => {
@@ -98,18 +86,22 @@ export function SetupScreen({ navigation, route }: Props) {
 
   const pickProvider = async (provider: BridgethingProviderInfo) => {
     if (busyProviderId || !provider.available) return;
+    if (provider.connected) {
+      await session.disconnectProvider(provider.id);
+      return;
+    }
     setBusyProviderId(provider.id);
     try {
-      await session.setActiveProvider(provider.id);
+      await session.connectProvider(provider.id);
     } catch {
-      // failures surface via authState
+      // failures surface via the provider's authState
     } finally {
       setBusyProviderId(null);
     }
   };
 
   const cancelAuth = () => {
-    void session.cancelAuth();
+    if (busyProviderId) void session.cancelAuth(busyProviderId);
     setBusyProviderId(null);
   };
 
@@ -154,8 +146,6 @@ export function SetupScreen({ navigation, route }: Props) {
           <Page width={width}>
             <SignInPage
               providers={providers}
-              activeProvider={provider ?? null}
-              authState={authState}
               busyProviderId={busyProviderId}
               onPickProvider={pickProvider}
               onCancelAuth={cancelAuth}
@@ -192,8 +182,6 @@ function Page({
 
 function SignInPage({
   providers,
-  activeProvider,
-  authState,
   busyProviderId,
   onPickProvider,
   onCancelAuth,
@@ -201,8 +189,6 @@ function SignInPage({
   signedIn,
 }: {
   providers: BridgethingProviderInfo[];
-  activeProvider: BridgethingProviderInfo | null;
-  authState: import('@bridgething/session-react-native').BridgethingAuthState;
   busyProviderId: string | null;
   onPickProvider: (p: BridgethingProviderInfo) => void;
   onCancelAuth: () => void;
@@ -229,8 +215,8 @@ function SignInPage({
         sign in to your music
       </Text>
       <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-        your Car Thing plays music from your phone. sign in once here and you
-        won&apos;t have to think about it again.
+        your Car Thing plays music from your phone. sign in to as many as you
+        like — whichever one you&apos;re playing takes over automatically.
       </Text>
 
       <View className="mt-6 gap-2.5">
@@ -242,16 +228,15 @@ function SignInPage({
           </View>
         ) : (
           providers.map(p => {
-            const selected = activeProvider?.id === p.id;
             const busy = busyProviderId === p.id;
             return (
               <ProviderTile
                 key={p.id}
                 name={p.displayName}
                 id={p.id}
-                selected={selected}
+                selected={p.connected}
                 busy={busy}
-                authStatus={selected ? authState.kind : 'idle'}
+                authStatus={p.authState.kind}
                 disabled={!p.available || (!!busyProviderId && !busy)}
                 comingSoon={!p.available}
                 onPress={() => onPickProvider(p)}
@@ -261,17 +246,25 @@ function SignInPage({
         )}
       </View>
 
-      <View className="mt-4">
-        <PendingAuth
-          state={authState}
-          onCancel={authState.kind === 'pending' ? onCancelAuth : undefined}
-          onRetry={
-            authState.kind === 'failed' && activeProvider
-              ? () => onPickProvider(activeProvider)
-              : undefined
-          }
-        />
-      </View>
+      {providers
+        .filter(
+          p => p.authState.kind === 'pending' || p.authState.kind === 'failed',
+        )
+        .map(p => (
+          <View className="mt-4" key={p.id}>
+            <PendingAuth
+              state={p.authState}
+              onCancel={
+                p.authState.kind === 'pending' ? onCancelAuth : undefined
+              }
+              onRetry={
+                p.authState.kind === 'failed'
+                  ? () => onPickProvider(p)
+                  : undefined
+              }
+            />
+          </View>
+        ))}
 
       <View className="mt-8 gap-2">
         <Button

@@ -12,7 +12,7 @@ use crate::{
   impl_broadcast_failure_from,
   net::WSError,
   player::PlayerError,
-  state::{AudioError, StateError},
+  state::{AudioError, PlaybackTargetError, StateError},
 };
 
 type HandlerResult = Result<(), HandlerError>;
@@ -35,6 +35,8 @@ pub enum HandlerError {
   Asset(#[from] AssetError),
   #[error(transparent)]
   Audio(#[from] AudioError),
+  #[error(transparent)]
+  PlaybackTargets(#[from] PlaybackTargetError),
 }
 
 impl_broadcast_failure_from!(HandlerError);

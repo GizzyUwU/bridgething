@@ -153,9 +153,8 @@ pub fn server_event_to_stock(
           },
         ))
       }
-      BridgeToClientAssetMsg::NotFound(_) | BridgeToClientAssetMsg::Ready(_) | BridgeToClientAssetMsg::Cleared(_) => {
-        StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
-      }
+      BridgeToClientAssetMsg::NotFound(_) => StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id)),
+      BridgeToClientAssetMsg::Ready(_) | BridgeToClientAssetMsg::Cleared(_) => StockSendMsg::Unsupported,
     },
     BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data, call_slot, phone),
     BridgeToClientMsgData::Audio(data) => audio_event_to_stock(data, stock_msg_id),
@@ -169,6 +168,7 @@ pub fn server_event_to_stock(
     | BridgeToClientMsgData::Geo(_)
     | BridgeToClientMsgData::Hardware(_)
     | BridgeToClientMsgData::Library(_)
+    | BridgeToClientMsgData::Lyrics(_)
     | BridgeToClientMsgData::Net(_)
     | BridgeToClientMsgData::Notifications(_)
     | BridgeToClientMsgData::Peer(_)

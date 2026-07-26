@@ -1,0 +1,27 @@
+{
+  "name": "@bridgething/catalog",
+  "type": "module",
+  "private": false,
+  "version": "0.1.0",
+  "description": "catalog.v1 schema, validator, and resolution rules for the bridgething webapp appstore",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema.v1.json": "./schema.v1.json"
+  },
+  "files": ["dist", "schema.v1.json"],
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/generated && cp src/generated/schema.v1.validator.mjs src/generated/schema.v1.validator.d.mts dist/generated/",
+    "validator": "bun run scripts/compile-validator.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  }
+}

@@ -144,7 +144,7 @@ export class Overlay {
       live.delete(id);
     };
     const post = (n: Notification) => {
-      if (n.flags.silent || n.flags.preExisting) return;
+      if (n.flags.silent) return;
       drop(n.id);
       const node = el('div', 'toast');
       node.append(el('div', 'app', n.app.displayName ?? n.app.bundleId), el('div', 'title', n.title ?? ''));

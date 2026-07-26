@@ -1,0 +1,293 @@
+name: release-daemon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "packages/webapps/builtin/**"
+      - "scripts/webapp-zip.ts"
+      - ".github/workflows/release-daemon.yml"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: channel slug
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - dev
+          - stable
+      dispatch_bundle:
+        description: Ask bridgething.com to compose a bundle afterwards
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-daemon
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      channels: ${{ steps.plan.outputs.channels }}
+      run: ${{ steps.plan.outputs.run }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve the version, require its notes, and check what is missing
+        id: plan
+        env:
+          OTA_PUBLIC_BASE: https://ota.bridgething.com
+          CHANNEL_INPUT: ${{ inputs.channel || 'all' }}
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          [[ -n "$version" ]] || { echo "could not read the workspace version from Cargo.toml" >&2; exit 1; }
+
+          # the manifest regen on the site side refuses to build a release it has no notes for, and
+          # by then the binary would already be on R2.
+          notes="releases/${version}.md"
+          [[ -f "$notes" ]] || { echo "missing daemon release notes: $notes" >&2; exit 1; }
+          declared=$(sed -n 's/^version:[[:space:]]*//p' "$notes" | head -n1 | tr -d "\"' ")
+          [[ "$declared" == "$version" ]] || {
+            echo "$notes declares version '$declared' but Cargo.toml says '$version'" >&2; exit 1; }
+
+          case "$CHANNEL_INPUT" in
+            all) channels="dev stable" ;;
+            *)   channels="$CHANNEL_INPUT" ;;
+          esac
+
+          # a 404 is the answer, not an error, so curl stays quiet about it.
+          published() { curl -fs -o /dev/null --max-time 20 -I "${OTA_PUBLIC_BASE}/$1" 2>/dev/null; }
+
+          missing=0
+          for ch in $channels; do
+            published "daemon/${ch}/${version}/bridgething" \
+              && echo "daemon ${version} already on ${ch}" || { echo "daemon ${version} missing on ${ch}"; missing=1; }
+            for app in hub browser; do
+              av=$(jq -r '.version' "packages/webapps/builtin/${app}/public/manifest.json")
+              published "webapps/${ch}/${app}/${av}/${app}.zip" \
+                && echo "${app} ${av} already on ${ch}" || { echo "${app} ${av} missing on ${ch}"; missing=1; }
+            done
+          done
+
+          # a hand-started run always proceeds: it may be republishing stock, whose version lives in
+          # another repo and cannot be checked from here.
+          run=true
+          [[ "${{ github.event_name }}" == "push" && "$missing" == "0" ]] && run=false
+
+          {
+            echo "version=$version"
+            echo "channels=$channels"
+            echo "run=$run"
+          } >>"$GITHUB_OUTPUT"
+          echo "version $version -> channels [$channels], run=$run"
+
+  release:
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: bridgething-ota
+      PUBLIC_BASE: https://ota.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+      VERSION: ${{ needs.decide.outputs.version }}
+      CHANNELS: ${{ needs.decide.outputs.channels }}
+      BUILTIN_WEBAPPS: hub browser
+      DAEMON_PATCH_COUNT: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: checkout the stock webapp source
+        uses: actions/checkout@v4
+        with:
+          repository: thinglabsoss/superbird-webapp
+          ref: bridgething
+          path: .external/superbird-webapp
+
+      - name: checkout yocto-superbird for the stock webapp identity
+        uses: actions/checkout@v4
+        with:
+          repository: JoeyEamigh/yocto-superbird
+          path: .external/yocto-superbird
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install rclone (R2 client)
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          # no_check_bucket: rclone otherwise issues CreateBucket before an upload,
+          # which an R2 object-read-write token denies with a 403.
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - name: build the cross image
+        run: docker build -f scripts/cross-aarch64.Dockerfile -t bridgething-cross:aarch64 .
+
+      - name: cross-compile the daemon
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/work" -w /work \
+            bridgething-cross:aarch64 \
+            cargo build --release --locked --target aarch64-unknown-linux-gnu -p bridgething
+          file target/aarch64-unknown-linux-gnu/release/bridgething
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the builtin webapp zips
+        id: webapps
+        env:
+          STOCK_FILES: .external/yocto-superbird/meta-bridgething/recipes-core/bridgething-stock-webapp/files
+        run: |
+          set -euo pipefail
+          webapps='{}'
+
+          # --builtin: these declare a role and are deliberately not catalog apps.
+          zip_it() {
+            local name="$1" dist="$2" meta
+            meta=$(bun run scripts/webapp-zip.ts --dist "$dist" --output "/tmp/$name.zip" --builtin)
+            webapps=$(jq -c --arg name "$name" --argjson meta "$meta" \
+              '. + {($name): {version: $meta.version, size: $meta.size, sha256: $meta.sha256}}' <<<"$webapps")
+            echo "built $name@$(jq -r '.version' <<<"$meta")"
+          }
+
+          for app in ${BUILTIN_WEBAPPS}; do
+            echo "::group::$app"
+            bunx turbo run build --filter="@bridgething/webapp-$app"
+            zip_it "$app" "packages/webapps/builtin/$app/dist"
+            echo "::endgroup::"
+          done
+
+          echo "::group::stock"
+          ( cd .external/superbird-webapp && bun install --frozen-lockfile && bun pm trust --all && bun run build )
+          install -m 0644 "$STOCK_FILES/manifest.json" .external/superbird-webapp/dist/manifest.json
+          install -m 0644 "$STOCK_FILES/spotify.svg" .external/superbird-webapp/dist/spotify.svg
+          zip_it stock .external/superbird-webapp/dist
+          echo "::endgroup::"
+
+          echo "json=$webapps" >>"$GITHUB_OUTPUT"
+
+      - name: publish to each channel
+        id: publish
+        env:
+          WEBAPPS: ${{ steps.webapps.outputs.json }}
+        run: |
+          set -euo pipefail
+          command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
+          bin=target/aarch64-unknown-linux-gnu/release/bridgething
+          bin_size=$(stat -c%s "$bin")
+          bin_sha=$(sha256sum "$bin" | cut -d' ' -f1)
+          dispatch=""
+
+          # a key is written once: same version, same bytes, forever. skipping an existing one keeps
+          # a re-run cheap and stops a changed-but-unbumped artifact from replacing what devices
+          # already pinned a digest against.
+          exists() { rclone lsf "r2:${R2_BUCKET}/$1" >/dev/null 2>&1; }
+
+          for ch in ${CHANNELS}; do
+            echo "::group::$ch"
+            daemon_key="daemon/${ch}/${VERSION}/bridgething"
+            patches='{}'
+
+            if exists "$daemon_key"; then
+              echo "daemon ${VERSION} already published on ${ch}; leaving it alone"
+            else
+              scripts/r2-put "$bin" "$daemon_key" application/octet-stream
+              dispatch="$dispatch $ch"
+
+              # devices update by patching the binary they are already running; one older than the
+              # window, or one whose patch does not apply, full-downloads instead.
+              if rclone cat "r2:${R2_BUCKET}/manifest.json" >/tmp/manifest.json 2>/dev/null; then
+                from_vers=$(jq -r --arg ch "$ch" '.channels[$ch].releases[]? // empty' /tmp/manifest.json \
+                  | sed -E 's/\+image\..*$//' | grep -vx "$VERSION" | sort -Vru | head -n "$DAEMON_PATCH_COUNT" || true)
+                mkdir -p /tmp/old
+                for from in $from_vers; do
+                  rclone copyto "r2:${R2_BUCKET}/daemon/${ch}/${from}/bridgething" "/tmp/old/${ch}-$from" 2>/dev/null \
+                    || { echo "no daemon binary on R2 for ${ch}/${from}; skipping its patch"; continue; }
+                  patch="/tmp/${ch}-from-${from}.zst"
+                  zstd -q -19 --long=27 --patch-from="/tmp/old/${ch}-$from" "$bin" -o "$patch" -f \
+                    || { echo "zstd patch ${from} -> ${VERSION} failed; skipping"; continue; }
+                  scripts/r2-put "$patch" "daemon/${ch}/${VERSION}/patches/from-${from}.zst" application/octet-stream
+                  patches=$(jq -c --arg from "$from" \
+                    --argjson size "$(stat -c%s "$patch")" \
+                    --arg sha256 "$(sha256sum "$patch" | cut -d' ' -f1)" \
+                    '. + {($from): {size: $size, sha256: $sha256}}' <<<"$patches")
+                done
+              else
+                echo "no manifest on R2 yet; nothing to patch from"
+              fi
+            fi
+
+            while read -r name version; do
+              key="webapps/${ch}/${name}/${version}/${name}.zip"
+              if exists "$key"; then
+                echo "${name} ${version} already published on ${ch}; bump its manifest to publish a change"
+              else
+                scripts/r2-put "/tmp/${name}.zip" "$key" application/zip
+              fi
+            done < <(jq -r 'to_entries[] | "\(.key) \(.value.version)"' <<<"$WEBAPPS")
+
+            # rewritten every run so it always describes the full release for this channel.
+            jq -n \
+              --arg channel "$ch" \
+              --arg version "$VERSION" \
+              --arg released_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --argjson size "$bin_size" \
+              --arg sha256 "$bin_sha" \
+              --argjson webapps "$WEBAPPS" \
+              --argjson patches "$patches" \
+              '{kind: "daemon", channel: $channel, version: $version, released_at: $released_at,
+                artifacts: {daemon: {size: $size, sha256: $sha256}},
+                webapps: $webapps, daemon_patches: $patches}' \
+              >/tmp/release-${ch}.json
+            scripts/r2-put "/tmp/release-${ch}.json" "daemon/${ch}/${VERSION}/release.json" \
+              application/json "public, max-age=300, must-revalidate"
+            echo "::endgroup::"
+          done
+
+          echo "dispatch=${dispatch# }" >>"$GITHUB_OUTPUT"
+
+      - name: purge the cloudflare edge
+        if: always()
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: scripts/cf-purge
+
+      - name: ask bridgething.com to compose a bundle
+        if: steps.publish.outputs.dispatch != '' && (github.event_name == 'push' || inputs.dispatch_bundle)
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          DISPATCH: ${{ steps.publish.outputs.dispatch }}
+        run: |
+          set -euo pipefail
+          for ch in ${DISPATCH}; do
+            jq -nc \
+              --arg channel "$ch" \
+              --arg daemon_version "$VERSION" \
+              '{event_type: "daemon-released",
+                client_payload: {kind: "daemon", channel: $channel, daemon_version: $daemon_version}}' \
+              | gh api repos/JoeyEamigh/bridgething.com/dispatches --input -
+            echo "dispatched a bundle for $ch"
+          done

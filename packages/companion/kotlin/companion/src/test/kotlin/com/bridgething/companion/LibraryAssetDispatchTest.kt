@@ -34,7 +34,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
-/** breadth coverage for asset, lyrics, library, and outbound capabilities dispatch. */
 class LibraryAssetDispatchTest {
     private suspend fun boot(
         scope: CoroutineScope,
@@ -51,7 +50,7 @@ class LibraryAssetDispatchTest {
             volume = NoOpVolumeSource,
             audio = NoOpAudioBackend,
         )
-        if (glue != null) companion.setActive(glue)
+        if (glue != null) companion.attach(glue)
         companion.start()
         val driver = WireDriver(adapter)
         driver.start(scope)
@@ -84,7 +83,6 @@ class LibraryAssetDispatchTest {
 
     @Test
     fun `asset miss returns notFound`() = runBlocking {
-        // fakeglue with no onAsset returns null -> notFound, not a hang
         val (companion, driver) = boot(this, FakeGlue())
 
         val resp = driver.request(BridgeToGatewayMsgData.Asset(BridgeToGatewayAssetMsg.Request(AssetRequest(id = "art:missing", requestId = UUID.randomUUID()))))
@@ -108,7 +106,6 @@ class LibraryAssetDispatchTest {
         assertEquals(requestId, ref.id)
         assertEquals(payload.size.toUInt(), ref.totalSize)
 
-        // fragments arrive offset-ordered, complete, and never more than one window past the acked bytes
         val assembled = java.io.ByteArrayOutputStream()
         var acked = 0u
         val windowBytes = 8 * 1024

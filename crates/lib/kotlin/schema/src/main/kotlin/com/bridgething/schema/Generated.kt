@@ -14,7 +14,7 @@ data class Album (
 	val id: String,
 	val name: String,
 	/// Opaque artwork asset id (`asset.get`), when known.
-	val artwork_id: String? = null
+	val artworkId: String? = null
 )
 
 /// Art render sizes a webapp declares so the companion warms exactly the
@@ -33,7 +33,7 @@ data class Artist (
 	val id: String,
 	val name: String,
 	/// Opaque artwork asset id (`asset.get`), when known.
-	val artwork_id: String? = null
+	val artworkId: String? = null
 )
 
 @Serializable
@@ -355,7 +355,11 @@ data class SurfaceAvailability (
 	val netFetch: Boolean,
 	val netWs: Boolean,
 	val audioTts: Boolean,
-	val lyrics: Boolean
+	val lyrics: Boolean,
+	/// The active music provider can enumerate remote endpoints and move
+	/// playback between them. False for providers whose platform refuses to
+	/// expose routes (Apple Music), and whenever no glue is attached.
+	val playbackTargets: Boolean? = null
 )
 
 @Serializable
@@ -998,12 +1002,16 @@ data class LogsUnsubscribe (
 	val token: String
 )
 
+/// One timed line. `start_ms` is relative to track start, so a webapp highlights against the
+/// same clock it draws the progress bar from.
 @Serializable
 data class LyricLine (
 	val startMs: UInt,
 	val text: String
 )
 
+/// Lyrics for one track. `synced` and `plain` are independent: a source may carry either, both,
+/// or neither. `source` names the provider so a webapp can attribute it.
 @Serializable
 data class Lyrics (
 	val synced: List<LyricLine>? = null,
@@ -1406,14 +1414,13 @@ enum class NotificationCategory(val string: String) {
 }
 
 /// ANCS-shaped flags. `silent` mirrors the iOS "do not surface
-/// audibly" hint, `important` is the high-importance flag, and
-/// `pre_existing` is true for notifications that arrived before the
-/// daemon connected (replayed by the companion on first sync).
+/// audibly" hint and `important` is the high-importance flag. Only
+/// notifications posted while the daemon is connected are surfaced, so
+/// there is no pre-existing/backfill marker.
 @Serializable
 data class NotificationFlags (
 	val silent: Boolean,
-	val important: Boolean,
-	val preExisting: Boolean
+	val important: Boolean
 )
 
 /// One ANCS-style action slot. `label` is the gateway-localized prompt
@@ -1652,10 +1659,6 @@ data class OtaBegin (
 	val updateUrlBase: String? = null,
 	val transfer: TransferRef,
 	val patch: OtaPatch? = null,
-	/// Provenance to record against the installed webapp, conventionally the
-	/// catalog source URL. `InstalledWebapp` only; authoritative, so `None`
-	/// clears any previously recorded provenance for that uuid. Capped at
-	/// `WEBAPP_PROVENANCE_MAX_LEN` bytes.
 	val provenance: String? = null
 )
 
@@ -2015,12 +2018,12 @@ data class PhoneStateReply (
 
 /// Optional context for `play({ uri })`. `context_uri` is the album /
 /// playlist / show URI the track is being played from; gateways with
-/// playlist support honor it for skip-next semantics. `position` is the
-/// 0-based index inside the context.
+/// playlist support honor it for skip-next semantics. A row inside the
+/// context is addressed by playing that row's own uri within it, so there
+/// is no index here.
 @Serializable
 data class PlayContext (
-	val contextUri: String,
-	val position: UInt? = null
+	val contextUri: String
 )
 
 @Serializable
@@ -2082,6 +2085,57 @@ data class PlaybackOptions (
 	val shuffle: Boolean
 )
 
+/// What kind of endpoint a `PlaybackTarget` is. Coarse on purpose: the
+/// provider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in
+/// their long tails, and webapps only pick an icon from this. Anything
+/// unrecognized maps to `Unknown` rather than leaking a provider string.
+@Serializable
+enum class PlaybackTargetKind(val string: String) {
+	@SerialName("unknown")
+	Unknown("unknown"),
+	@SerialName("phone")
+	Phone("phone"),
+	@SerialName("tablet")
+	Tablet("tablet"),
+	@SerialName("computer")
+	Computer("computer"),
+	@SerialName("speaker")
+	Speaker("speaker"),
+	@SerialName("tv")
+	Tv("tv"),
+	@SerialName("gameConsole")
+	GameConsole("gameConsole"),
+	@SerialName("automobile")
+	Automobile("automobile"),
+	@SerialName("wearable")
+	Wearable("wearable"),
+}
+
+/// A remote endpoint the current provider can move playback to. Only
+/// meaningful when `SurfaceAvailability::playback_targets` is set; the
+/// list never contains the Car Thing itself, which is a control surface
+/// and never an audio endpoint.
+/// 
+/// `volume_percent` is `None` when the endpoint does not report volume.
+@Serializable
+data class PlaybackTarget (
+	/// Provider-opaque endpoint id; pass back to `transferTo`.
+	val id: String,
+	val name: String,
+	val kind: PlaybackTargetKind,
+	/// Whether this endpoint is the one currently playing.
+	val isActive: Boolean,
+	val volumePercent: UInt? = null
+)
+
+/// Complete replacement list of the provider's remote endpoints. The
+/// companion pushes one whenever its endpoint set changes; there is no
+/// delta and no daemon-side poll.
+@Serializable
+data class PlaybackTargets (
+	val targets: List<PlaybackTarget>
+)
+
 /// User-tunable knobs that are not "currently playing" state.
 /// `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
 /// distinguishes "user explicitly set zero" from "feature unsupported by
@@ -2089,7 +2143,7 @@ data class PlaybackOptions (
 @Serializable
 data class PlayerOptions (
 	val speed: Float,
-	val crossfade_ms: UInt? = null
+	val crossfadeMs: UInt? = null
 )
 
 /// One row in the player queue. Lean cross-platform shape - gateways
@@ -2121,7 +2175,11 @@ data class PlayerState (
 	val playback: Playback,
 	val queue: List<QueueItem>,
 	val options: PlayerOptions,
-	val context: PlaybackContext? = null
+	val context: PlaybackContext? = null,
+	/// The endpoint the audio is coming out of, when it is not the phone
+	/// itself. `None` means local playback, or a provider with no remote
+	/// endpoint concept. Webapps render "playing on <name>" from this.
+	val target: PlaybackTarget? = null
 )
 
 /// Lean cross-platform shape for a playlist. `uri` is what `player.play`
@@ -2353,9 +2411,9 @@ data class Track (
 	val artist: Artist,
 	/// All credited artists, in order.
 	val artists: List<Artist>,
-	val duration_ms: UInt,
+	val durationMs: UInt,
 	/// Opaque artwork asset id; pass to `asset.get` for the bytes.
-	val image_id: String,
+	val imageId: String,
 	/// Whether the track is saved in the user's library.
 	val saved: Boolean
 )
@@ -2377,6 +2435,11 @@ data class TransferFragment (
 	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
 	val offset: UInt,
 	val bytes: ByteArray
+)
+
+@Serializable
+data class TransferTo (
+	val targetId: String
 )
 
 @Serializable
@@ -2751,10 +2814,7 @@ data class WebappInfo (
 	val art: ArtProfile? = null,
 	/// Opaque provenance token recorded at install time by whoever pushed
 	/// the bundle, conventionally the catalog source URL. The daemon stores
-	/// and returns it verbatim and never dereferences it; it exists so every
-	/// client agrees on which source an installed webapp came from, and can
-	/// tell an update apart from a different source claiming the same uuid.
-	/// `None` means unknown provenance (image-seeded examples, sideloads).
+	/// and returns it verbatim and never dereferences it.
 	val provenance: String? = null
 )
 
@@ -3069,6 +3129,9 @@ sealed class BridgeToGatewayPlayerMsg {
 	@Serializable
 	@SerialName("setCrossfade")
 	data class SetCrossfade(val data: com.bridgething.schema.SetCrossfade): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("transferTo")
+	data class TransferTo(val data: com.bridgething.schema.TransferTo): BridgeToGatewayPlayerMsg()
 }
 
 @Serializable(with = BridgeToGatewaySystemMsgSerializer::class)
@@ -3406,6 +3469,9 @@ sealed class GatewayToBridgePlayerMsg {
 	@SerialName("queueChanged")
 	data class QueueChanged(val data: QueueSnapshot): GatewayToBridgePlayerMsg()
 	@Serializable
+	@SerialName("targetsChanged")
+	data class TargetsChanged(val data: PlaybackTargets): GatewayToBridgePlayerMsg()
+	@Serializable
 	@SerialName("requestSpotifyWake")
 	object RequestSpotifyWake: GatewayToBridgePlayerMsg()
 }
@@ -3623,6 +3689,12 @@ data class PlayerErrorNotInQueueInner (
 	val index: UInt
 )
 
+/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorUnknownTargetInner (
+	val target_id: String
+)
+
 @Serializable(with = PlayerErrorSerializer::class)
 sealed class PlayerError {
 	/// `play({uri})` was called with a scheme no connected gateway claims.
@@ -3642,6 +3714,10 @@ sealed class PlayerError {
 	@Serializable
 	@SerialName("notInQueue")
 	data class NotInQueue(val data: PlayerErrorNotInQueueInner): PlayerError()
+	/// `transferTo` named an endpoint that is not in the current target list.
+	@Serializable
+	@SerialName("unknownTarget")
+	data class UnknownTarget(val data: PlayerErrorUnknownTargetInner): PlayerError()
 }
 
 @Serializable

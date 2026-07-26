@@ -10,7 +10,7 @@ use futures::{
 };
 use libbridgething::{
   client::{BridgeToClientMsg, BridgeToClientMsgData, ClientToBridgeMsg, ClientToBridgeMsgData},
-  protocol::try_probe_envelope_json,
+  protocol::{try_probe_envelope_json, try_probe_envelope_msgpack},
   wire::{MsgMeta, ResponseMeta, WireError},
 };
 use tokio::task::JoinHandle;
@@ -19,8 +19,15 @@ use uuid::Uuid;
 
 use crate::handler::client::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendRx};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientEncoding {
+  Json,
+  Msgpack,
+}
+
 pub struct Connection {
   mode: ClientMode,
+  encoding: ClientEncoding,
   address: SocketAddr,
 
   writer: SplitSink<WebSocket, ws::Message>,
@@ -51,6 +58,7 @@ impl Connection {
     tokio::spawn(async move {
       Self {
         mode,
+        encoding: ClientEncoding::Json,
         address,
 
         writer,
@@ -115,29 +123,53 @@ impl Connection {
 
   async fn handle_text(&mut self, text: Utf8Bytes) {
     tracing::trace!("(incoming: {}) new message: {}", &self.address, text.as_str());
-    let msg = match serde_json::from_str::<PossibleRecvMsg>(text.as_str()) {
-      Ok(msg) => msg,
+    self.encoding = ClientEncoding::Json;
+    match serde_json::from_str::<PossibleRecvMsg>(text.as_str()) {
+      Ok(msg) => self.handle_decoded(msg).await,
       Err(error) => {
-        let probe = try_probe_envelope_json(text.as_bytes());
-        tracing::warn!(
-          target: "bridgething::ws::decode",
-          "({}) typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
-          &self.address, probe.data_type, probe.data_event, probe.meta_kind, probe.id,
-        );
-        if probe.is_request()
-          && let Some(request_id) = probe.id
-        {
-          let nack = BridgeToClientMsg {
-            id: Uuid::now_v7(),
-            meta: MsgMeta::Response(ResponseMeta { request_id }),
-            data: BridgeToClientMsgData::Error(WireError::Unsupported),
-          };
-          self.send(PossibleSendMsg::Modern(nack)).await;
-        }
-        return;
+        self
+          .nack_undecodable(try_probe_envelope_json(text.as_bytes()), &error.to_string())
+          .await
       }
-    };
+    }
+  }
 
+  async fn handle_binary(&mut self, payload: Bytes) {
+    tracing::trace!(
+      "(incoming: {}) new msgpack message: {} bytes",
+      &self.address,
+      payload.len()
+    );
+    self.encoding = ClientEncoding::Msgpack;
+    match rmp_serde::from_slice::<PossibleRecvMsg>(&payload) {
+      Ok(msg) => self.handle_decoded(msg).await,
+      Err(error) => {
+        self
+          .nack_undecodable(try_probe_envelope_msgpack(&payload), &error.to_string())
+          .await
+      }
+    }
+  }
+
+  async fn nack_undecodable(&mut self, probe: libbridgething::protocol::EnvelopeProbe, error: &str) {
+    tracing::warn!(
+      target: "bridgething::ws::decode",
+      "({}) typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
+      &self.address, probe.data_type, probe.data_event, probe.meta_kind, probe.id,
+    );
+    if probe.is_request()
+      && let Some(request_id) = probe.id
+    {
+      let nack = BridgeToClientMsg {
+        id: Uuid::now_v7(),
+        meta: MsgMeta::Response(ResponseMeta { request_id }),
+        data: BridgeToClientMsgData::Error(WireError::Unsupported),
+      };
+      self.send(PossibleSendMsg::Modern(nack)).await;
+    }
+  }
+
+  async fn handle_decoded(&mut self, msg: PossibleRecvMsg) {
     if self.mode != ClientMode::Stock
       && (matches!(msg, PossibleRecvMsg::Stock(_)) || matches!(msg, PossibleRecvMsg::StockInterApp { .. }))
     {
@@ -174,10 +206,6 @@ impl Connection {
     self.forward(msg).await;
   }
 
-  async fn handle_binary(&self, payload: Bytes) {
-    tracing::trace!("({}) binary data received? payload: {:?}", &self.address, payload);
-  }
-
   async fn handle_pong(&self, payload: Bytes) {
     tracing::trace!("({}) pong received? payload: {:?}", &self.address, payload);
   }
@@ -195,23 +223,42 @@ impl Connection {
       return;
     }
 
-    let json = match serde_json::to_string(&msg) {
-      Ok(json) => json,
-      Err(err) => {
-        return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err);
+    #[cfg(feature = "test-tap")]
+    match serde_json::to_string(&msg) {
+      Ok(json) => {
+        let _ = self.frame_tap.send(super::connman::TappedFrame {
+          to: self.address,
+          mode: self.mode,
+          json,
+        });
       }
+      Err(err) => {
+        tracing::error!(target: "bridgething::ws::connection::send", "({}) could not tap frame as json: {:?}", &self.address, err)
+      }
+    }
+
+    let frame = match self.encoding {
+      ClientEncoding::Json => match serde_json::to_string(&msg) {
+        Ok(json) => {
+          tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);
+          ws::Message::Text(json.into())
+        }
+        Err(err) => {
+          return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err);
+        }
+      },
+      ClientEncoding::Msgpack => match rmp_serde::to_vec_named(&msg) {
+        Ok(packed) => {
+          tracing::trace!(target: "bridgething::ws::connection::send", "sending msgpack: {} bytes", packed.len());
+          ws::Message::Binary(packed.into())
+        }
+        Err(err) => {
+          return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to msgpack!!: {:?}", &self.address, err);
+        }
+      },
     };
 
-    #[cfg(feature = "test-tap")]
-    let _ = self.frame_tap.send(super::connman::TappedFrame {
-      to: self.address,
-      mode: self.mode,
-      json: json.clone(),
-    });
-
-    tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);
-
-    if let Err(err) = self.writer.send(ws::Message::Text(json.into())).await {
+    if let Err(err) = self.writer.send(frame).await {
       tracing::error!(target: "bridgething::ws::connection::send", "({}) error sending message to websocket!!: {:?}", &self.address, err);
     };
   }

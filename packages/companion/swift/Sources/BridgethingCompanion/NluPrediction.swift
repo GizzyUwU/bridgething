@@ -1,14 +1,7 @@
-// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
-#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
-
 import BridgethingSchema
 import Foundation
 
-/// Mutable companion-side intermediate that mirrors the immutable wire
-/// `NluResolvedIntent`. Built up across the fast-path / LLM / intent-snap
-/// / Spotify-resolve stages, then converted to the wire shape once at the
-/// `VoiceDispatch` boundary.
-public struct NluPrediction: Equatable, Sendable {
+public struct NluPrediction: Sendable {
     public var intent: String
     public var slots: NluMutableSlots
     public var transcript: String
@@ -50,9 +43,6 @@ public struct NluPrediction: Equatable, Sendable {
     }
 }
 
-/// Companion-side mutable mirror of the wire `NluSlots`. Same fields,
-/// `public var` instead of `let` so pipeline stages can decorate (e.g.
-/// SpotifyResolver setting `uri` after lookup).
 public struct NluMutableSlots: Equatable, Sendable {
     public var artist: String?
     public var track: String?
@@ -164,5 +154,3 @@ public struct NluMutableSlots: Equatable, Sendable {
         )
     }
 }
-
-#endif

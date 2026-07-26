@@ -70,6 +70,8 @@ pub struct SurfaceAvailability {
   pub net_ws: bool,
   pub audio_tts: bool,
   pub lyrics: bool,
+  #[serde(default)]
+  pub playback_targets: bool,
 }
 
 /// Which music service the companion is currently logged into and

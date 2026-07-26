@@ -20,9 +20,9 @@ own terms.
 | `crates/swupdate-sys`                      | FFI to libswupdate for in-band system OTA                         |
 | `packages/gateway`, `packages/companion`   | Phone-side gateway (TS + native)                                  |
 | `packages/client-ts`, `packages/adapter-*` | Generated SDKs                                                    |
-| `packages/hub-webapp`                      | The built-in launcher webapp                                      |
+| `packages/webapps/builtin`                 | Webapps delivered with the daemon (hub, browser)                  |
+| `packages/webapps/catalog`                 | Webapps published to the app catalog                              |
 | `packages/create-bridgething`              | `bun create bridgething`                                          |
-| `packages/examples`                        | Sample webapps                                                    |
 | `mobile/`                                  | Phone-side app                                                    |
 | `docs/protocol.md`                         | Wire-protocol reference                                           |
 

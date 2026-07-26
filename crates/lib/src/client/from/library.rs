@@ -91,6 +91,26 @@ pub struct LibraryRecommendations {
 #[wire_request(
   direction = ClientToBridge,
   surface = Library,
+  request_variant = ResolveContext,
+  response = crate::client::LibraryResolveContextReply,
+  response_variant = ResolveContextReply,
+  error = crate::client::LibraryErrorReply,
+  error_variant = LibraryErrorReply,
+)]
+/// Payload for the `resolveContext` request: turn a context uri into something renderable.
+/// The uri a webapp holds is usually `PlayerState::context`, so this is what backs a
+/// "playing from <playlist>" line without having to browse for the containing entity.
+pub struct LibraryResolveContext {
+  pub uri: String,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Library,
   request_variant = FavoritesList,
   response = crate::client::LibraryFavoritesListReply,
   response_variant = FavoritesListReply,
@@ -159,8 +179,9 @@ pub struct FavoritesSetMany {
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
 /// Webapp -> daemon library surface: browse/search/recommend across the connected gateway's
-/// library, and read or mutate favorites. `Browse`, `Search`, `Recommendations`,
-/// `FavoritesList`, and `FavoritesContains` are request/reply and fail with
+/// library, resolve a context uri, and read or mutate favorites. `Browse`, `Search`,
+/// `Recommendations`, `ResolveContext`, `FavoritesList`, and `FavoritesContains` are
+/// request/reply and fail with
 /// `LibraryErrorReply` when no gateway is connected. `FavoritesToggle`, `FavoritesSet`, and
 /// `FavoritesSetMany` are fire-and-forget commands with no completion reply; if no gateway is
 /// connected they are silently dropped, and on success their effect surfaces later as a
@@ -172,6 +193,8 @@ pub enum ClientToBridgeLibraryMsg {
   Search(LibrarySearch),
   #[bridge_request]
   Recommendations(LibraryRecommendations),
+  #[bridge_request]
+  ResolveContext(LibraryResolveContext),
   #[bridge_request]
   FavoritesList(LibraryFavoritesList),
   #[bridge_request]

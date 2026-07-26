@@ -7,7 +7,10 @@ use std::{
 use libbridgething::{
   ConfigField, WEBAPP_PROVENANCE_MAX_LEN, WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource,
 };
-use tokio::{fs, sync::RwLock};
+use tokio::{
+  fs,
+  sync::{OnceCell, RwLock},
+};
 use uuid::Uuid;
 
 use super::{StateResult, storage::WebappProvenanceStore};
@@ -15,7 +18,6 @@ use super::{StateResult, storage::WebappProvenanceStore};
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 pub const SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
-const STOCK_ICON_SVG: &str = include_str!("stock_icon.svg");
 
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
 pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
@@ -39,7 +41,7 @@ pub struct WebappBundle {
   pub icon_mime: Option<String>,
   pub icon_hash: Option<String>,
   pub settings_hash: Option<String>,
-  pub bundle_hash: String,
+  pub bundle_hash: Arc<OnceCell<String>>,
   pub provenance: Option<String>,
 }
 
@@ -117,7 +119,12 @@ impl WebappRegistry {
   }
 
   pub async fn bundle_hash(&self, id: Uuid) -> Option<String> {
-    self.bundles.read().await.get(&id).map(|b| b.bundle_hash.clone())
+    let (cell, path) = {
+      let bundles = self.bundles.read().await;
+      let bundle = bundles.get(&id)?;
+      (bundle.bundle_hash.clone(), bundle.path.clone())
+    };
+    Some(cell.get_or_init(|| compute_bundle_hash(path)).await.clone())
   }
 
   pub async fn launcher_id(&self) -> Option<Uuid> {
@@ -271,9 +278,6 @@ impl WebappRegistry {
 
   pub async fn read_icon(&self, id: Uuid) -> Option<(Vec<u8>, Option<String>)> {
     let bundle = self.bundle(id).await?;
-    if id == STOCK_WEBAPP_ID {
-      return Some((STOCK_ICON_SVG.as_bytes().to_vec(), Some("image/svg+xml".to_string())));
-    }
     let rel = bundle.manifest.icon.as_deref()?;
     bundle.icon_hash.as_ref()?;
     let path = bundle.path.join(rel);
@@ -389,17 +393,6 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     None => None,
   };
 
-  let bundle_hash = compute_bundle_hash(path).await;
-
-  let (icon_mime, icon_hash) = if manifest.id == STOCK_WEBAPP_ID {
-    (
-      Some("image/svg+xml".to_string()),
-      Some(sha256_hex(STOCK_ICON_SVG.as_bytes())),
-    )
-  } else {
-    (icon_mime, icon_hash)
-  };
-
   Some(WebappBundle {
     path: path.to_path_buf(),
     source,
@@ -407,7 +400,7 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     icon_mime,
     icon_hash,
     settings_hash,
-    bundle_hash,
+    bundle_hash: Arc::new(OnceCell::new()),
     provenance: None,
   })
 }
@@ -441,10 +434,10 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
   hex::encode(hasher.finalize())
 }
 
-async fn compute_bundle_hash(root: &Path) -> String {
+async fn compute_bundle_hash(root: PathBuf) -> String {
   use sha2::{Digest, Sha256};
   let mut hasher = Sha256::new();
-  let mut entries = collect_files(root).await;
+  let mut entries = collect_files(&root).await;
   entries.sort();
   for rel in entries {
     let abs = root.join(&rel);

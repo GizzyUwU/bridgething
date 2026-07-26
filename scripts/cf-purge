@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+file="${PURGE_URLS:-}"
+[ -n "$file" ] && [ -s "$file" ] || { echo "cf-purge: nothing to purge" >&2; exit 0; }
+
+if [ -z "${CLOUDFLARE_ZONE_ID:-}" ] || [ -z "${CLOUDFLARE_CACHE_PURGE_TOKEN:-}" ]; then
+  echo "cf-purge: no zone id or purge token; the edge may serve stale bytes until TTL" >&2
+  exit 0
+fi
+
+urls=()
+while IFS= read -r line; do urls+=("$line"); done < <(sort -u "$file")
+ok=1
+for ((i = 0; i < ${#urls[@]}; i += 30)); do
+  body=$(printf '%s\n' "${urls[@]:i:30}" | jq -R . | jq -s '{files: .}')
+  curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+    -H "Authorization: Bearer ${CLOUDFLARE_CACHE_PURGE_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$body" | jq -e '.success' >/dev/null || ok=0
+done
+
+if [ "$ok" = 1 ]; then
+  echo "cf-purge: purged ${#urls[@]} url(s)" >&2
+else
+  echo "cf-purge: purge failed; objects are live on R2 but the edge may serve stale until TTL" >&2
+fi
+exit 0

@@ -32,6 +32,18 @@ pub struct LibraryRecommendationsReply {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Reply to `resolveContext`. Every field is best-effort: a gateway that recognises the uri but
+/// cannot cheaply name it answers with `None`s rather than failing the request.
+pub struct LibraryResolveContextReply {
+  pub name: Option<String>,
+  pub artwork_id: Option<String>,
+  pub subtitle: Option<String>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
 pub struct LibraryFavoritesListReply {
   pub page: FavoritesPage,
 }
@@ -70,7 +82,8 @@ pub struct FavoriteChanged {
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
 /// Daemon -> webapp replies and events for the library surface. `BrowseReply`, `SearchReply`,
-/// `RecommendationsReply`, `FavoritesListReply`, and `FavoritesContainsReply` answer the
+/// `RecommendationsReply`, `ResolveContextReply`, `FavoritesListReply`, and
+/// `FavoritesContainsReply` answer the
 /// matching `ClientToBridgeLibraryMsg` request; `LibraryErrorReply` replaces the reply on
 /// failure. `FavoriteChanged` is a live event broadcast to every connected webapp whenever a
 /// favorite's status changes.
@@ -81,6 +94,8 @@ pub enum BridgeToClientLibraryMsg {
   SearchReply(LibrarySearchReply),
   #[bridge_response]
   RecommendationsReply(LibraryRecommendationsReply),
+  #[bridge_response]
+  ResolveContextReply(LibraryResolveContextReply),
   #[bridge_response]
   FavoritesListReply(LibraryFavoritesListReply),
   #[bridge_response]

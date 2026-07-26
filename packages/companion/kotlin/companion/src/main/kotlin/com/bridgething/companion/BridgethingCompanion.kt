@@ -103,23 +103,15 @@ import com.bridgething.schema.FavoritesToggle
 import com.bridgething.schema.FavoritesSet
 import com.bridgething.schema.FavoritesSetMany
 
-/** Severity tag passed to the [BridgethingCompanion] log observer. */
 public enum class CompanionLogLevel(public val raw: String) {
     Debug("debug"), Info("info"), Warn("warn"), Error("error"),
 }
 
-/** version stamps the companion announces in `GatewayInfo`. */
 public object BridgethingCompanionVersion {
     public const val LIB: String = "0.1.0"
     public const val LIBBRIDGETHING: String = "0.1.0"
 }
 
-/**
- * Identity the companion advertises in `GatewayCapabilities.gateway`.
- * Caller-supplied at companion init; on Android the natural value for
- * `address` is `Settings.Secure.ANDROID_ID`. Empty string is acceptable
- * when no stable identifier is available.
- */
 public data class HostInfo(
     val appName: String,
     val appVersion: String,
@@ -129,11 +121,6 @@ public data class HostInfo(
     val adapterVersion: String = "",
 )
 
-/**
- * Capability flags the companion declares. Glue contributions
- * (`uriSchemes`, `musicProvider`, `lyricsSupported`) are mixed in by
- * [BridgethingCompanion] at announce time.
- */
 public data class CompanionCapabilityFlags(
     val geo: Boolean = true,
     val notifications: Boolean = true,
@@ -142,7 +129,6 @@ public data class CompanionCapabilityFlags(
     val audioTts: Boolean = true,
 )
 
-/** outcome of an attempted ANCS pair flow; Android has no AccessorySetupKit equivalent so always [Unsupported] here. */
 public enum class AncsSetupKind {
     Paired, AlreadyPaired, Cancelled, Unsupported, Failed
 }
@@ -153,10 +139,6 @@ public data class AncsSetupResult(
     val message: String? = null,
 )
 
-/**
- * Top-level orchestrator for the bridgething companion on Android. Owns one [BridgethingGateway] over the
- * supplied adapter and holds at most one active [BridgethingGlue]; per-state mutation flows through [stateMutex].
- */
 public class BridgethingCompanion(
     public val context: Context,
     adapter: Adapter,
@@ -180,14 +162,6 @@ public class BridgethingCompanion(
         gateway = gateway,
         receiver = transferReceiver,
     )
-    public val catalog: CatalogService = CatalogService(
-        installer = ota,
-        store = FileCatalogStore(
-            java.io.File(context.filesDir?.path ?: (System.getProperty("java.io.tmpdir") ?: "."), "bridgething-catalog"),
-        ),
-        httpClient = httpClient,
-    )
-
     private val netDispatcher = NetDispatcher(client = httpClient)
     private val tunnelDispatcher = TunnelDispatcher()
     private val audioDispatcher = AudioDispatcher(backend = audio)
@@ -205,7 +179,9 @@ public class BridgethingCompanion(
 
     private val stateMutex = Mutex()
     private var capFlags: CompanionCapabilityFlags = capabilities
-    private var activeGlue: BridgethingGlue? = null
+    private val glues: MutableMap<String, BridgethingGlue> = java.util.concurrent.ConcurrentHashMap()
+    @Volatile private var providerPriority: List<String> = emptyList()
+    @Volatile private var lastPlayedFromGlueId: String? = null
     private var dispatchers: MutableList<Job> = mutableListOf()
     private var started: Boolean = false
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
@@ -257,12 +233,12 @@ public class BridgethingCompanion(
 
     public suspend fun stop() {
         val toCancel: List<Job>
-        val glue: BridgethingGlue?
+        val attached: List<BridgethingGlue>
         stateMutex.withLock {
             toCancel = dispatchers.toList()
             dispatchers.clear()
-            glue = activeGlue
-            activeGlue = null
+            attached = glues.values.toList()
+            glues.clear()
             started = false
         }
         for (job in toCancel) job.cancel()
@@ -295,50 +271,109 @@ public class BridgethingCompanion(
         runCatching { phoneDispatcher.stop() }
         runCatching { notificationDispatcher.stop() }
         runCatching { ota.stop() }
-        runCatching { catalog.stop() }
 
-        if (glue != null) runCatching { glue.detach() }
+        for (g in attached) {
+            runCatching { g.detach() }
+            runCatching { g.setNowPlayingSink(null) }
+        }
 
         gateway.stop()
         log(CompanionLogLevel.Info, "companion stopped")
     }
 
-    public suspend fun setActive(glue: BridgethingGlue?) {
-        val previous = stateMutex.withLock {
-            val prev = activeGlue
-            activeGlue = glue
-            prev
-        }
-        if (previous != null) {
-            log(CompanionLogLevel.Info, "detaching glue ${previous.name}")
-            nowPlayingHub.unregister(previous.name)
-            runCatching { previous.detach() }
-            runCatching { previous.setNowPlayingSink(null) }
-            nowPlayingObserver?.invoke(null)
-        }
-        activeAppBundles = glue?.appBundles?.toSet() ?: emptySet()
-        if (glue != null) {
-            nowPlayingObserver?.let { glue.setNowPlayingObserver(it) }
-            glue.setNowPlayingSink(nowPlayingHub)
-            try {
-                glue.attach(gateway)
-                nowPlayingHub.register(glue.name, glue)
-                log(CompanionLogLevel.Info, "attached glue ${glue.name}")
-            } catch (e: Throwable) {
-                log(CompanionLogLevel.Error, "glue ${glue.name} attach failed: ${e.message ?: e.toString()}")
-                throw e
-            }
+    public suspend fun attach(glue: BridgethingGlue) {
+        if (stateMutex.withLock { glues.containsKey(glue.name) }) detach(glue.name)
+        nowPlayingObserver?.let { glue.setNowPlayingObserver(it) }
+        glue.setNowPlayingSink(nowPlayingHub)
+        try {
+            glue.attach(gateway)
+            stateMutex.withLock { glues[glue.name] = glue }
+            nowPlayingHub.register(glue.name, glue)
+            refreshActiveAppBundles()
+            log(CompanionLogLevel.Info, "attached glue ${glue.name}")
+        } catch (e: Throwable) {
+            runCatching { glue.setNowPlayingSink(null) }
+            log(CompanionLogLevel.Error, "glue ${glue.name} attach failed: ${e.message ?: e.toString()}")
+            throw e
         }
         announceCapabilities()
     }
 
-    public fun current(): BridgethingGlue? = activeGlue
+    public suspend fun detach(id: String) {
+        val glue = stateMutex.withLock { glues.remove(id) } ?: return
+        log(CompanionLogLevel.Info, "detaching glue $id")
+        nowPlayingHub.unregister(id)
+        nowPlayingHub.clearSource(id)
+        runCatching { glue.detach() }
+        runCatching { glue.setNowPlayingSink(null) }
+        stateMutex.withLock { if (lastPlayedFromGlueId == id) lastPlayedFromGlueId = null }
+        refreshActiveAppBundles()
+        if (stateMutex.withLock { glues.isEmpty() }) nowPlayingObserver?.invoke(null)
+        announceCapabilities()
+    }
 
-    /**
-     * Re-attach the system-media observer after a notification-access grant. The active-sessions listener
-     * cannot register before the grant, so the host calls this once access lands (e.g. on the
-     * NotificationListenerService binding) to start surfacing foreign-app now-playing.
-     */
+    public suspend fun detachAll() {
+        for (id in stateMutex.withLock { glues.keys.toList() }) detach(id)
+    }
+
+    public fun attachedProviderIds(): List<String> = glues.keys.toList()
+
+    public suspend fun setProviderPriority(ids: List<String>) {
+        stateMutex.withLock { providerPriority = ids }
+        announceCapabilities()
+    }
+
+    public fun libraryGlue(): BridgethingGlue? {
+        lastPlayedFromGlueId?.let { id -> glues[id]?.let { return it } }
+        for (id in providerPriority) glues[id]?.let { return it }
+        return glues.values.firstOrNull()
+    }
+
+    public fun audibleGlue(): BridgethingGlue? = nowPlayingHub.currentSource()?.let { glues[it] }
+
+    private fun orderedGlueIds(): List<String> {
+        val ranked = providerPriority.filter { glues.containsKey(it) }
+        return ranked + glues.keys.filter { it !in ranked }.sorted()
+    }
+
+    private fun attachedSchemes(): List<String> =
+        orderedGlueIds().mapNotNull { glues[it] }.flatMap { it.uriSchemes }.distinct()
+
+    private fun glueForUri(uri: String): BridgethingGlue? {
+        val scheme = uri.substringBefore(':', "").lowercase()
+        if (scheme.isEmpty()) return null
+        return orderedGlueIds().mapNotNull { glues[it] }
+            .firstOrNull { g -> g.uriSchemes.any { it.lowercase() == scheme } }
+    }
+
+    private fun refreshActiveAppBundles() {
+        activeAppBundles = glues.values.flatMap { it.appBundles }.toSet()
+    }
+
+    private suspend fun notifyPeerConnected(deviceId: String) {
+        val allowResume = allowAutoResume(deviceId)
+        val winner = resumeWinnerId()
+        for ((id, glue) in glues) {
+            runCatching { glue.handlePeerConnected(allowResume && id == winner) }
+        }
+    }
+
+    private fun resumeWinnerId(): String? {
+        nowPlayingHub.currentSource()?.let { if (glues.containsKey(it)) return it }
+        lastPlayedFromGlueId?.let { if (glues.containsKey(it)) return it }
+        return orderedGlueIds().firstOrNull()
+    }
+
+    private suspend fun resolveAsset(id: String): AssetBytes? {
+        val owner = id.substringBefore('/', "")
+        glues[owner]?.asset(id)?.let { return it }
+        for ((glueId, glue) in glues) {
+            if (glueId == owner) continue
+            glue.asset(id)?.let { return it }
+        }
+        return null
+    }
+
     public fun refreshSystemMedia() {
         systemMediaSource.refresh()
     }
@@ -370,16 +405,14 @@ public class BridgethingCompanion(
         true
     }
 
-    /** observer persists across [setActive] swaps and takes effect immediately for the current glue. */
     public suspend fun setNowPlayingObserver(observer: ((GlueNowPlaying?) -> Unit)?) {
-        val glue = stateMutex.withLock {
+        val attached = stateMutex.withLock {
             nowPlayingObserver = observer
-            activeGlue
+            glues.values.toList()
         }
-        glue?.setNowPlayingObserver(observer ?: { _ -> })
+        for (g in attached) g.setNowPlayingObserver(observer ?: { _ -> })
     }
 
-    /** iOS-only signal in practice; on Android the observer never fires from a daemon-side ANCS event. */
     public fun setAncsAuthStateObserver(observer: ((AncsAuthState) -> Unit)?) {
         ancsAuthStateObserver = observer
     }
@@ -466,15 +499,11 @@ public class BridgethingCompanion(
             LogLevel.Error -> CompanionLogLevel.Error
         }
         val message = "[${entry.target}] ${entry.message}"
-        // straight to the store rather than via logcat: these arrive over the
-        // wire and routing them through logcat would echo back through
-        // LogcatCapture and reach the live stream twice
         LogStore.write("daemon ${level.raw}: $message")
         DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }
 
-    /** Android has no equivalent to the iOS ANCS pair flow; always resolves [AncsSetupKind.Unsupported]. */
     public fun enableAncsNotifications(): AncsSetupResult =
         AncsSetupResult(kind = AncsSetupKind.Unsupported, authState = AncsAuthState.Unknown)
 
@@ -486,7 +515,7 @@ public class BridgethingCompanion(
     }
 
     private fun composeCapabilities(): GatewayCapabilities {
-        val glue = activeGlue
+        val glue = libraryGlue()
         val info = GatewayInfo(
             address = host.address,
             name = host.appName,
@@ -504,10 +533,11 @@ public class BridgethingCompanion(
             netWs = capFlags.netWs,
             audioTts = capFlags.audioTts,
             lyrics = true,
+            playbackTargets = glues.values.any { it.supportsPlaybackTargets },
         )
         return GatewayCapabilities(
             gateway = info,
-            uriSchemes = glue?.uriSchemes ?: emptyList(),
+            uriSchemes = attachedSchemes(),
             network = NetworkInfo(kind = NetworkKind.Unknown, metered = false),
             available = avail,
             audio = AudioCapabilities(earcons = emptyList(), voices = emptyList()),
@@ -536,11 +566,10 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
         dispatchers.add(scope.launch { tunnelDispatcher.start(gateway) })
-        audioDispatcher.setGlueProvider { current() }
+        audioDispatcher.setGlueProvider { audibleGlue() ?: libraryGlue() }
         dispatchers.add(scope.launch { audioDispatcher.start(gateway) })
         dispatchers.add(scope.launch { phoneDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })
-        dispatchers.add(scope.launch { catalog.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
     }
 
@@ -554,7 +583,7 @@ public class BridgethingCompanion(
         gateway.webapp.activeChanged.collect { (_, changed) ->
             val hero = changed.art?.heroPx?.toInt() ?: 248
             val thumb = changed.art?.thumbPx?.toInt() ?: 96
-            activeGlue?.setArtProfile(hero, thumb)
+            for (g in glues.values) g.setArtProfile(hero, thumb)
         }
     }
 
@@ -565,10 +594,9 @@ public class BridgethingCompanion(
                     log(CompanionLogLevel.Info, "peer connected: ${event.device.name} [${event.device.id}]")
                     announceCapabilities()
                     emitTimeSnapshot()
-                    activeGlue?.handlePeerConnected(allowAutoResume(event.device.id))
                     nowPlayingHub.onConnect()
+                    notifyPeerConnected(event.device.id)
                     phoneDispatcher.announce(gateway)
-                    notificationDispatcher.replay(gateway, event.device.id)
                     val subscribe = deviceLogMutex.withLock {
                         connectedDeviceIds.add(event.device.id)
                         deviceLogStreaming
@@ -621,14 +649,23 @@ public class BridgethingCompanion(
     }
 
     private suspend fun dispatchPlayer(player: BridgeToGatewayPlayerMsg) {
-        val glue = activeGlue
-        val transport: NowPlayingTransport? = nowPlayingHub.currentTransport() ?: glue
+        val transport: NowPlayingTransport? = nowPlayingHub.currentTransport() ?: libraryGlue()
         try {
             when (player) {
-                is BridgeToGatewayPlayerMsg.Play ->
-                    if (glue != null) glue.play(player.data) else log(CompanionLogLevel.Warn, "play dropped: no music provider")
-                is BridgeToGatewayPlayerMsg.Queue ->
-                    if (glue != null) glue.queue(player.data) else log(CompanionLogLevel.Warn, "queue dropped: no music provider")
+                is BridgeToGatewayPlayerMsg.Play -> {
+                    val glue = glueForUri(player.data.uri)
+                    if (glue != null) {
+                        lastPlayedFromGlueId = glue.name
+                        glue.play(player.data)
+                    } else {
+                        log(CompanionLogLevel.Warn, "play dropped: no provider claims ${player.data.uri}")
+                    }
+                }
+                is BridgeToGatewayPlayerMsg.Queue -> {
+                    val glue = glueForUri(player.data.uri)
+                    if (glue != null) glue.queue(player.data)
+                    else log(CompanionLogLevel.Warn, "queue dropped: no provider claims ${player.data.uri}")
+                }
                 BridgeToGatewayPlayerMsg.Pause -> transport?.pause()
                 BridgeToGatewayPlayerMsg.Resume -> transport?.resume()
                 BridgeToGatewayPlayerMsg.SkipNext -> transport?.skipNext()
@@ -639,6 +676,11 @@ public class BridgethingCompanion(
                 is BridgeToGatewayPlayerMsg.SetRepeat -> transport?.setRepeat(player.data.mode)
                 is BridgeToGatewayPlayerMsg.SetSpeed -> transport?.setSpeed(player.data.speed)
                 is BridgeToGatewayPlayerMsg.SetCrossfade -> transport?.setCrossfade(player.data.durationMs)
+                is BridgeToGatewayPlayerMsg.TransferTo -> {
+                    val glue = audibleGlue() ?: libraryGlue()
+                    if (glue != null) glue.transferTo(player.data.targetId)
+                    else log(CompanionLogLevel.Warn, "transferTo dropped: no music provider")
+                }
             }
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "player verb $player failed: ${e.message ?: e.toString()}")
@@ -654,7 +696,7 @@ public class BridgethingCompanion(
     private suspend fun handleAsset(handle: AssetRequestHandle, req: AssetRequest) {
         val bytes: AssetBytes? = try {
             if (req.id.startsWith(SystemMediaSource.ASSET_ID_PREFIX)) systemMediaSource.asset(req.id)
-            else activeGlue?.asset(req.id)
+            else resolveAsset(req.id)
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "asset ${req.id} glue resolve failed: ${e.message ?: e.toString()}")
             runCatching { handle.respondErr(AssetNotFoundReply(id = req.id)) }
@@ -735,7 +777,7 @@ public class BridgethingCompanion(
             isrc = req.track.isrc,
         )
         val resolved: DomainLyrics? = try {
-            activeGlue?.lyrics(identity) ?: lyricsResolver.lyrics(identity)
+            (audibleGlue() ?: libraryGlue())?.lyrics(identity) ?: lyricsResolver.lyrics(identity)
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "lyrics resolve failed for ${req.track.artist} - ${req.track.track}: ${e.message ?: e.toString()}")
             runCatching { handle.respondErr(LyricsErrorReply(message = e.toString())) }
@@ -766,7 +808,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleBrowse(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val result = try {
             glue.browse(req)
         } catch (e: Throwable) {
@@ -784,7 +826,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleResolveContext(handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val result = try {
             glue.resolveContext(req.uri)
         } catch (e: Throwable) {
@@ -795,7 +837,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleSearch(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val result = try {
             glue.search(req)
         } catch (e: Throwable) {
@@ -806,7 +848,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleRecommendations(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val result = try {
             glue.recommendations(req)
         } catch (e: Throwable) {
@@ -817,7 +859,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleFavoritesList(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val page = try {
             glue.favoritesList(req)
         } catch (e: Throwable) {
@@ -828,7 +870,7 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleFavoritesContains(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest) {
-        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val glue = libraryGlue() ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
         val liked = try {
             glue.favoritesContains(req)
         } catch (e: Throwable) {
@@ -843,7 +885,7 @@ public class BridgethingCompanion(
             systemMediaSource.toggleLiked()
             return
         }
-        val glue = activeGlue ?: return
+        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: return
         try {
             glue.favoritesToggle(msg.item)
         } catch (e: Throwable) {
@@ -856,7 +898,7 @@ public class BridgethingCompanion(
             systemMediaSource.setLiked(msg.liked)
             return
         }
-        val glue = activeGlue ?: return
+        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: return
         try {
             glue.favoritesSet(msg.item, msg.liked)
         } catch (e: Throwable) {
@@ -865,11 +907,14 @@ public class BridgethingCompanion(
     }
 
     private suspend fun handleFavoritesSetMany(msg: FavoritesSetMany) {
-        val glue = activeGlue ?: return
-        try {
-            glue.favoritesSetMany(msg.entries)
-        } catch (e: Throwable) {
-            log(CompanionLogLevel.Warn, "favoritesSetMany failed: ${e.message ?: e.toString()}")
+        val byProvider = msg.entries.groupBy { (glueForUri(it.item.uri) ?: libraryGlue())?.name }
+        for ((id, entries) in byProvider) {
+            val glue = id?.let { glues[it] } ?: continue
+            try {
+                glue.favoritesSetMany(entries)
+            } catch (e: Throwable) {
+                log(CompanionLogLevel.Warn, "favoritesSetMany failed for $id: ${e.message ?: e.toString()}")
+            }
         }
     }
 

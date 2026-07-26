@@ -28,9 +28,6 @@ import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingPlayback
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingTrack
-import com.margelo.nitro.bridgething.session.BridgethingCatalogEvent
-import com.margelo.nitro.bridgething.session.BridgethingCatalogEventKind
-import com.margelo.nitro.bridgething.session.BridgethingCatalogPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingOtaChannelInfo
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaEventKind
@@ -54,10 +51,6 @@ import com.margelo.nitro.bridgething.session.BridgethingWebappSource
 import com.bridgething.companion.AncsSetupKind
 import com.bridgething.companion.BridgethingCompanion
 import com.bridgething.companion.BridgethingCompanionVersion
-import com.bridgething.companion.CatalogAppListing
-import com.bridgething.companion.CatalogAppUpdate
-import com.bridgething.companion.CatalogEvent
-import com.bridgething.companion.CatalogPollConfig as KCatalogPollConfig
 import com.bridgething.companion.CompanionCapabilityFlags
 import com.bridgething.companion.CompanionLogLevel
 import com.bridgething.companion.DeviceLogRing
@@ -125,7 +118,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
-/** [BridgethingSessionBackend] impl that owns one [BridgethingCompanion]. */
 public class HybridBridgethingSessionImpl(
     private val context: Context,
 ) : BridgethingSessionBackend {
@@ -150,7 +142,8 @@ public class HybridBridgethingSessionImpl(
 
         private const val REQUEST_DIALER_ROLE = 0xBA02
         private const val AUTO_RESUME_PREFIX = "autoresume."
-        private const val ACTIVE_PROVIDER_KEY = "activeProvider"
+        private const val CONNECTED_PROVIDERS_KEY = "connectedProviders"
+        private const val PROVIDER_PRIORITY_KEY = "providerPriority"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -159,24 +152,23 @@ public class HybridBridgethingSessionImpl(
     private var eventsJob: Job? = null
     private var otaJob: Job? = null
     private var deviceMetaJob: Job? = null
-    private var catalogJob: Job? = null
     private var webappDocJob: Job? = null
-    private var authJob: Job? = null
 
     private val peers = ConcurrentHashMap<String, BridgethingSessionPeer>()
 
     @Volatile
     private var lastNowPlaying: BridgethingNowPlaying? = null
 
-    @Volatile
-    private var activeRegistration: ProviderRegistration? = null
+    private val connectJobs = ConcurrentHashMap<String, Job>()
+    private val authStates = ConcurrentHashMap<String, BridgethingAuthState>()
+    private val healthStates = ConcurrentHashMap<String, BridgethingServiceHealth>()
+    private val connectedIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     @Volatile
-    private var onProviderChanged: ((BridgethingProviderInfo?) -> Unit)? = null
+    private var priority: List<String> = emptyList()
 
     @Volatile
-    private var onAuthStateChanged: ((BridgethingAuthState) -> Unit)? = null
-    private var onServiceHealthChanged: ((BridgethingServiceHealth) -> Unit)? = null
+    private var onProvidersChanged: ((Array<BridgethingProviderInfo>) -> Unit)? = null
 
     @Volatile
     private var onPeerConnected: ((BridgethingSessionPeer) -> Unit)? = null
@@ -208,15 +200,6 @@ public class HybridBridgethingSessionImpl(
     @Volatile
     private var onOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
 
-    @Volatile
-    private var onCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
-
-    @Volatile
-    private var lastAuthState: BridgethingAuthState = idleState()
-
-    @Volatile
-    private var lastServiceHealth: BridgethingServiceHealth = toRnServiceHealth(GlueServiceHealth.Ok)
-
     private val prefs by lazy {
         context.applicationContext.getSharedPreferences("bridgething.session", Context.MODE_PRIVATE)
     }
@@ -246,7 +229,6 @@ public class HybridBridgethingSessionImpl(
                 safeEmit { if (CompanionHolder.foreground) onDeviceMetaChanged?.invoke(id, toRnDeviceMeta(meta)) }
             }
         }
-        catalogJob = scope.launch { c.catalog.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } } }
         webappDocJob = scope.launch {
             c.gateway.webapp.docChanged.collect { (deviceId, msg) ->
                 safeEmit {
@@ -266,11 +248,13 @@ public class HybridBridgethingSessionImpl(
             BridgethingConnectionService.start(context)
         }
 
-        val persisted = prefs.getString(ACTIVE_PROVIDER_KEY, null)
-        val restore = persisted?.let { id -> registry.firstOrNull { it.id == id && it.available } }
-            ?: registry.firstOrNull { it.available && it.hasCredentials() }
-        restore?.let {
-            runCatching { setActiveProvider(it.id) }
+        priority = prefs.getString(PROVIDER_PRIORITY_KEY, null)?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+        stateLock.withLock { companion }?.setProviderPriority(priority)
+
+        val restore = (prefs.getStringSet(CONNECTED_PROVIDERS_KEY, emptySet()) ?: emptySet()).toMutableSet()
+        for (reg in registry) if (reg.available && reg.hasCredentials()) restore.add(reg.id)
+        for (reg in registry) {
+            if (reg.available && restore.contains(reg.id)) runCatching { connectProvider(reg.id) }
         }
     }
 
@@ -278,32 +262,26 @@ public class HybridBridgethingSessionImpl(
         var priorEvents: Job? = null
         var priorOta: Job? = null
         var priorDeviceMeta: Job? = null
-        var priorCatalog: Job? = null
         var priorWebappDoc: Job? = null
-        var priorAuth: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
             priorEvents = eventsJob
             priorOta = otaJob
             priorDeviceMeta = deviceMetaJob
-            priorCatalog = catalogJob
             priorWebappDoc = webappDocJob
-            priorAuth = authJob
             priorCompanion = companion
             companion = null
             eventsJob = null
             otaJob = null
             deviceMetaJob = null
-            catalogJob = null
             webappDocJob = null
-            authJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
         priorDeviceMeta?.cancel()
-        priorCatalog?.cancel()
         priorWebappDoc?.cancel()
-        priorAuth?.cancel()
+        for (job in connectJobs.values) job.cancel()
+        connectJobs.clear()
         priorCompanion?.setNowPlayingObserver(null)
         priorCompanion?.setAncsAuthStateObserver(null)
         priorCompanion?.setLogObserver(null)
@@ -312,38 +290,41 @@ public class HybridBridgethingSessionImpl(
         emitNowPlaying(null)
     }
 
-    override suspend fun availableProviders(): Array<BridgethingProviderInfo> = registry.map {
-        BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
-    }.toTypedArray()
+    override suspend fun availableProviders(): Array<BridgethingProviderInfo> = providerInfos()
 
-    override suspend fun setActiveProvider(id: String?) {
-        authJob?.cancel()
+    private fun providerInfos(): Array<BridgethingProviderInfo> = registry.map { reg ->
+        BridgethingProviderInfo(
+            id = reg.id,
+            displayName = reg.displayName,
+            available = reg.available,
+            connected = connectedIds.contains(reg.id),
+            authState = authStates[reg.id] ?: idleState(),
+            serviceHealth = healthStates[reg.id] ?: toRnServiceHealth(GlueServiceHealth.Ok),
+        )
+    }.sortedWith(
+        compareBy({ priority.indexOf(it.id).let { i -> if (i < 0) Int.MAX_VALUE else i } }, { it.id }),
+    ).toTypedArray()
+
+    override suspend fun connectProvider(id: String) {
+        connectJobs.remove(id)?.cancel()
         val c = stateLock.withLock { companion } ?: error("session not started")
-        if (id == null) {
-            c.setActive(null)
-            activeRegistration = null
-            emitProvider(null)
-            emitAuth(idleState())
-            return
-        }
-        val registration = registry.firstOrNull { it.id == id }
-            ?: error("unknown provider $id")
-        activeRegistration = registration
-        emitAuth(authState(BridgethingAuthKind.PENDING))
+        val registration = registry.firstOrNull { it.id == id } ?: error("unknown provider $id")
+        setAuthState(id, authState(BridgethingAuthKind.PENDING))
         try {
             val glue = registration.factory()
-            glue.setAuthObserver { state -> handleGlueAuthState(state) }
-            glue.setServiceHealthObserver { health -> emitServiceHealth(toRnServiceHealth(health)) }
-            c.setActive(glue)
+            glue.setAuthObserver { state -> handleGlueAuthState(id, state) }
+            glue.setServiceHealthObserver { health -> setServiceHealth(id, toRnServiceHealth(health)) }
+            c.attach(glue)
         } catch (e: Throwable) {
-            emitAuth(authState(BridgethingAuthKind.FAILED, message = e.message ?: e.toString()))
+            setAuthState(id, authState(BridgethingAuthKind.FAILED, message = e.message ?: e.toString()))
             throw e
         }
     }
 
-    private fun handleGlueAuthState(state: GlueAuthState) {
+    private fun handleGlueAuthState(id: String, state: GlueAuthState) {
         when (state) {
-            is GlueAuthState.Pending -> emitAuth(
+            is GlueAuthState.Pending -> setAuthState(
+                id,
                 authState(
                     BridgethingAuthKind.PENDING,
                     userCode = state.prompt?.userCode,
@@ -352,52 +333,56 @@ public class HybridBridgethingSessionImpl(
                 ),
             )
             is GlueAuthState.Authenticated -> {
-                activeRegistration?.let {
-                    prefs.edit().putString(ACTIVE_PROVIDER_KEY, it.id).apply()
-                    emitProvider(BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available))
-                }
-                emitAuth(authState(BridgethingAuthKind.AUTHENTICATED))
+                connectedIds.add(id)
+                persistConnected()
+                setAuthState(id, authState(BridgethingAuthKind.AUTHENTICATED))
             }
-            is GlueAuthState.Failed -> emitAuth(authState(BridgethingAuthKind.FAILED, message = state.reason))
+            is GlueAuthState.Failed -> setAuthState(id, authState(BridgethingAuthKind.FAILED, message = state.reason))
         }
     }
 
-    override suspend fun cancelAuth() {
-        authJob?.cancel()
-        activeRegistration = null
-        prefs.edit().remove(ACTIVE_PROVIDER_KEY).apply()
-        stateLock.withLock { companion }?.setActive(null)
-        emitProvider(null)
-        emitAuth(idleState())
+    private fun setAuthState(id: String, state: BridgethingAuthState) {
+        authStates[id] = state
+        emitProviders()
     }
 
-    override suspend fun signOut() {
-        authJob?.cancel()
-        val reg = activeRegistration
-        activeRegistration = null
-        prefs.edit().remove(ACTIVE_PROVIDER_KEY).apply()
-        runCatching { reg?.signOut?.invoke() }
-        stateLock.withLock { companion }?.setActive(null)
-        emitProvider(null)
-        emitServiceHealth(toRnServiceHealth(GlueServiceHealth.Ok))
-        emitAuth(idleState())
+    private fun setServiceHealth(id: String, health: BridgethingServiceHealth) {
+        healthStates[id] = health
+        emitProviders()
     }
 
-    override suspend fun currentProvider(): BridgethingProviderInfo? {
-        val glue = stateLock.withLock { companion }?.current() ?: return null
-        return registry.firstOrNull { it.id == glue.name }?.let {
-            BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
-        }
+    private fun persistConnected() {
+        prefs.edit().putStringSet(CONNECTED_PROVIDERS_KEY, connectedIds.toSet()).apply()
+    }
+
+    override suspend fun cancelAuth(id: String) {
+        connectJobs.remove(id)?.cancel()
+        connectedIds.remove(id)
+        persistConnected()
+        stateLock.withLock { companion }?.detach(id)
+        setAuthState(id, idleState())
+    }
+
+    override suspend fun disconnectProvider(id: String) {
+        connectJobs.remove(id)?.cancel()
+        connectedIds.remove(id)
+        healthStates.remove(id)
+        persistConnected()
+        runCatching { registry.firstOrNull { it.id == id }?.signOut?.invoke() }
+        stateLock.withLock { companion }?.detach(id)
+        setAuthState(id, idleState())
+    }
+
+    override suspend fun setProviderPriority(ids: Array<String>) {
+        priority = ids.toList()
+        prefs.edit().putString(PROVIDER_PRIORITY_KEY, priority.joinToString(",")).apply()
+        stateLock.withLock { companion }?.setProviderPriority(priority)
+        emitProviders()
     }
 
     override suspend fun snapshot(): BridgethingSessionSnapshot {
         val c = stateLock.withLock { companion }
-        val glue = c?.current()
-        val provider = glue?.let { g ->
-            registry.firstOrNull { it.id == g.name }?.let {
-                BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
-            }
-        }
+        val libraryProvider = c?.libraryGlue()?.name
         val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
         val deviceMetaEntries = mutableListOf<BridgethingDeviceMetaEntry>()
         if (c != null) {
@@ -408,9 +393,9 @@ public class HybridBridgethingSessionImpl(
         }
         return BridgethingSessionSnapshot(
             hostInfo = rnHostInfo(),
-            provider = provider,
-            authState = lastAuthState,
-            serviceHealth = lastServiceHealth,
+            providers = providerInfos(),
+            providerPriority = priority.toTypedArray(),
+            libraryProvider = libraryProvider,
             peers = peers.values.toTypedArray(),
             ancsAuthStatus = ancs,
             nowPlaying = lastNowPlaying,
@@ -462,7 +447,7 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun companionDebug(): BridgethingCompanionDebug {
         val c = stateLock.withLock { companion }
-        val debug = c?.current()?.debugState() ?: GlueDebugState()
+        val debug = (c?.audibleGlue() ?: c?.libraryGlue())?.debugState() ?: GlueDebugState()
         val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
         return BridgethingCompanionDebug(
             authorityPlaybackHeld = debug.authorityPlaybackHeld,
@@ -672,55 +657,29 @@ public class HybridBridgethingSessionImpl(
         stateLock.withLock { companion }?.ota?.applyVersion(deviceId, channel, version, otaRootUrl(rootUrl))
     }
 
-    override suspend fun catalogSources(): Array<String> =
-        stateLock.withLock { companion }?.catalog?.sources()?.toTypedArray() ?: emptyArray()
-
-    override suspend fun addCatalogSource(url: String) {
-        stateLock.withLock { companion }?.catalog?.addSource(url)
-    }
-
-    override suspend fun removeCatalogSource(url: String) {
-        stateLock.withLock { companion }?.catalog?.removeSource(url)
-    }
-
-    override suspend fun refreshCatalog() {
-        stateLock.withLock { companion }?.catalog?.refresh()
-    }
-
-    override suspend fun availableCatalogApps(deviceId: String): String {
-        val catalog = stateLock.withLock { companion }?.catalog ?: return "[]"
-        val listings = catalog.availableApps(deviceId)
-        return catalogJson.encodeToString(ListSerializer(CatalogAppListing.serializer()), listings)
-    }
-
-    override suspend fun checkForCatalogUpdates(deviceId: String): String {
-        val catalog = stateLock.withLock { companion }?.catalog ?: return "[]"
-        val updates = catalog.checkForUpdates(deviceId)
-        return catalogJson.encodeToString(ListSerializer(CatalogAppUpdate.serializer()), updates)
-    }
-
-    override suspend fun installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String): BridgethingWebappInfo {
+    override suspend fun installWebappFromUrl(
+        deviceId: String,
+        url: String,
+        sha256: String,
+        size: Double,
+        provenance: String?,
+    ): BridgethingWebappInfo {
         val c = requireCompanion(deviceId)
-        return when (val result = c.catalog.install(deviceId, appId, version, sourceUrl)) {
+        val result = c.ota.installWebappFromUrl(
+            gateway = c.gateway,
+            deviceId = deviceId,
+            url = url,
+            sha256 = sha256.lowercase(),
+            size = size.toLong(),
+            provenance = provenance,
+            cacheDir = context.cacheDir ?: java.io.File(System.getProperty("java.io.tmpdir") ?: "."),
+        )
+        return when (result) {
             is WebappInstallResult.Installed -> {
                 emitWebappsChanged(deviceId)
                 toRnWebappInfo(result.info)
             }
             is WebappInstallResult.Failed -> throw IllegalStateException("install failed: ${result.reason}")
-        }
-    }
-
-    override suspend fun setCatalogPollConfig(config: BridgethingCatalogPollConfig?) {
-        val catalog = stateLock.withLock { companion }?.catalog ?: return
-        if (config == null) {
-            catalog.setPollConfig(null)
-        } else {
-            catalog.setPollConfig(
-                KCatalogPollConfig(
-                    intervalSeconds = config.intervalSeconds.toLong().coerceAtLeast(60L),
-                    autoInstall = config.autoInstall,
-                )
-            )
         }
     }
 
@@ -766,6 +725,7 @@ public class HybridBridgethingSessionImpl(
 
     private fun toRnDeviceMeta(meta: BridgeThingMeta): BridgethingDeviceMeta = BridgethingDeviceMeta(
         daemonVersion = meta.appVersion,
+        libbridgethingVersion = meta.libbridgethingVersion,
         imageVersion = meta.imageVersion,
         appName = meta.appName,
         osName = meta.osName,
@@ -953,9 +913,7 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
-    override fun setOnProviderChanged(callback: (BridgethingProviderInfo?) -> Unit) { onProviderChanged = callback }
-    override fun setOnAuthStateChanged(callback: (BridgethingAuthState) -> Unit) { onAuthStateChanged = callback }
-    override fun setOnServiceHealthChanged(callback: (BridgethingServiceHealth) -> Unit) { onServiceHealthChanged = callback }
+    override fun setOnProvidersChanged(callback: (Array<BridgethingProviderInfo>) -> Unit) { onProvidersChanged = callback }
     override fun setOnPeerConnected(callback: (BridgethingSessionPeer) -> Unit) { onPeerConnected = callback }
     override fun setOnPeerDisconnected(callback: (String) -> Unit) { onPeerDisconnected = callback }
     override fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit) { onPeerLinkFailed = callback }
@@ -989,7 +947,6 @@ public class HybridBridgethingSessionImpl(
     override fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit) { onWebappDocChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
-    override fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit) { onCatalogEvent = callback }
 
     private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
         val c = stateLock.withLock { companion } ?: throw IllegalStateException("session not started")
@@ -1024,10 +981,6 @@ public class HybridBridgethingSessionImpl(
         is RequestResult.ProtocolErr -> throw IllegalStateException("$label: ${result.error}")
     }
 
-    /**
-     * A sideload's provenance is the URL the bytes came from. Local files get
-     * none, since a device-side path tells a future client nothing.
-     */
     private fun provenanceForSideload(sourceUri: String): String? =
         when (runCatching { URI(sourceUri).scheme?.lowercase() }.getOrNull()) {
             "http", "https" -> sourceUri
@@ -1064,6 +1017,7 @@ public class HybridBridgethingSessionImpl(
         source = if (info.source == WebappSource.Builtin) BridgethingWebappSource.BUILTIN else BridgethingWebappSource.INSTALLED,
         role = if (info.role == WebappRole.Launcher) BridgethingWebappRole.LAUNCHER else BridgethingWebappRole.STANDARD,
         version = info.version,
+        provenance = info.provenance,
         description = info.description,
         iconHash = info.iconHash,
         settingsHash = info.settingsHash,
@@ -1180,13 +1134,7 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    private fun emitProvider(info: BridgethingProviderInfo?) { if (CompanionHolder.foreground) onProviderChanged?.invoke(info) }
-    private fun emitAuth(state: BridgethingAuthState) { lastAuthState = state; if (CompanionHolder.foreground) onAuthStateChanged?.invoke(state) }
-    private fun emitServiceHealth(health: BridgethingServiceHealth) {
-        lastServiceHealth = health
-        if (CompanionHolder.foreground) onServiceHealthChanged?.invoke(health)
-    }
-
+    private fun emitProviders() { if (CompanionHolder.foreground) onProvidersChanged?.invoke(providerInfos()) }
     private fun toRnServiceHealth(health: GlueServiceHealth): BridgethingServiceHealth = when (health) {
         is GlueServiceHealth.Ok -> BridgethingServiceHealth(BridgethingServiceHealthKind.OK, null)
         is GlueServiceHealth.RateLimited ->
@@ -1365,54 +1313,4 @@ public class HybridBridgethingSessionImpl(
         OtaStepKind.REBOOT -> BridgethingOtaStepKind.REBOOT
     }
 
-    private val catalogJson = Json { ignoreUnknownKeys = true; explicitNulls = false }
-
-    private fun toRnCatalogEvent(ev: CatalogEvent): BridgethingCatalogEvent = when (ev) {
-        is CatalogEvent.Refreshed -> makeCatalogEvent(
-            kind = BridgethingCatalogEventKind.REFRESHED,
-            sourceCount = ev.sourceCount.toDouble(), appCount = ev.appCount.toDouble(),
-        )
-        is CatalogEvent.SourceFailed -> makeCatalogEvent(
-            kind = BridgethingCatalogEventKind.SOURCEFAILED, url = ev.url, reason = ev.reason,
-        )
-        is CatalogEvent.UpdateAvailable -> makeCatalogEvent(
-            kind = BridgethingCatalogEventKind.UPDATEAVAILABLE,
-            deviceId = ev.deviceId, appId = ev.update.appId, name = ev.update.name,
-            url = ev.update.sourceUrl, fromVersion = ev.update.installedVersion, toVersion = ev.update.target.version,
-        )
-        is CatalogEvent.Installed -> makeCatalogEvent(
-            kind = BridgethingCatalogEventKind.INSTALLED,
-            deviceId = ev.deviceId, appId = ev.appId, version = ev.version,
-        )
-        is CatalogEvent.InstallFailed -> makeCatalogEvent(
-            kind = BridgethingCatalogEventKind.INSTALLFAILED,
-            deviceId = ev.deviceId, appId = ev.appId, reason = ev.reason,
-        )
-    }
-
-    private fun makeCatalogEvent(
-        kind: BridgethingCatalogEventKind,
-        sourceCount: Double? = null,
-        appCount: Double? = null,
-        url: String? = null,
-        reason: String? = null,
-        deviceId: String? = null,
-        appId: String? = null,
-        name: String? = null,
-        fromVersion: String? = null,
-        toVersion: String? = null,
-        version: String? = null,
-    ): BridgethingCatalogEvent = BridgethingCatalogEvent(
-        kind = kind,
-        sourceCount = sourceCount,
-        appCount = appCount,
-        url = url,
-        reason = reason,
-        deviceId = deviceId,
-        appId = appId,
-        name = name,
-        fromVersion = fromVersion,
-        toVersion = toVersion,
-        version = version,
-    )
 }

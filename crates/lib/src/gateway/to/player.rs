@@ -76,6 +76,14 @@ pub struct SetCrossfade {
 }
 
 #[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct TransferTo {
+  pub target_id: String,
+}
+
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -106,4 +114,6 @@ pub enum BridgeToGatewayPlayerMsg {
   SetSpeed(SetSpeed),
   #[bridge_command]
   SetCrossfade(SetCrossfade),
+  #[bridge_command]
+  TransferTo(TransferTo),
 }

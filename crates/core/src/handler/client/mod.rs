@@ -7,6 +7,7 @@ mod doc;
 mod geo;
 mod hardware;
 mod library;
+mod lyrics;
 mod net;
 mod notifications;
 mod phone;
@@ -28,6 +29,7 @@ use geo::*;
 use hardware::*;
 use libbridgething::{ForwardMessage, wire::WireError};
 use library::*;
+use lyrics::*;
 use net::*;
 use notifications::*;
 use phone::*;
@@ -115,6 +117,12 @@ impl ClientHandler {
         dispatch(
           handle,
           move |h| async move { msg.dispatch(&LibraryHandler::new(h)).await },
+        );
+      }
+      RecvMsgData::Lyrics(msg) => {
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&LyricsHandler::new(h)).await },
         );
       }
       RecvMsgData::Net(msg) => {

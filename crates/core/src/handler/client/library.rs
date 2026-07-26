@@ -7,11 +7,12 @@ use libbridgething::{
     FavoritesSetMany as ClientFavoritesSetMany, FavoritesToggle as ClientFavoritesToggle, LibraryBrowse,
     LibraryBrowseReply, LibraryErrorReply, LibraryFavoritesContains, LibraryFavoritesContainsReply,
     LibraryFavoritesList, LibraryFavoritesListReply, LibraryRecommendations, LibraryRecommendationsReply,
-    LibrarySearch, LibrarySearchReply,
+    LibraryResolveContext, LibraryResolveContextReply, LibrarySearch, LibrarySearchReply,
   },
   gateway::{
     self, BridgeToGatewayLibraryMsgCommand, BrowseReply, FavoritesContainsReply, LibraryBrowseRequest,
-    LibraryFavoritesContainsRequest, LibraryFavoritesListRequest, LibraryRecommendationsRequest, LibrarySearchRequest,
+    LibraryFavoritesContainsRequest, LibraryFavoritesListRequest, LibraryRecommendationsRequest,
+    LibraryResolveContextRequest, LibrarySearchRequest,
   },
   wire::{RequestError, WireRequest},
 };
@@ -182,6 +183,50 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       Err(err) => {
         self
           .respond_request_error::<LibraryRecommendations>("library.recommendations", err)
+          .await?
+      }
+    }
+    Ok(())
+  }
+
+  async fn resolve_context(&self, params: LibraryResolveContext) -> HandlerResult {
+    let LibraryResolveContext { uri } = params;
+    if !self.has_gateway() {
+      return self
+        .respond_error::<LibraryResolveContext>(LibraryError::NoGateway)
+        .await;
+    }
+    if is_synthetic_uri(&uri) {
+      return self
+        .handle
+        .respond_to::<LibraryResolveContext>(LibraryResolveContextReply {
+          name: None,
+          artwork_id: None,
+          subtitle: None,
+        })
+        .await
+        .map_err(Into::into);
+    }
+    match self
+      .handle
+      .bluetooth
+      .gateway_man
+      .request(None, LibraryResolveContextRequest { uri })
+      .await
+    {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibraryResolveContext>(LibraryResolveContextReply {
+            name: reply.name,
+            artwork_id: reply.artwork_id,
+            subtitle: reply.subtitle,
+          })
+          .await?;
+      }
+      Err(err) => {
+        self
+          .respond_request_error::<LibraryResolveContext>("library.resolveContext", err)
           .await?
       }
     }
