@@ -118,6 +118,35 @@ impl WebappRegistry {
     self.bundles.read().await.get(&id).map(|b| b.path.clone())
   }
 
+  pub async fn resolve_by_name(&self, spoken: &str) -> Option<Uuid> {
+    let needle = normalize_webapp_name(spoken);
+    if needle.is_empty() {
+      return None;
+    }
+    let bundles = self.bundles.read().await;
+    let candidates: Vec<(Uuid, String)> = bundles
+      .values()
+      .filter(|b| !matches!(b.manifest.role, WebappRole::Launcher))
+      .map(|b| (b.manifest.id, normalize_webapp_name(&b.manifest.name)))
+      .collect();
+
+    if let Some((id, _)) = candidates.iter().find(|(_, name)| *name == needle) {
+      return Some(*id);
+    }
+
+    let mut partial = candidates
+      .iter()
+      .filter(|(_, name)| !name.is_empty() && (name.contains(&needle) || needle.contains(name.as_str())));
+    match (partial.next(), partial.next()) {
+      (Some((id, _)), None) => Some(*id),
+      (Some(_), Some(_)) => {
+        tracing::debug!("webapp name {spoken:?} matches more than one webapp; refusing to guess");
+        None
+      }
+      _ => None,
+    }
+  }
+
   pub async fn bundle_hash(&self, id: Uuid) -> Option<String> {
     let (cell, path) = {
       let bundles = self.bundles.read().await;
@@ -575,7 +604,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     settings_hash: b.settings_hash.clone(),
     config: b.manifest.config.clone(),
     permissions: b.manifest.permissions.clone(),
-    voice_grammar: b.manifest.voice_grammar.clone(),
+    renders_voice_display: b.manifest.renders_voice_display,
     art: b.manifest.art,
     provenance: b.provenance.clone(),
   }
@@ -633,4 +662,39 @@ pub(crate) fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), Webapp
   }
 
   Ok(())
+}
+
+fn normalize_webapp_name(raw: &str) -> String {
+  const NOISE: &[&str] = &["the", "a", "an", "app", "webapp", "application"];
+  raw
+    .chars()
+    .map(|c| {
+      if c.is_alphanumeric() {
+        c.to_ascii_lowercase()
+      } else {
+        ' '
+      }
+    })
+    .collect::<String>()
+    .split_whitespace()
+    .filter(|w| !NOISE.contains(w))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+  use super::normalize_webapp_name;
+
+  #[test]
+  fn strips_noise_words_and_punctuation() {
+    assert_eq!(normalize_webapp_name("the Browser app"), "browser");
+    assert_eq!(normalize_webapp_name("Home-Assistant"), "home assistant");
+    assert_eq!(normalize_webapp_name("  Hub  "), "hub");
+  }
+
+  #[test]
+  fn all_noise_normalizes_empty() {
+    assert_eq!(normalize_webapp_name("the app"), "");
+  }
 }

@@ -984,7 +984,7 @@ mod tests {
       settings_hash: None,
       config: vec![],
       permissions: vec![],
-      voice_grammar: None,
+      renders_voice_display: false,
       art: None,
       provenance: None,
     }

@@ -56,12 +56,19 @@ public struct NluMutableSlots: Equatable, Sendable {
     public var popularityFilter: String?
     public var entityType: String?
     public var query: String?
-    public var rawQuery: String?
-    public var webappId: String?
     public var webappName: String?
     public var preset: String?
+    public var enabled: Bool?
+    public var repeatMode: NluRepeatMode?
+    public var seconds: Int32?
+    public var speed: NluPlaybackSpeed?
+    public var direction: NluDirection?
     public var amount: String?
     public var level: UInt32?
+    public var brightnessMode: NluBrightnessMode?
+    public var view: NluView?
+    public var phoneAction: NluPhoneAction?
+    public var systemAction: NluSystemAction?
     public var uri: String?
 
     public init(
@@ -77,12 +84,19 @@ public struct NluMutableSlots: Equatable, Sendable {
         popularityFilter: String? = nil,
         entityType: String? = nil,
         query: String? = nil,
-        rawQuery: String? = nil,
-        webappId: String? = nil,
         webappName: String? = nil,
         preset: String? = nil,
+        enabled: Bool? = nil,
+        repeatMode: NluRepeatMode? = nil,
+        seconds: Int32? = nil,
+        speed: NluPlaybackSpeed? = nil,
+        direction: NluDirection? = nil,
         amount: String? = nil,
         level: UInt32? = nil,
+        brightnessMode: NluBrightnessMode? = nil,
+        view: NluView? = nil,
+        phoneAction: NluPhoneAction? = nil,
+        systemAction: NluSystemAction? = nil,
         uri: String? = nil
     ) {
         self.artist = artist
@@ -97,12 +111,19 @@ public struct NluMutableSlots: Equatable, Sendable {
         self.popularityFilter = popularityFilter
         self.entityType = entityType
         self.query = query
-        self.rawQuery = rawQuery
-        self.webappId = webappId
         self.webappName = webappName
         self.preset = preset
+        self.enabled = enabled
+        self.repeatMode = repeatMode
+        self.seconds = seconds
+        self.speed = speed
+        self.direction = direction
         self.amount = amount
         self.level = level
+        self.brightnessMode = brightnessMode
+        self.view = view
+        self.phoneAction = phoneAction
+        self.systemAction = systemAction
         self.uri = uri
     }
 
@@ -120,12 +141,19 @@ public struct NluMutableSlots: Equatable, Sendable {
             popularityFilter: popularityFilter,
             entityType: entityType,
             query: query,
-            rawQuery: rawQuery,
-            webappId: webappId,
             webappName: webappName,
             preset: preset,
+            enabled: enabled,
+            repeatMode: repeatMode,
+            seconds: seconds,
+            speed: speed,
+            direction: direction,
             amount: amount,
             level: level,
+            brightnessMode: brightnessMode,
+            view: view,
+            phoneAction: phoneAction,
+            systemAction: systemAction,
             uri: uri
         )
     }
@@ -144,12 +172,19 @@ public struct NluMutableSlots: Equatable, Sendable {
             popularityFilter: s.popularityFilter,
             entityType: s.entityType,
             query: s.query,
-            rawQuery: s.rawQuery,
-            webappId: s.webappId,
             webappName: s.webappName,
             preset: s.preset,
+            enabled: s.enabled,
+            repeatMode: s.repeatMode,
+            seconds: s.seconds,
+            speed: s.speed,
+            direction: s.direction,
             amount: s.amount,
             level: s.level,
+            brightnessMode: s.brightnessMode,
+            view: s.view,
+            phoneAction: s.phoneAction,
+            systemAction: s.systemAction,
             uri: s.uri
         )
     }

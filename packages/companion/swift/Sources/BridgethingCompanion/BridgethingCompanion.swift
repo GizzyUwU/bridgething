@@ -98,6 +98,7 @@ public actor BridgethingCompanion {
     private let netDispatcher: NetDispatcher
     private let tunnelDispatcher: TunnelDispatcher
     private let audioDispatcher: AudioDispatcher
+    private let voiceDispatcher: (any VoiceCapturing)?
     private var timeChangeObservers: [NSObjectProtocol] = []
     public let ota: OtaService
     private let transferReceiver = TransferReceiver()
@@ -116,7 +117,8 @@ public actor BridgethingCompanion {
         host: HostInfo,
         capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags(),
         geoProvider: (any GeoLocationProviding)? = nil,
-        audioBackend: (any AudioBackend)? = nil
+        audioBackend: (any AudioBackend)? = nil,
+        voice: (any VoiceCapturing)? = nil
     ) {
         self.host = host
         self.lyricsResolver = lyricsResolver
@@ -130,6 +132,7 @@ public actor BridgethingCompanion {
         #else
             audioDispatcher = AudioDispatcher(backend: audioBackend ?? NoOpAudioBackend())
         #endif
+        voiceDispatcher = voice
         ota = OtaService()
         webappResources = WebappResourceService(receiver: transferReceiver)
         #if canImport(CoreLocation)
@@ -186,6 +189,7 @@ public actor BridgethingCompanion {
         await netDispatcher.stop()
         await tunnelDispatcher.stop()
         await audioDispatcher.stop()
+        await voiceDispatcher?.stop()
         await ota.stop()
         await transferReceiver.stop()
 
@@ -604,6 +608,10 @@ public actor BridgethingCompanion {
                 return await libraryGlue()
             }
             await audioDispatcher.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            await voiceDispatcher?.start(gateway: gateway)
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }

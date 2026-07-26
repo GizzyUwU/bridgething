@@ -9,12 +9,14 @@ use super::GatewayHandler;
 use crate::{
   bluetooth::{BluetoothMan, GatewayType, OutboundGatewayMessage},
   state::State,
+  transport::TransportController,
 };
 
 #[derive(Debug)]
 pub struct MsgHandle {
   pub state: State,
   pub bluetooth: BluetoothMan,
+  pub transport: TransportController,
 
   pub id: Uuid,
   pub meta: MsgMeta,
@@ -35,6 +37,7 @@ impl MsgHandle {
     Self {
       state: handler.state.clone(),
       bluetooth: handler.bluetooth.clone(),
+      transport: handler.transport.clone(),
 
       id,
       meta,

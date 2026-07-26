@@ -158,6 +158,12 @@ pub fn server_event_to_stock(
     },
     BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data, call_slot, phone),
     BridgeToClientMsgData::Audio(data) => audio_event_to_stock(data, stock_msg_id),
+    BridgeToClientMsgData::Voice(data) => match data {
+      libbridgething::client::BridgeToClientVoiceMsg::Intent(intent) => {
+        StockSendMsg::Voice(voice::voice_intent_to_stock(&intent))
+      }
+      _ => StockSendMsg::Unsupported,
+    },
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
@@ -173,7 +179,6 @@ pub fn server_event_to_stock(
     | BridgeToClientMsgData::Notifications(_)
     | BridgeToClientMsgData::Peer(_)
     | BridgeToClientMsgData::Time(_)
-    | BridgeToClientMsgData::Voice(_)
     | BridgeToClientMsgData::Webapp(_) => StockSendMsg::Unsupported,
   }
 }

@@ -3,34 +3,38 @@ import Foundation
 
 public enum NluSystemPrompt {
     public static let surfaceNames: [String] = [
-        "ADD_TO_COLLECTION", "ADD_TO_PLAYLIST", "ADD_TO_QUEUE", "BAN_TRACK", "CANCEL_INTERACTION",
-        "CLARIFY", "FOLLOW", "HELP", "MORE_LIKE_THIS", "MUTE", "NEXT",
-        "NO_INTENT", "OPEN_WEBAPP", "PAUSE", "PLAY", "PLAY_PRESET",
-        "PREVIOUS", "REPEAT_OFF", "REPEAT_ON", "REPEAT_ONE", "RESUME",
-        "SAVE_TO_PRESET", "SEARCH", "SEEK_BACK_15_SECONDS",
-        "SEEK_FORWARD_15_SECONDS", "SET_PLAYBACK_SPEED_1POINT2X",
-        "SET_PLAYBACK_SPEED_1POINT5X", "SET_PLAYBACK_SPEED_1X",
-        "SET_PLAYBACK_SPEED_2X", "SHOW", "SHOW_MY_LIBRARY",
-        "SHOW_MY_NEW_EPISODES", "SHOW_MY_PRESETS", "SHOW_MY_SAVED_EPISODES",
-        "SHOW_MY_SONGS", "SHOW_THE_QUEUE", "SHOW_THIS_ARTIST", "SHUFFLE_OFF",
-        "SHUFFLE_ON", "STOP", "THUMBS_UP", "TRANSFER_PLAYBACK", "UNMUTE",
-        "VOLUME_ABSOLUTE", "VOLUME_DOWN", "VOLUME_UP", "WEBAPP_INTENT",
+        "ADD_TO_COLLECTION",
+        "ADD_TO_PLAYLIST",
+        "ADD_TO_QUEUE",
+        "CANCEL_INTERACTION",
+        "HELP",
+        "MORE_LIKE_THIS",
+        "NEXT",
+        "OPEN_WEBAPP",
+        "PAUSE",
+        "PHONE_ACTION",
+        "PLAY",
+        "PLAY_PRESET",
+        "PREVIOUS",
+        "SAVE_TO_PRESET",
+        "SEARCH",
+        "SEEK_RELATIVE",
+        "SET_BRIGHTNESS",
+        "SET_DISCOVERABLE",
+        "SET_MUTE",
+        "SET_PLAYBACK_SPEED",
+        "SET_REPEAT",
+        "SET_SHUFFLE",
+        "SET_VOLUME",
+        "SHOW_VIEW",
+        "SYSTEM_ACTION",
+        "THUMBS_UP",
         "WHATS_PLAYING",
     ]
 
-    public struct ActiveWebapp: Sendable {
-        public let id: String
-        public let voiceGrammar: String
-
-        public init(id: String, voiceGrammar: String) {
-            self.id = id
-            self.voiceGrammar = voiceGrammar
-        }
-    }
-
-    public static func build(activeWebapps: [ActiveWebapp] = []) -> String {
+    public static func build() -> String {
         let intentList = surfaceNames.sorted().joined(separator: ", ")
-        var prompt = """
+        return """
         You are a voice-command NLU model. Given a user utterance, emit ONE \
         JSON object describing the intent and slots.
 
@@ -38,32 +42,37 @@ public enum NluSystemPrompt {
 
         Slot keys you may emit (omit absent slots): artist, track, album, \
         playlist, podcast, episode, entity_type, popularity_filter, mood, \
-        genre, era, preset, amount, level, webapp_id, webapp_name, raw_query, \
-        query, ambiguous_alternates.
+        genre, era, preset, enabled, repeat_mode, seconds, speed, direction, \
+        amount, level, brightness_mode, view, phone_action, system_action, \
+        webapp_name, query, ambiguous_alternates.
+
+        Enum slot values:
+        - enabled: true | false (the desired END state, never "flip it")
+        - repeat_mode: off | all | one
+        - speed: 1 | 1.2 | 1.5 | 2
+        - direction: up | down
+        - brightness_mode: auto | manual
+        - view: library | presets | songs | saved_episodes | new_episodes | \
+        queue | this_artist
+        - phone_action: answer | decline | end | hold | unhold | swap | merge \
+        | mute | unmute
+        - system_action: reboot | power_off
+        - seconds: signed integer; negative rewinds
 
         Schema:
         {
           "intent": "<intent id>",
-          "slots": { ... },
-          "confidence": {"intent": "low|medium|high", "slots": "low|medium|high"}
+          "slots": { ... }
         }
 
         Rules:
-        - If the utterance is not a music or device-control command, emit \
-        intent NO_INTENT with empty slots.
-        - If multiple interpretations are plausible, emit CLARIFY.
+        - PLAY with no slots resumes; PLAY with any catalog slot starts \
+        something new.
+        - SEARCH covers both showing a named entity and running a query: put \
+        the entity in its own slot when the user named one.
         - Preserve slot values as the user said them (do not normalize artist \
         or song names).
         - Emit ONLY the JSON object. No prose, no markdown, no backticks.
         """
-
-        if !activeWebapps.isEmpty {
-            prompt += "\n\nCurrently active extensions (emit WEBAPP_INTENT with the matching webapp_id when the utterance fits one of these domains; raw_query is the filler-stripped command):"
-            for w in activeWebapps {
-                prompt += "\n- \(w.id): \(w.voiceGrammar)"
-            }
-        }
-
-        return prompt
     }
 }

@@ -712,9 +712,6 @@ public struct SurfaceAvailability: Codable, Sendable {
 	public let netWs: Bool
 	public let audioTts: Bool
 	public let lyrics: Bool
-	/// The active music provider can enumerate remote endpoints and move
-	/// playback between them. False for providers whose platform refuses to
-	/// expose routes (Apple Music), and whenever no glue is attached.
 	public let playbackTargets: Bool?
 
 	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool, playbackTargets: Bool?) {
@@ -2349,14 +2346,56 @@ public struct NetWsSend: Codable, Sendable {
 	}
 }
 
-/// Slot catalog. Every intent projects through this flat shape;
-/// per-intent slot allowlists are enforced by the json_schema grammar at
-/// decode time, not by this struct. The wire payload omits absent slots,
-/// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
-/// 
-/// String values are passed through verbatim from the user's transcript
-/// (no normalization at this layer); the SpotifyResolver may decorate
-/// the slots with a `uri` after catalog lookup.
+public enum NluRepeatMode: String, Codable, Sendable {
+	case off
+	case all
+	case one
+}
+
+public enum NluPlaybackSpeed: String, Codable, Sendable {
+	case one = "1"
+	case onePointTwo = "1.2"
+	case onePointFive = "1.5"
+	case two = "2"
+}
+
+public enum NluDirection: String, Codable, Sendable {
+	case up
+	case down
+}
+
+public enum NluBrightnessMode: String, Codable, Sendable {
+	case auto
+	case manual
+}
+
+public enum NluView: String, Codable, Sendable {
+	case library
+	case presets
+	case songs
+	case savedEpisodes
+	case newEpisodes
+	case queue
+	case thisArtist
+}
+
+public enum NluPhoneAction: String, Codable, Sendable {
+	case answer
+	case decline
+	case end
+	case hold
+	case unhold
+	case swap
+	case merge
+	case mute
+	case unmute
+}
+
+public enum NluSystemAction: String, Codable, Sendable {
+	case reboot
+	case powerOff
+}
+
 public struct NluSlots: Codable, Sendable {
 	public let artist: String?
 	public let track: String?
@@ -2370,26 +2409,22 @@ public struct NluSlots: Codable, Sendable {
 	public let popularityFilter: String?
 	public let entityType: String?
 	public let query: String?
-	/// WEBAPP_INTENT only: the filler-stripped natural-language command
-	/// the active webapp's voice grammar handler will parse.
-	public let rawQuery: String?
-	/// WEBAPP_INTENT / OPEN_WEBAPP only.
-	public let webappId: String?
 	public let webappName: String?
-	/// PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
-	/// but stock SLIMO expects an Array<string> envelope - the stock
-	/// translation wraps as needed.
 	public let preset: String?
-	/// VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+	public let enabled: Bool?
+	public let repeatMode: NluRepeatMode?
+	public let seconds: Int32?
+	public let speed: NluPlaybackSpeed?
+	public let direction: NluDirection?
 	public let amount: String?
-	/// VOLUME_ABSOLUTE. 0-100.
 	public let level: UInt32?
-	/// Post-resolution Spotify URI. Populated by the companion's
-	/// SpotifyResolver after the NLU stage; daemon dispatches directly
-	/// to playback when set.
+	public let brightnessMode: NluBrightnessMode?
+	public let view: NluView?
+	public let phoneAction: NluPhoneAction?
+	public let systemAction: NluSystemAction?
 	public let uri: String?
 
-	public init(artist: String?, track: String?, album: String?, playlist: String?, podcast: String?, episode: String?, mood: String?, genre: String?, era: String?, popularityFilter: String?, entityType: String?, query: String?, rawQuery: String?, webappId: String?, webappName: String?, preset: String?, amount: String?, level: UInt32?, uri: String?) {
+	public init(artist: String?, track: String?, album: String?, playlist: String?, podcast: String?, episode: String?, mood: String?, genre: String?, era: String?, popularityFilter: String?, entityType: String?, query: String?, webappName: String?, preset: String?, enabled: Bool?, repeatMode: NluRepeatMode?, seconds: Int32?, speed: NluPlaybackSpeed?, direction: NluDirection?, amount: String?, level: UInt32?, brightnessMode: NluBrightnessMode?, view: NluView?, phoneAction: NluPhoneAction?, systemAction: NluSystemAction?, uri: String?) {
 		self.artist = artist
 		self.track = track
 		self.album = album
@@ -2402,20 +2437,23 @@ public struct NluSlots: Codable, Sendable {
 		self.popularityFilter = popularityFilter
 		self.entityType = entityType
 		self.query = query
-		self.rawQuery = rawQuery
-		self.webappId = webappId
 		self.webappName = webappName
 		self.preset = preset
+		self.enabled = enabled
+		self.repeatMode = repeatMode
+		self.seconds = seconds
+		self.speed = speed
+		self.direction = direction
 		self.amount = amount
 		self.level = level
+		self.brightnessMode = brightnessMode
+		self.view = view
+		self.phoneAction = phoneAction
+		self.systemAction = systemAction
 		self.uri = uri
 	}
 }
 
-/// One alternate interpretation the LLM surfaced alongside the primary.
-/// Populated when the LLM returns `ambiguous_alternates` in its
-/// json_schema output; consumed by the companion's CLARIFY UI so the
-/// user can pick.
 public struct NluAlternate: Codable, Sendable {
 	public let intent: String
 	public let slots: NluSlots?
@@ -2426,28 +2464,6 @@ public struct NluAlternate: Codable, Sendable {
 	}
 }
 
-/// Confidence the companion-side NLU pipeline attaches to a resolved
-/// intent: a coarse "low" | "medium" | "high" level per channel, one for
-/// the intent match and one for the extracted slots.
-public struct NluConfidence: Codable, Sendable {
-	/// "low" | "medium" | "high". The LLM emits one of these per channel.
-	public let intent: String
-	public let slots: String?
-
-	public init(intent: String, slots: String?) {
-		self.intent = intent
-		self.slots = slots
-	}
-}
-
-/// What the companion-side NLU resolved an utterance to, sent across
-/// the gateway link for the daemon to dispatch. This is the bridgething-
-/// native shape; the daemon's stock-compat layer wraps it into the
-/// SLIMO `NluMessage` envelope when the active webapp is stock.
-/// 
-/// `transcript` is the ASR output the NLU ran on; carried so the daemon
-/// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
-/// stock-compat fallbacks have the raw query available.
 public struct NluResolvedIntent: Codable, Sendable {
 	public let intent: String
 	public let slots: NluSlots?
@@ -3399,9 +3415,7 @@ public enum PlaybackTargetKind: String, Codable, Sendable {
 }
 
 /// A remote endpoint the current provider can move playback to. Only
-/// meaningful when `SurfaceAvailability::playback_targets` is set; the
-/// list never contains the Car Thing itself, which is a control surface
-/// and never an audio endpoint.
+/// meaningful when `SurfaceAvailability::playback_targets` is set.
 /// 
 /// `volume_percent` is `None` when the endpoint does not report volume.
 public struct PlaybackTarget: Codable, Sendable {
@@ -3422,9 +3436,7 @@ public struct PlaybackTarget: Codable, Sendable {
 	}
 }
 
-/// Complete replacement list of the provider's remote endpoints. The
-/// companion pushes one whenever its endpoint set changes; there is no
-/// delta and no daemon-side poll.
+/// Complete replacement list of the provider's remote endpoints.
 public struct PlaybackTargets: Codable, Sendable {
 	public let targets: [PlaybackTarget]
 
@@ -3488,9 +3500,6 @@ public struct PlayerState: Codable, Sendable {
 	public let queue: [QueueItem]
 	public let options: PlayerOptions
 	public let context: PlaybackContext?
-	/// The endpoint the audio is coming out of, when it is not the phone
-	/// itself. `None` means local playback, or a provider with no remote
-	/// endpoint concept. Webapps render "playing on <name>" from this.
 	public let target: PlaybackTarget?
 
 	public init(track: MediaItem?, playback: Playback, queue: [QueueItem], options: PlayerOptions, context: PlaybackContext?, target: PlaybackTarget?) {
@@ -4097,37 +4106,23 @@ public struct VoiceDispatch: Codable, Sendable {
 	}
 }
 
-/// Why dispatch declined to act on a `VoiceDispatch`. The companion
-/// surfaces these to the user (toast / UI hint); the daemon does not
-/// otherwise retain state about the failure.
 public enum VoiceDispatchErrorCode: String, Codable, Sendable {
-	/// WEBAPP_INTENT targeted a webapp_id that isn't installed.
-	case webappNotInstalled
-	/// WEBAPP_INTENT targeted an installed webapp that isn't the active
-	/// one. Companion can prompt the user to switch.
-	case webappNotActive
-	/// Active webapp accepted the dispatch but reported an error.
-	case webappRefused
-	/// Intent is CLARIFY / NO_INTENT - companion should resolve at its
-	/// own edge rather than asking the daemon to dispatch.
+	case webappNotFound
 	case notDispatchable
-	/// Stock playback target couldn't be resolved (no Spotify session,
-	/// missing slot, etc.).
+	case unsupported
 	case playbackFailed
-	/// Catch-all (io error, internal state machine glitch).
+	case badSlots
 	case `internal`
 }
 
 public struct VoiceDispatchFailed: Codable, Sendable {
 	public let code: VoiceDispatchErrorCode
 	public let intent: String
-	public let webappId: String?
 	public let msg: String
 
-	public init(code: VoiceDispatchErrorCode, intent: String, webappId: String?, msg: String) {
+	public init(code: VoiceDispatchErrorCode, intent: String, msg: String) {
 		self.code = code
 		self.intent = intent
-		self.webappId = webappId
 		self.msg = msg
 	}
 }
@@ -4135,11 +4130,15 @@ public struct VoiceDispatchFailed: Codable, Sendable {
 /// Where the daemon actually routed a successful dispatch. Carried back
 /// to the companion so it can render the right confirmation UI.
 public enum VoiceDispatchTarget: String, Codable, Sendable {
-	/// Stock playback path (PLAY/PAUSE/NEXT/etc) - translated into the
-	/// SLIMO `NluMessage` and handed to the stock webapp.
-	case stockPlayback
-	/// Forwarded to the active webapp's voice handler.
-	case activeWebapp
+	/// Transport / playback effect, routed through the daemon's transport
+	/// controller or a player command to the companion.
+	case playback
+	/// A daemon-local device setting (brightness, discoverable, power).
+	case device
+	/// Phone call control over the companion's phone surface.
+	case phone
+	/// Display-shaped intent handed to the active webapp to render.
+	case display
 	/// Switched the active webapp via OPEN_WEBAPP.
 	case webappSwitch
 }
@@ -4422,7 +4421,6 @@ public enum ConfigField: Codable, Sendable {
 	case number(NumberField)
 	case boolean(BoolField)
 	case `enum`(EnumField)
-	/// String semantics, masked in companion UI. No actual secure storage.
 	case secret(StringField)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -4500,30 +4498,15 @@ public struct WebappInfo: Codable, Sendable {
 	public let role: WebappRole
 	public let version: String
 	public let description: String?
-	/// sha256 of the icon bytes; presence means an icon exists. consumers
-	/// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
-	/// and cache keyed by this hash.
 	public let iconHash: String?
-	/// sha256 of the companion settings page declared by the manifest;
-	/// presence is the companion's cue to offer the settings UI.
 	public let settingsHash: String?
 	public let config: [ConfigField]
 	public let permissions: [String]
-	/// Plain-English description of the voice intents the webapp wants
-	/// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
-	/// "currently active extensions" section of the system prompt at
-	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
-	/// `None` opts the webapp out of voice integration.
-	public let voiceGrammar: String?
-	/// Declared art render sizes; the companion warms exactly these. `None`
-	/// means the canonical `{248, 96}` default applies.
+	public let rendersVoiceDisplay: Bool
 	public let art: ArtProfile?
-	/// Opaque provenance token recorded at install time by whoever pushed
-	/// the bundle, conventionally the catalog source URL. The daemon stores
-	/// and returns it verbatim and never dereferences it.
 	public let provenance: String?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?, provenance: String?) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, provenance: String?) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -4534,7 +4517,7 @@ public struct WebappInfo: Codable, Sendable {
 		self.settingsHash = settingsHash
 		self.config = config
 		self.permissions = permissions
-		self.voiceGrammar = voiceGrammar
+		self.rendersVoiceDisplay = rendersVoiceDisplay
 		self.art = art
 		self.provenance = provenance
 	}
@@ -4557,25 +4540,15 @@ public struct WebappManifest: Codable, Sendable {
 	public let version: String
 	public let description: String?
 	public let icon: String?
-	/// Bundle-relative path to one self-contained HTML file the companion
-	/// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
 	public let settings: String?
 	public let role: WebappRole?
 	public let config: [ConfigField]?
 	public let permissions: [String]?
-	/// Optional plain-English description of the voice commands this
-	/// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
-	/// the grammars of all installed-and-active webapps into the system
-	/// prompt at inference. Webapps that don't declare a grammar opt out
-	/// of voice integration.
-	public let voiceGrammar: String?
-	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
+	public let rendersVoiceDisplay: Bool?
 	public let art: ArtProfile?
-	/// Which system overlays the daemon injects into this webapp's page.
-	/// Omitted surfaces (and an omitted field) default to on.
 	public let overlays: OverlayProfile?
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?, overlays: OverlayProfile?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, rendersVoiceDisplay: Bool?, art: ArtProfile?, overlays: OverlayProfile?) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -4585,7 +4558,7 @@ public struct WebappManifest: Codable, Sendable {
 		self.role = role
 		self.config = config
 		self.permissions = permissions
-		self.voiceGrammar = voiceGrammar
+		self.rendersVoiceDisplay = rendersVoiceDisplay
 		self.art = art
 		self.overlays = overlays
 	}

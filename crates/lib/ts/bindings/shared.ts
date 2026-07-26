@@ -547,37 +547,20 @@ export type NetworkInfo = { kind: NetworkKind; metered: boolean };
 
 export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
 
-/**
- * One alternate interpretation the LLM surfaced alongside the primary.
- * Populated when the LLM returns `ambiguous_alternates` in its
- * json_schema output; consumed by the companion's CLARIFY UI so the
- * user can pick.
- */
 export type NluAlternate = { intent: string; slots: NluSlots | null };
 
-/**
- * Confidence the companion-side NLU pipeline attaches to a resolved
- * intent: a coarse "low" | "medium" | "high" level per channel, one for
- * the intent match and one for the extracted slots.
- */
-export type NluConfidence = {
-  /**
-   * "low" | "medium" | "high". The LLM emits one of these per channel.
-   */
-  intent: string;
-  slots: string | null;
-};
+export type NluBrightnessMode = 'auto' | 'manual';
 
-/**
- * What the companion-side NLU resolved an utterance to, sent across
- * the gateway link for the daemon to dispatch. This is the bridgething-
- * native shape; the daemon's stock-compat layer wraps it into the
- * SLIMO `NluMessage` envelope when the active webapp is stock.
- *
- * `transcript` is the ASR output the NLU ran on; carried so the daemon
- * can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
- * stock-compat fallbacks have the raw query available.
- */
+export type NluConfidence = { intent: string; slots: string | null };
+
+export type NluDirection = 'up' | 'down';
+
+export type NluPhoneAction = 'answer' | 'decline' | 'end' | 'hold' | 'unhold' | 'swap' | 'merge' | 'mute' | 'unmute';
+
+export type NluPlaybackSpeed = '1' | '1.2' | '1.5' | '2';
+
+export type NluRepeatMode = 'off' | 'all' | 'one';
+
 export type NluResolvedIntent = {
   intent: string;
   slots: NluSlots;
@@ -586,16 +569,6 @@ export type NluResolvedIntent = {
   alternates: Array<NluAlternate> | null;
 };
 
-/**
- * Slot catalog. Every intent projects through this flat shape;
- * per-intent slot allowlists are enforced by the json_schema grammar at
- * decode time, not by this struct. The wire payload omits absent slots,
- * so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
- *
- * String values are passed through verbatim from the user's transcript
- * (no normalization at this layer); the SpotifyResolver may decorate
- * the slots with a `uri` after catalog lookup.
- */
 export type NluSlots = {
   artist: string | null;
   track: string | null;
@@ -609,37 +582,25 @@ export type NluSlots = {
   popularityFilter: string | null;
   entityType: string | null;
   query: string | null;
-  /**
-   * WEBAPP_INTENT only: the filler-stripped natural-language command
-   * the active webapp's voice grammar handler will parse.
-   */
-  rawQuery: string | null;
-  /**
-   * WEBAPP_INTENT / OPEN_WEBAPP only.
-   */
-  webappId: string | null;
   webappName: string | null;
-  /**
-   * PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
-   * but stock SLIMO expects an Array<string> envelope - the stock
-   * translation wraps as needed.
-   */
   preset: string | null;
-  /**
-   * VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
-   */
+  enabled: boolean | null;
+  repeatMode: NluRepeatMode | null;
+  seconds: number | null;
+  speed: NluPlaybackSpeed | null;
+  direction: NluDirection | null;
   amount: string | null;
-  /**
-   * VOLUME_ABSOLUTE. 0-100.
-   */
   level: number | null;
-  /**
-   * Post-resolution Spotify URI. Populated by the companion's
-   * SpotifyResolver after the NLU stage; daemon dispatches directly
-   * to playback when set.
-   */
+  brightnessMode: NluBrightnessMode | null;
+  view: NluView | null;
+  phoneAction: NluPhoneAction | null;
+  systemAction: NluSystemAction | null;
   uri: string | null;
 };
+
+export type NluSystemAction = 'reboot' | 'powerOff';
+
+export type NluView = 'library' | 'presets' | 'songs' | 'savedEpisodes' | 'newEpisodes' | 'queue' | 'thisArtist';
 
 /**
  * One notification surfaced from the connected companion's notification
@@ -959,9 +920,7 @@ export type PlaybackState = 'stopped' | 'paused' | 'playing';
 
 /**
  * A remote endpoint the current provider can move playback to. Only
- * meaningful when `SurfaceAvailability::playback_targets` is set; the
- * list never contains the Car Thing itself, which is a control surface
- * and never an audio endpoint.
+ * meaningful when `SurfaceAvailability::playback_targets` is set.
  *
  * `volume_percent` is `None` when the endpoint does not report volume.
  */
@@ -1052,11 +1011,6 @@ export type PlayerState = {
   queue: Array<QueueItem>;
   options: PlayerOptions;
   context: PlaybackContext | null;
-  /**
-   * The endpoint the audio is coming out of, when it is not the phone
-   * itself. `None` means local playback, or a provider with no remote
-   * endpoint concept. Webapps render "playing on <name>" from this.
-   */
   target?: PlaybackTarget | null;
 };
 
@@ -1267,11 +1221,6 @@ export type SurfaceAvailability = {
   netWs: boolean;
   audioTts: boolean;
   lyrics: boolean;
-  /**
-   * The active music provider can enumerate remote endpoints and move
-   * playback between them. False for providers whose platform refuses to
-   * expose routes (Apple Music), and whenever no glue is attached.
-   */
   playbackTargets: boolean;
 };
 
@@ -1339,24 +1288,19 @@ export type TunnelError =
  */
 export type VoiceDescriptor = { id: string; name: string; locale: string };
 
-/**
- * Why dispatch declined to act on a `VoiceDispatch`. The companion
- * surfaces these to the user (toast / UI hint); the daemon does not
- * otherwise retain state about the failure.
- */
 export type VoiceDispatchErrorCode =
-  | 'webappNotInstalled'
-  | 'webappNotActive'
-  | 'webappRefused'
+  | 'webappNotFound'
   | 'notDispatchable'
+  | 'unsupported'
   | 'playbackFailed'
+  | 'badSlots'
   | 'internal';
 
 /**
  * Where the daemon actually routed a successful dispatch. Carried back
  * to the companion so it can render the right confirmation UI.
  */
-export type VoiceDispatchTarget = 'stockPlayback' | 'activeWebapp' | 'webappSwitch';
+export type VoiceDispatchTarget = 'playback' | 'device' | 'phone' | 'display' | 'webappSwitch';
 
 /**
  * Domain errors emitted by any webapp surface (gateway- or client-side).
@@ -1384,37 +1328,12 @@ export type WebappInfo = {
   role: WebappRole;
   version: string;
   description: string | null;
-  /**
-   * sha256 of the icon bytes; presence means an icon exists. consumers
-   * fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
-   * and cache keyed by this hash.
-   */
   iconHash: string | null;
-  /**
-   * sha256 of the companion settings page declared by the manifest;
-   * presence is the companion's cue to offer the settings UI.
-   */
   settingsHash: string | null;
   config: Array<ConfigField>;
   permissions: Array<string>;
-  /**
-   * Plain-English description of the voice intents the webapp wants
-   * WEBAPP_INTENT routing for. Companion-side NLU folds this into the
-   * "currently active extensions" section of the system prompt at
-   * inference, which is what makes WEBAPP_INTENT emission context-aware.
-   * `None` opts the webapp out of voice integration.
-   */
-  voiceGrammar: string | null;
-  /**
-   * Declared art render sizes; the companion warms exactly these. `None`
-   * means the canonical `{248, 96}` default applies.
-   */
+  rendersVoiceDisplay: boolean;
   art: ArtProfile | null;
-  /**
-   * Opaque provenance token recorded at install time by whoever pushed
-   * the bundle, conventionally the catalog source URL. The daemon stores
-   * and returns it verbatim and never dereferences it.
-   */
   provenance: string | null;
 };
 
@@ -1429,30 +1348,12 @@ export type WebappManifest = {
   version: string;
   description: string | null;
   icon: string | null;
-  /**
-   * Bundle-relative path to one self-contained HTML file the companion
-   * renders in a webview as this webapp's settings UI. Capped at 1 MiB.
-   */
   settings: string | null;
   role: WebappRole;
   config: Array<ConfigField>;
   permissions: Array<string>;
-  /**
-   * Optional plain-English description of the voice commands this
-   * webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
-   * the grammars of all installed-and-active webapps into the system
-   * prompt at inference. Webapps that don't declare a grammar opt out
-   * of voice integration.
-   */
-  voiceGrammar: string | null;
-  /**
-   * Declared art render sizes. Omitted falls back to `{248, 96}`.
-   */
+  rendersVoiceDisplay: boolean;
   art?: ArtProfile | null;
-  /**
-   * Which system overlays the daemon injects into this webapp's page.
-   * Omitted surfaces (and an omitted field) default to on.
-   */
   overlays: OverlayProfile;
 };
 

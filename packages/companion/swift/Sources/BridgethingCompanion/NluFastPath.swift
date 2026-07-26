@@ -1,3 +1,4 @@
+import BridgethingSchema
 import Foundation
 
 public enum NluFastPath {
@@ -113,14 +114,14 @@ public enum NluFastPath {
         ]
         for pat in patterns {
             if let captured = captureGroup(raw, pat), let n = parseInt(captured), 1...100 ~= n {
-                return Hit(intent: "VOLUME_ABSOLUTE", slots: NluMutableSlots(level: UInt32(n)))
+                return Hit(intent: "SET_VOLUME", slots: NluMutableSlots(level: UInt32(n)))
             }
         }
         return nil
     }
 
-    static let speedRules: [(String, [String])] = [
-        ("SET_PLAYBACK_SPEED_1POINT2X", [
+    static let speedRules: [(NluPlaybackSpeed, [String])] = [
+        (.onePointTwo, [
             "\\bone\\s+point\\s+two(?:\\s+(?:speed|x|times))?\\b",
             "\\b1\\.2\\s*x?\\b",
             "\\b(?:play\\s+it\\s+|speed\\s+)faster\\b",
@@ -128,17 +129,17 @@ public enum NluFastPath {
             "\\ba\\s+little\\s+faster\\b",
             "\\bfaster\\s+a\\s+little\\b",
         ]),
-        ("SET_PLAYBACK_SPEED_1POINT5X", [
+        (.onePointFive, [
             "\\bone\\s+(?:and\\s+a\\s+)?half(?:\\s+speed)?\\b",
             "\\b1\\.5\\s*x?\\b",
             "\\bone\\s+point\\s+five\\b",
         ]),
-        ("SET_PLAYBACK_SPEED_1X", [
+        (.one, [
             "\\bnormal\\s+speed\\b",
             "\\b(?:back\\s+to\\s+|reset\\s+to\\s+)?(?:1\\s*x|one\\s+x|original\\s+speed)\\b",
             "\\b(?:play\\s+(?:it\\s+)?(?:at\\s+)?|at\\s+)normal(?:\\s+speed)?\\b",
         ]),
-        ("SET_PLAYBACK_SPEED_2X", [
+        (.two, [
             "\\bdouble\\s+speed\\b",
             "\\b2\\s*x\\b",
             "\\btwo\\s+x\\b",
@@ -150,9 +151,9 @@ public enum NluFastPath {
         let anchors = ["speed", "faster", "slower", "normal", "double", "2x", "1.5", "1.2",
                        "two x", "two times", "one point", "half"]
         guard anchors.contains(where: { raw.contains($0) }) else { return nil }
-        for (intent, patterns) in speedRules {
+        for (speed, patterns) in speedRules {
             for p in patterns where contains(raw, p) {
-                return Hit(intent: intent, slots: NluMutableSlots())
+                return Hit(intent: "SET_PLAYBACK_SPEED", slots: NluMutableSlots(speed: speed))
             }
         }
         return nil
@@ -161,19 +162,19 @@ public enum NluFastPath {
     static func ruleSeek(_ tokens: [String], _ raw: String) -> Hit? {
         let has15 = contains(raw, "\\b(?:15|fifteen)\\b")
         if has15 && contains(raw, "\\b(?:rewind|go\\s+back|back|skip\\s+back)\\b") {
-            return Hit(intent: "SEEK_BACK_15_SECONDS", slots: NluMutableSlots())
+            return Hit(intent: "SEEK_RELATIVE", slots: NluMutableSlots(seconds: -15))
         }
         if contains(raw, "^back\\s+fifteen\\s*$") {
-            return Hit(intent: "SEEK_BACK_15_SECONDS", slots: NluMutableSlots())
+            return Hit(intent: "SEEK_RELATIVE", slots: NluMutableSlots(seconds: -15))
         }
         if has15 && contains(raw, "\\b(?:fast\\s+forward|forward|skip\\s+(?:ahead|forward))\\b") {
-            return Hit(intent: "SEEK_FORWARD_15_SECONDS", slots: NluMutableSlots())
+            return Hit(intent: "SEEK_RELATIVE", slots: NluMutableSlots(seconds: 15))
         }
         if contains(raw, "\\bjump\\s+ahead\\b") && contains(raw, "\\bjump\\s+ahead(?:\\s+(?:fifteen|15))?\\s*(?:seconds?)?\\s*$") {
-            return Hit(intent: "SEEK_FORWARD_15_SECONDS", slots: NluMutableSlots())
+            return Hit(intent: "SEEK_RELATIVE", slots: NluMutableSlots(seconds: 15))
         }
         if contains(raw, "^forward\\s+fifteen\\s*$") {
-            return Hit(intent: "SEEK_FORWARD_15_SECONDS", slots: NluMutableSlots())
+            return Hit(intent: "SEEK_RELATIVE", slots: NluMutableSlots(seconds: 15))
         }
         return nil
     }
@@ -181,18 +182,18 @@ public enum NluFastPath {
     static func ruleRepeat(_ tokens: [String], _ raw: String) -> Hit? {
         guard tokens.contains("repeat") || tokens.contains("loop") else { return nil }
         if contains(raw, "\\b(?:repeat|loop)\\s+(?:this(?:\\s+(?:song|track|one))?|current(?:\\s+(?:song|track))?|it)\\b") {
-            return Hit(intent: "REPEAT_ONE", slots: NluMutableSlots())
+            return Hit(intent: "SET_REPEAT", slots: NluMutableSlots(repeatMode: .one))
         }
         if contains(raw, "\\b(?:play\\s+)?this\\s+(?:song\\s+)?on\\s+repeat\\b") {
-            return Hit(intent: "REPEAT_ONE", slots: NluMutableSlots())
+            return Hit(intent: "SET_REPEAT", slots: NluMutableSlots(repeatMode: .one))
         }
         if contains(raw, "\\brepeat\\s+off\\b") || contains(raw, "\\bstop\\s+repeat(?:ing)?\\b")
             || contains(raw, "\\bturn\\s+(?:off|of)\\s+repeat\\b") || contains(raw, "\\bdisable\\s+repeat\\b") {
-            return Hit(intent: "REPEAT_OFF", slots: NluMutableSlots())
+            return Hit(intent: "SET_REPEAT", slots: NluMutableSlots(repeatMode: .off))
         }
         if contains(raw, "\\brepeat(?:\\s+on)?\\s*$") || ["repeat", "loop", "repeat on", "loop on"].contains(raw)
             || contains(raw, "\\bturn\\s+on\\s+repeat\\b") || contains(raw, "\\benable\\s+repeat\\b") {
-            return Hit(intent: "REPEAT_ON", slots: NluMutableSlots())
+            return Hit(intent: "SET_REPEAT", slots: NluMutableSlots(repeatMode: .all))
         }
         return nil
     }
@@ -201,13 +202,13 @@ public enum NluFastPath {
         guard tokens.contains("shuffle") || tokens.contains("shuffling") else { return nil }
         if contains(raw, "\\bshuffle\\s+off\\b") || contains(raw, "\\bstop\\s+shuffling\\b")
             || contains(raw, "\\bturn\\s+off\\s+shuffle\\b") || contains(raw, "\\bdisable\\s+shuffle\\b") {
-            return Hit(intent: "SHUFFLE_OFF", slots: NluMutableSlots())
+            return Hit(intent: "SET_SHUFFLE", slots: NluMutableSlots(enabled: false))
         }
         if ["shuffle", "shuffle on"].contains(raw)
             || contains(raw, "\\bshuffle\\s+(?:on|please)?\\s*$")
             || contains(raw, "\\bturn\\s+on\\s+shuffle\\b")
             || contains(raw, "\\benable\\s+shuffle\\b") {
-            return Hit(intent: "SHUFFLE_ON", slots: NluMutableSlots())
+            return Hit(intent: "SET_SHUFFLE", slots: NluMutableSlots(enabled: true))
         }
         return nil
     }
@@ -229,31 +230,20 @@ public enum NluFastPath {
         return nil
     }
 
-    static func ruleTransferPlayback(_ tokens: [String], _ raw: String) -> Hit? {
-        if contains(raw, "\\btransfer\\s+playback\\b") { return Hit(intent: "TRANSFER_PLAYBACK", slots: NluMutableSlots()) }
-        if contains(raw, "\\b(?:move|send|cast)\\s+(?:this|the\\s+(?:music|audio|playback))\\s+to\\s+(?:my|the)\\b") {
-            return Hit(intent: "TRANSFER_PLAYBACK", slots: NluMutableSlots())
-        }
-        if contains(raw, "\\bplay\\s+on\\s+(?:my\\s+)?(?:speaker|tv|chromecast|sonos|stereo|receiver)\\b") {
-            return Hit(intent: "TRANSFER_PLAYBACK", slots: NluMutableSlots())
-        }
-        return nil
-    }
-
     static func ruleUnmute(_ tokens: [String], _ raw: String) -> Hit? {
-        if contains(raw, "\\bunmute\\b") { return Hit(intent: "UNMUTE", slots: NluMutableSlots()) }
+        if contains(raw, "\\bunmute\\b") { return Hit(intent: "SET_MUTE", slots: NluMutableSlots(enabled: false)) }
         if contains(raw, "\\bturn\\s+(?:the\\s+)?(?:sound|audio|volume)\\s+back\\s+on\\b") {
-            return Hit(intent: "UNMUTE", slots: NluMutableSlots())
+            return Hit(intent: "SET_MUTE", slots: NluMutableSlots(enabled: false))
         }
         return nil
     }
 
     static func ruleMute(_ tokens: [String], _ raw: String) -> Hit? {
         if contains(raw, "^mute(?:\\s+(?:it|the\\s+(?:audio|sound|volume|music)))?\\s*$") {
-            return Hit(intent: "MUTE", slots: NluMutableSlots())
+            return Hit(intent: "SET_MUTE", slots: NluMutableSlots(enabled: true))
         }
         if contains(raw, "\\bturn\\s+(?:off|down\\s+to\\s+zero)\\s+(?:the\\s+)?(?:sound|audio|volume)\\b") {
-            return Hit(intent: "MUTE", slots: NluMutableSlots())
+            return Hit(intent: "SET_MUTE", slots: NluMutableSlots(enabled: true))
         }
         return nil
     }
@@ -274,7 +264,7 @@ public enum NluFastPath {
             "^make\\s+(?:it\\s+)?louder\\s*$",
         ]
         for p in patterns where contains(raw, p) {
-            return Hit(intent: "VOLUME_UP", slots: NluMutableSlots(amount: amountModifier(raw)))
+            return Hit(intent: "SET_VOLUME", slots: NluMutableSlots(direction: .up, amount: amountModifier(raw)))
         }
         return nil
     }
@@ -284,19 +274,19 @@ public enum NluFastPath {
             || contains(raw, "\\bturn\\s+(?:it|the\\s+(?:volume|music))?\\s*down\\b")
             || contains(raw, "\\bturn\\s+down\\s+(?:the\\s+)?volume\\b")
             || contains(raw, "^make\\s+(?:it\\s+)?(?:quieter|softer)\\s*$") {
-            return Hit(intent: "VOLUME_DOWN", slots: NluMutableSlots(amount: amountModifier(raw)))
+            return Hit(intent: "SET_VOLUME", slots: NluMutableSlots(direction: .down, amount: amountModifier(raw)))
         }
         return nil
     }
 
-    static func ruleResume(_ tokens: [String], _ raw: String) -> Hit? {
+    static func rulePlayResume(_ tokens: [String], _ raw: String) -> Hit? {
         let exact: Set<String> = ["resume", "keep playing", "resume the music", "resume music", "resume playing"]
-        if exact.contains(raw) { return Hit(intent: "RESUME", slots: NluMutableSlots()) }
+        if exact.contains(raw) { return Hit(intent: "PLAY", slots: NluMutableSlots()) }
         if contains(raw, "^resume(?:\\s+(?:the\\s+)?(?:music|song|track|playback|playing))?\\s*$") {
-            return Hit(intent: "RESUME", slots: NluMutableSlots())
+            return Hit(intent: "PLAY", slots: NluMutableSlots())
         }
         if contains(raw, "^keep\\s+(?:playing|going)\\s*$") {
-            return Hit(intent: "RESUME", slots: NluMutableSlots())
+            return Hit(intent: "PLAY", slots: NluMutableSlots())
         }
         return nil
     }
@@ -308,10 +298,10 @@ public enum NluFastPath {
         return nil
     }
 
-    static func ruleStop(_ tokens: [String], _ raw: String) -> Hit? {
+    static func rulePauseStop(_ tokens: [String], _ raw: String) -> Hit? {
         if tokens.contains("repeat") || raw.contains("shuffl") { return nil }
         if contains(raw, "^stop(?:\\s+(?:it|playing|the\\s+(?:music|song|track|playback)))?\\s*$") {
-            return Hit(intent: "STOP", slots: NluMutableSlots())
+            return Hit(intent: "PAUSE", slots: NluMutableSlots())
         }
         return nil
     }
@@ -355,14 +345,13 @@ public enum NluFastPath {
         ruleRepeat,
         ruleShuffle,
         ruleWhatsPlaying,
-        ruleTransferPlayback,
         ruleUnmute,
         ruleMute,
         ruleVolumeUp,
         ruleVolumeDown,
-        ruleResume,
+        rulePlayResume,
         rulePause,
-        ruleStop,
+        rulePauseStop,
         ruleNext,
         rulePrevious,
         rulePlayBare,

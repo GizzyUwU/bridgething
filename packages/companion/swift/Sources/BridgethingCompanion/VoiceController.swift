@@ -63,7 +63,7 @@ public actor VoiceController {
         self.config = config
     }
 
-    public func resolve(transcript: String, activeWebapps: [NluSystemPrompt.ActiveWebapp] = []) async throws -> Resolution {
+    public func resolve(transcript: String) async throws -> Resolution {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return Resolution(
@@ -81,7 +81,7 @@ public actor VoiceController {
         do {
             let completion = try await client.chat(
                 model: config.model,
-                systemPrompt: NluSystemPrompt.build(activeWebapps: activeWebapps),
+                systemPrompt: NluSystemPrompt.build(),
                 utterance: trimmed,
                 responseFormat: config.grammarSchema.flatMap { data -> [String: Any]? in
                     guard let schema = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -139,9 +139,24 @@ public enum NluController {
             slots.popularityFilter = raw["popularity_filter"] as? String
             slots.entityType = raw["entity_type"] as? String
             slots.query = raw["query"] as? String
-            slots.rawQuery = raw["raw_query"] as? String
-            slots.webappId = raw["webapp_id"] as? String
             slots.webappName = raw["webapp_name"] as? String
+            slots.enabled = raw["enabled"] as? Bool
+            slots.repeatMode = (raw["repeat_mode"] as? String).flatMap(NluRepeatMode.init(rawValue:))
+            slots.seconds = raw["seconds"].flatMap { v -> Int32? in
+                if let n = v as? Int { return Int32(n) }
+                if let s = v as? String, let n = Int32(s) { return n }
+                return nil
+            }
+            slots.speed = raw["speed"].flatMap { v -> NluPlaybackSpeed? in
+                if let s = v as? String { return NluPlaybackSpeed(rawValue: s) }
+                if let n = v as? Double { return NluPlaybackSpeed(rawValue: n == n.rounded() ? String(Int(n)) : String(n)) }
+                return nil
+            }
+            slots.direction = (raw["direction"] as? String).flatMap(NluDirection.init(rawValue:))
+            slots.brightnessMode = (raw["brightness_mode"] as? String).flatMap(NluBrightnessMode.init(rawValue:))
+            slots.view = (raw["view"] as? String).flatMap { NluView(rawValue: camelCased($0)) }
+            slots.phoneAction = (raw["phone_action"] as? String).flatMap(NluPhoneAction.init(rawValue:))
+            slots.systemAction = (raw["system_action"] as? String).flatMap { NluSystemAction(rawValue: camelCased($0)) }
             slots.preset = raw["preset"].flatMap { v -> String? in
                 if let s = v as? String { return s }
                 if let n = v as? Int { return String(n) }
@@ -197,14 +212,27 @@ public enum NluController {
             popularityFilter: raw["popularity_filter"] as? String,
             entityType: raw["entity_type"] as? String,
             query: raw["query"] as? String,
-            rawQuery: raw["raw_query"] as? String,
-            webappId: raw["webapp_id"] as? String,
             webappName: raw["webapp_name"] as? String,
             preset: raw["preset"] as? String,
+            enabled: raw["enabled"] as? Bool,
+            repeatMode: (raw["repeat_mode"] as? String).flatMap(NluRepeatMode.init(rawValue:)),
+            seconds: (raw["seconds"] as? Int).map(Int32.init),
+            speed: (raw["speed"] as? String).flatMap(NluPlaybackSpeed.init(rawValue:)),
+            direction: (raw["direction"] as? String).flatMap(NluDirection.init(rawValue:)),
             amount: raw["amount"] as? String,
             level: raw["level"] as? UInt32,
+            brightnessMode: (raw["brightness_mode"] as? String).flatMap(NluBrightnessMode.init(rawValue:)),
+            view: (raw["view"] as? String).flatMap { NluView(rawValue: camelCased($0)) },
+            phoneAction: (raw["phone_action"] as? String).flatMap(NluPhoneAction.init(rawValue:)),
+            systemAction: (raw["system_action"] as? String).flatMap { NluSystemAction(rawValue: camelCased($0)) },
             uri: raw["uri"] as? String
         )
+    }
+
+    static func camelCased(_ raw: String) -> String {
+        let parts = raw.split(separator: "_")
+        guard let first = parts.first else { return raw }
+        return ([String(first)] + parts.dropFirst().map { $0.capitalized }).joined()
     }
 
     static func stripJsonFences(_ text: String) -> String {

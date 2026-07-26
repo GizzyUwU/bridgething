@@ -543,9 +543,7 @@ export type PhoneStateReply = { state: PhoneState };
 export type PlayUri = { uri: string; context: PlayContext | null };
 
 /**
- * Complete replacement list of the provider's remote endpoints. The
- * companion pushes one whenever its endpoint set changes; there is no
- * delta and no daemon-side poll.
+ * Complete replacement list of the provider's remote endpoints.
  */
 export type PlaybackTargets = { targets: Array<PlaybackTarget> };
 
@@ -613,12 +611,7 @@ export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
 
 export type VoiceDispatch = { resolved: NluResolvedIntent };
 
-export type VoiceDispatchFailed = {
-  code: VoiceDispatchErrorCode;
-  intent: string;
-  webappId: string | null;
-  msg: string;
-};
+export type VoiceDispatchFailed = { code: VoiceDispatchErrorCode; intent: string; msg: string };
 
 export type VoiceDispatched = { target: VoiceDispatchTarget; intent: string; webappId: string | null };
 

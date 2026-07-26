@@ -138,6 +138,7 @@ import type {
   TtsCancel,
   TtsEnded,
   TtsStarted,
+  VoiceIntent,
   VoiceState,
   VoiceStateReply,
   VolumeChanged,
@@ -282,6 +283,7 @@ export type TimeInboundHandlers = {
 
 export type VoiceInboundHandlers = {
   stateChanged: (msg: VoiceState) => void;
+  intent: (msg: VoiceIntent) => void;
   stateReply: (msg: VoiceStateReply) => void;
 };
 
@@ -2995,6 +2997,18 @@ export class VoiceSurface {
     });
   }
 
+  /** Subscribe to `Voice::Intent` from the daemon. */
+  onIntent(handler: (msg: VoiceIntent) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'intent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Voice::StateReply` from the daemon. */
   onStateReply(handler: (msg: VoiceStateReply) => void): () => void {
     return this._client.on(event => {
@@ -3026,6 +3040,10 @@ export class VoiceSurface {
       switch (inner.event) {
         case 'stateChanged': {
           handlers.stateChanged?.(inner.data);
+          return;
+        }
+        case 'intent': {
+          handlers.intent?.(inner.data);
           return;
         }
         case 'stateReply': {
@@ -4335,6 +4353,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
         switch (inner.event) {
           case 'stateChanged': {
             innerHandlers.stateChanged?.(inner.data);
+            return;
+          }
+          case 'intent': {
+            innerHandlers.intent?.(inner.data);
             return;
           }
           case 'stateReply': {

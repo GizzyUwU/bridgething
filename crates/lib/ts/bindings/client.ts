@@ -33,6 +33,7 @@ import type {
   NetError,
   NetFetchRequest,
   NetFetchResponse,
+  NluSlots,
   Notification,
   NowPlayingUpdate,
   OtaError,
@@ -420,11 +421,12 @@ export type BridgeToClientTimeMsg =
   | { event: 'snapshot'; data: TimeSnapshot };
 
 /**
- * Daemon -> webapp voice/NLU surface: mic state-change events and the
- * reply to `voice.stateGet`.
+ * Daemon -> webapp voice/NLU surface: mic state-change events, resolved
+ * display intents, and the reply to `voice.stateGet`.
  */
 export type BridgeToClientVoiceMsg =
   | { event: 'stateChanged'; data: VoiceState }
+  | { event: 'intent'; data: VoiceIntent }
   | { event: 'stateReply'; data: VoiceStateReply };
 
 /**
@@ -1459,9 +1461,6 @@ export type PlayerStateReply = {
 
 /**
  * Response to `targetsGet`, also carried by the `TargetsChanged` event.
- * Empty when no companion is attached, or when the provider has no
- * remote endpoint concept - check `capabilities.available.playbackTargets`
- * to tell "none right now" from "never".
  */
 export type PlayerTargetsReply = { targets: Array<PlaybackTarget> };
 
@@ -1644,6 +1643,16 @@ export type TtsStarted = {
    */
   id: string;
 };
+
+/**
+ * The display-shaped intents
+ */
+export type VoiceDisplayIntent = 'search' | 'showView' | 'moreLikeThis';
+
+/**
+ * A resolved display intent for the active webapp to render
+ */
+export type VoiceIntent = { intent: VoiceDisplayIntent; slots: NluSlots; transcript: string };
 
 /**
  * Current mic state.

@@ -356,9 +356,6 @@ data class SurfaceAvailability (
 	val netWs: Boolean,
 	val audioTts: Boolean,
 	val lyrics: Boolean,
-	/// The active music provider can enumerate remote endpoints and move
-	/// playback between them. False for providers whose platform refuses to
-	/// expose routes (Apple Music), and whenever no glue is attached.
 	val playbackTargets: Boolean? = null
 )
 
@@ -1295,14 +1292,92 @@ data class NetWsSend (
 	val frame: WsFrame
 )
 
-/// Slot catalog. Every intent projects through this flat shape;
-/// per-intent slot allowlists are enforced by the json_schema grammar at
-/// decode time, not by this struct. The wire payload omits absent slots,
-/// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
-/// 
-/// String values are passed through verbatim from the user's transcript
-/// (no normalization at this layer); the SpotifyResolver may decorate
-/// the slots with a `uri` after catalog lookup.
+@Serializable
+enum class NluRepeatMode(val string: String) {
+	@SerialName("off")
+	Off("off"),
+	@SerialName("all")
+	All("all"),
+	@SerialName("one")
+	One("one"),
+}
+
+@Serializable
+enum class NluPlaybackSpeed(val string: String) {
+	@SerialName("1")
+	One("1"),
+	@SerialName("1.2")
+	OnePointTwo("1.2"),
+	@SerialName("1.5")
+	OnePointFive("1.5"),
+	@SerialName("2")
+	Two("2"),
+}
+
+@Serializable
+enum class NluDirection(val string: String) {
+	@SerialName("up")
+	Up("up"),
+	@SerialName("down")
+	Down("down"),
+}
+
+@Serializable
+enum class NluBrightnessMode(val string: String) {
+	@SerialName("auto")
+	Auto("auto"),
+	@SerialName("manual")
+	Manual("manual"),
+}
+
+@Serializable
+enum class NluView(val string: String) {
+	@SerialName("library")
+	Library("library"),
+	@SerialName("presets")
+	Presets("presets"),
+	@SerialName("songs")
+	Songs("songs"),
+	@SerialName("savedEpisodes")
+	SavedEpisodes("savedEpisodes"),
+	@SerialName("newEpisodes")
+	NewEpisodes("newEpisodes"),
+	@SerialName("queue")
+	Queue("queue"),
+	@SerialName("thisArtist")
+	ThisArtist("thisArtist"),
+}
+
+@Serializable
+enum class NluPhoneAction(val string: String) {
+	@SerialName("answer")
+	Answer("answer"),
+	@SerialName("decline")
+	Decline("decline"),
+	@SerialName("end")
+	End("end"),
+	@SerialName("hold")
+	Hold("hold"),
+	@SerialName("unhold")
+	Unhold("unhold"),
+	@SerialName("swap")
+	Swap("swap"),
+	@SerialName("merge")
+	Merge("merge"),
+	@SerialName("mute")
+	Mute("mute"),
+	@SerialName("unmute")
+	Unmute("unmute"),
+}
+
+@Serializable
+enum class NluSystemAction(val string: String) {
+	@SerialName("reboot")
+	Reboot("reboot"),
+	@SerialName("powerOff")
+	PowerOff("powerOff"),
+}
+
 @Serializable
 data class NluSlots (
 	val artist: String? = null,
@@ -1317,54 +1392,28 @@ data class NluSlots (
 	val popularityFilter: String? = null,
 	val entityType: String? = null,
 	val query: String? = null,
-	/// WEBAPP_INTENT only: the filler-stripped natural-language command
-	/// the active webapp's voice grammar handler will parse.
-	val rawQuery: String? = null,
-	/// WEBAPP_INTENT / OPEN_WEBAPP only.
-	val webappId: String? = null,
 	val webappName: String? = null,
-	/// PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
-	/// but stock SLIMO expects an Array<string> envelope - the stock
-	/// translation wraps as needed.
 	val preset: String? = null,
-	/// VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+	val enabled: Boolean? = null,
+	val repeatMode: NluRepeatMode? = null,
+	val seconds: Int? = null,
+	val speed: NluPlaybackSpeed? = null,
+	val direction: NluDirection? = null,
 	val amount: String? = null,
-	/// VOLUME_ABSOLUTE. 0-100.
 	val level: UInt? = null,
-	/// Post-resolution Spotify URI. Populated by the companion's
-	/// SpotifyResolver after the NLU stage; daemon dispatches directly
-	/// to playback when set.
+	val brightnessMode: NluBrightnessMode? = null,
+	val view: NluView? = null,
+	val phoneAction: NluPhoneAction? = null,
+	val systemAction: NluSystemAction? = null,
 	val uri: String? = null
 )
 
-/// One alternate interpretation the LLM surfaced alongside the primary.
-/// Populated when the LLM returns `ambiguous_alternates` in its
-/// json_schema output; consumed by the companion's CLARIFY UI so the
-/// user can pick.
 @Serializable
 data class NluAlternate (
 	val intent: String,
 	val slots: NluSlots? = null
 )
 
-/// Confidence the companion-side NLU pipeline attaches to a resolved
-/// intent: a coarse "low" | "medium" | "high" level per channel, one for
-/// the intent match and one for the extracted slots.
-@Serializable
-data class NluConfidence (
-	/// "low" | "medium" | "high". The LLM emits one of these per channel.
-	val intent: String,
-	val slots: String? = null
-)
-
-/// What the companion-side NLU resolved an utterance to, sent across
-/// the gateway link for the daemon to dispatch. This is the bridgething-
-/// native shape; the daemon's stock-compat layer wraps it into the
-/// SLIMO `NluMessage` envelope when the active webapp is stock.
-/// 
-/// `transcript` is the ASR output the NLU ran on; carried so the daemon
-/// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
-/// stock-compat fallbacks have the raw query available.
 @Serializable
 data class NluResolvedIntent (
 	val intent: String,
@@ -2112,9 +2161,7 @@ enum class PlaybackTargetKind(val string: String) {
 }
 
 /// A remote endpoint the current provider can move playback to. Only
-/// meaningful when `SurfaceAvailability::playback_targets` is set; the
-/// list never contains the Car Thing itself, which is a control surface
-/// and never an audio endpoint.
+/// meaningful when `SurfaceAvailability::playback_targets` is set.
 /// 
 /// `volume_percent` is `None` when the endpoint does not report volume.
 @Serializable
@@ -2128,9 +2175,7 @@ data class PlaybackTarget (
 	val volumePercent: UInt? = null
 )
 
-/// Complete replacement list of the provider's remote endpoints. The
-/// companion pushes one whenever its endpoint set changes; there is no
-/// delta and no daemon-side poll.
+/// Complete replacement list of the provider's remote endpoints.
 @Serializable
 data class PlaybackTargets (
 	val targets: List<PlaybackTarget>
@@ -2176,9 +2221,6 @@ data class PlayerState (
 	val queue: List<QueueItem>,
 	val options: PlayerOptions,
 	val context: PlaybackContext? = null,
-	/// The endpoint the audio is coming out of, when it is not the phone
-	/// itself. `None` means local playback, or a provider with no remote
-	/// endpoint concept. Webapps render "playing on <name>" from this.
 	val target: PlaybackTarget? = null
 )
 
@@ -2524,30 +2566,18 @@ data class VoiceDispatch (
 	val resolved: NluResolvedIntent
 )
 
-/// Why dispatch declined to act on a `VoiceDispatch`. The companion
-/// surfaces these to the user (toast / UI hint); the daemon does not
-/// otherwise retain state about the failure.
 @Serializable
 enum class VoiceDispatchErrorCode(val string: String) {
-	/// WEBAPP_INTENT targeted a webapp_id that isn't installed.
-	@SerialName("webappNotInstalled")
-	WebappNotInstalled("webappNotInstalled"),
-	/// WEBAPP_INTENT targeted an installed webapp that isn't the active
-	/// one. Companion can prompt the user to switch.
-	@SerialName("webappNotActive")
-	WebappNotActive("webappNotActive"),
-	/// Active webapp accepted the dispatch but reported an error.
-	@SerialName("webappRefused")
-	WebappRefused("webappRefused"),
-	/// Intent is CLARIFY / NO_INTENT - companion should resolve at its
-	/// own edge rather than asking the daemon to dispatch.
+	@SerialName("webappNotFound")
+	WebappNotFound("webappNotFound"),
 	@SerialName("notDispatchable")
 	NotDispatchable("notDispatchable"),
-	/// Stock playback target couldn't be resolved (no Spotify session,
-	/// missing slot, etc.).
+	@SerialName("unsupported")
+	Unsupported("unsupported"),
 	@SerialName("playbackFailed")
 	PlaybackFailed("playbackFailed"),
-	/// Catch-all (io error, internal state machine glitch).
+	@SerialName("badSlots")
+	BadSlots("badSlots"),
 	@SerialName("internal")
 	Internal("internal"),
 }
@@ -2556,7 +2586,6 @@ enum class VoiceDispatchErrorCode(val string: String) {
 data class VoiceDispatchFailed (
 	val code: VoiceDispatchErrorCode,
 	val intent: String,
-	val webappId: String? = null,
 	val msg: String
 )
 
@@ -2564,13 +2593,19 @@ data class VoiceDispatchFailed (
 /// to the companion so it can render the right confirmation UI.
 @Serializable
 enum class VoiceDispatchTarget(val string: String) {
-	/// Stock playback path (PLAY/PAUSE/NEXT/etc) - translated into the
-	/// SLIMO `NluMessage` and handed to the stock webapp.
-	@SerialName("stockPlayback")
-	StockPlayback("stockPlayback"),
-	/// Forwarded to the active webapp's voice handler.
-	@SerialName("activeWebapp")
-	ActiveWebapp("activeWebapp"),
+	/// Transport / playback effect, routed through the daemon's transport
+	/// controller or a player command to the companion.
+	@SerialName("playback")
+	Playback("playback"),
+	/// A daemon-local device setting (brightness, discoverable, power).
+	@SerialName("device")
+	Device("device"),
+	/// Phone call control over the companion's phone surface.
+	@SerialName("phone")
+	Phone("phone"),
+	/// Display-shaped intent handed to the active webapp to render.
+	@SerialName("display")
+	Display("display"),
 	/// Switched the active webapp via OPEN_WEBAPP.
 	@SerialName("webappSwitch")
 	WebappSwitch("webappSwitch"),
@@ -2780,7 +2815,6 @@ sealed class ConfigField {
 	@Serializable
 	@SerialName("enum")
 	data class Enum(val data: EnumField): ConfigField()
-	/// String semantics, masked in companion UI. No actual secure storage.
 	@Serializable
 	@SerialName("secret")
 	data class Secret(val data: StringField): ConfigField()
@@ -2794,27 +2828,12 @@ data class WebappInfo (
 	val role: WebappRole,
 	val version: String,
 	val description: String? = null,
-	/// sha256 of the icon bytes; presence means an icon exists. consumers
-	/// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
-	/// and cache keyed by this hash.
 	val iconHash: String? = null,
-	/// sha256 of the companion settings page declared by the manifest;
-	/// presence is the companion's cue to offer the settings UI.
 	val settingsHash: String? = null,
 	val config: List<ConfigField>,
 	val permissions: List<String>,
-	/// Plain-English description of the voice intents the webapp wants
-	/// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
-	/// "currently active extensions" section of the system prompt at
-	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
-	/// `None` opts the webapp out of voice integration.
-	val voiceGrammar: String? = null,
-	/// Declared art render sizes; the companion warms exactly these. `None`
-	/// means the canonical `{248, 96}` default applies.
+	val rendersVoiceDisplay: Boolean,
 	val art: ArtProfile? = null,
-	/// Opaque provenance token recorded at install time by whoever pushed
-	/// the bundle, conventionally the catalog source URL. The daemon stores
-	/// and returns it verbatim and never dereferences it.
 	val provenance: String? = null
 )
 
@@ -2833,22 +2852,12 @@ data class WebappManifest (
 	val version: String,
 	val description: String? = null,
 	val icon: String? = null,
-	/// Bundle-relative path to one self-contained HTML file the companion
-	/// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
 	val settings: String? = null,
 	val role: WebappRole? = null,
 	val config: List<ConfigField>? = null,
 	val permissions: List<String>? = null,
-	/// Optional plain-English description of the voice commands this
-	/// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
-	/// the grammars of all installed-and-active webapps into the system
-	/// prompt at inference. Webapps that don't declare a grammar opt out
-	/// of voice integration.
-	val voiceGrammar: String? = null,
-	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
+	val rendersVoiceDisplay: Boolean? = null,
 	val art: ArtProfile? = null,
-	/// Which system overlays the daemon injects into this webapp's page.
-	/// Omitted surfaces (and an omitted field) default to on.
 	val overlays: OverlayProfile? = null
 )
 

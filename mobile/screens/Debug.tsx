@@ -127,7 +127,11 @@ function StateDump({
             />
           ))}
           {snapshot.ancsAuthStatuses.map(a => (
-            <Row key={a.deviceId} label={`ANCS · ${a.deviceId}`} value={a.status} />
+            <Row
+              key={a.deviceId}
+              label={`ANCS · ${a.deviceId}`}
+              value={a.status}
+            />
           ))}
           {snapshot.libraryProvider ? (
             <Row label="library" value={snapshot.libraryProvider} />

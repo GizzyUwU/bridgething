@@ -128,7 +128,7 @@ public actor SpotifyResolver {
 
     private func isCatalogIntent(_ intent: String) -> Bool {
         switch intent {
-        case "PLAY", "ADD_TO_QUEUE", "ADD_TO_COLLECTION", "FOLLOW", "SHOW", "SEARCH":
+        case "PLAY", "ADD_TO_QUEUE", "ADD_TO_COLLECTION", "ADD_TO_PLAYLIST", "SHOW", "SEARCH":
             return true
         default:
             return false

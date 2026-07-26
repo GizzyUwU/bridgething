@@ -41,9 +41,10 @@ struct NluFastPathTests {
 
     @Test("rule order keeps overlapping repeat phrasings distinct")
     func ruleOrdering() {
-        #expect(NluFastPath.match("repeat this")?.intent == "REPEAT_ONE")
-        #expect(NluFastPath.match("repeat on")?.intent == "REPEAT_ON")
-        #expect(NluFastPath.match("repeat off")?.intent == "REPEAT_OFF")
+        #expect(NluFastPath.match("repeat this")?.intent == "SET_REPEAT")
+        #expect(NluFastPath.match("repeat this")?.slots.repeatMode == .one)
+        #expect(NluFastPath.match("repeat on")?.slots.repeatMode == .all)
+        #expect(NluFastPath.match("repeat off")?.slots.repeatMode == .off)
     }
 
     @Test("unhandled phrasings fall through instead of guessing")

@@ -104,7 +104,10 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
         return;
       case 'ancsAuthStatusChanged':
         set(s => ({
-          ancsAuthStatus: { ...s.ancsAuthStatus, [event.deviceId]: event.status },
+          ancsAuthStatus: {
+            ...s.ancsAuthStatus,
+            [event.deviceId]: event.status,
+          },
         }));
         return;
       case 'nowPlayingChanged':

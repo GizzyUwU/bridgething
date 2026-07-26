@@ -48,17 +48,24 @@ use crate::{
   bluetooth::{BluetoothMan, InboundGatewayMessage},
   ota::OtaOrchestrator,
   state::State,
+  transport::TransportController,
 };
 
 pub struct GatewayHandler {
   state: State,
   bluetooth: BluetoothMan,
   ota: OtaOrchestrator,
+  transport: TransportController,
 }
 
 impl GatewayHandler {
-  pub fn new(state: State, bluetooth: BluetoothMan, ota: OtaOrchestrator) -> Self {
-    Self { state, bluetooth, ota }
+  pub fn new(state: State, bluetooth: BluetoothMan, ota: OtaOrchestrator, transport: TransportController) -> Self {
+    Self {
+      state,
+      bluetooth,
+      ota,
+      transport,
+    }
   }
 
   pub async fn handle(&self, data: InboundGatewayMessage) -> HandlerResult {

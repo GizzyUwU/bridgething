@@ -2,24 +2,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-/// Confidence the companion-side NLU pipeline attaches to a resolved
-/// intent: a coarse "low" | "medium" | "high" level per channel, one for
-/// the intent match and one for the extracted slots.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NluConfidence {
-  /// "low" | "medium" | "high". The LLM emits one of these per channel.
   pub intent: String,
   pub slots: Option<String>,
 }
 
-/// One alternate interpretation the LLM surfaced alongside the primary.
-/// Populated when the LLM returns `ambiguous_alternates` in its
-/// json_schema output; consumed by the companion's CLARIFY UI so the
-/// user can pick.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -30,14 +21,6 @@ pub struct NluAlternate {
   pub slots: Option<NluSlots>,
 }
 
-/// Slot catalog. Every intent projects through this flat shape;
-/// per-intent slot allowlists are enforced by the json_schema grammar at
-/// decode time, not by this struct. The wire payload omits absent slots,
-/// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
-///
-/// String values are passed through verbatim from the user's transcript
-/// (no normalization at this layer); the SpotifyResolver may decorate
-/// the slots with a `uri` after catalog lookup.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -56,34 +39,104 @@ pub struct NluSlots {
   pub popularity_filter: Option<String>,
   pub entity_type: Option<String>,
   pub query: Option<String>,
-  /// WEBAPP_INTENT only: the filler-stripped natural-language command
-  /// the active webapp's voice grammar handler will parse.
-  pub raw_query: Option<String>,
-  /// WEBAPP_INTENT / OPEN_WEBAPP only.
-  pub webapp_id: Option<String>,
   pub webapp_name: Option<String>,
-  /// PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
-  /// but stock SLIMO expects an Array<string> envelope - the stock
-  /// translation wraps as needed.
   pub preset: Option<String>,
-  /// VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+  pub enabled: Option<bool>,
+  pub repeat_mode: Option<NluRepeatMode>,
+  pub seconds: Option<i32>,
+  pub speed: Option<NluPlaybackSpeed>,
+  pub direction: Option<NluDirection>,
   pub amount: Option<String>,
-  /// VOLUME_ABSOLUTE. 0-100.
   pub level: Option<u32>,
-  /// Post-resolution Spotify URI. Populated by the companion's
-  /// SpotifyResolver after the NLU stage; daemon dispatches directly
-  /// to playback when set.
+  pub brightness_mode: Option<NluBrightnessMode>,
+  pub view: Option<NluView>,
+  pub phone_action: Option<NluPhoneAction>,
+  pub system_action: Option<NluSystemAction>,
   pub uri: Option<String>,
 }
 
-/// What the companion-side NLU resolved an utterance to, sent across
-/// the gateway link for the daemon to dispatch. This is the bridgething-
-/// native shape; the daemon's stock-compat layer wraps it into the
-/// SLIMO `NluMessage` envelope when the active webapp is stock.
-///
-/// `transcript` is the ASR output the NLU ran on; carried so the daemon
-/// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
-/// stock-compat fallbacks have the raw query available.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluRepeatMode {
+  Off,
+  All,
+  One,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluPlaybackSpeed {
+  #[serde(rename = "1")]
+  One,
+  #[serde(rename = "1.2")]
+  OnePointTwo,
+  #[serde(rename = "1.5")]
+  OnePointFive,
+  #[serde(rename = "2")]
+  Two,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluDirection {
+  Up,
+  Down,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluBrightnessMode {
+  Auto,
+  Manual,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluView {
+  Library,
+  Presets,
+  Songs,
+  SavedEpisodes,
+  NewEpisodes,
+  Queue,
+  ThisArtist,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluPhoneAction {
+  Answer,
+  Decline,
+  End,
+  Hold,
+  Unhold,
+  Swap,
+  Merge,
+  Mute,
+  Unmute,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluSystemAction {
+  Reboot,
+  PowerOff,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -98,28 +151,16 @@ pub struct NluResolvedIntent {
   pub alternates: Option<Vec<NluAlternate>>,
 }
 
-/// Why dispatch declined to act on a `VoiceDispatch`. The companion
-/// surfaces these to the user (toast / UI hint); the daemon does not
-/// otherwise retain state about the failure.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum VoiceDispatchErrorCode {
-  /// WEBAPP_INTENT targeted a webapp_id that isn't installed.
-  WebappNotInstalled,
-  /// WEBAPP_INTENT targeted an installed webapp that isn't the active
-  /// one. Companion can prompt the user to switch.
-  WebappNotActive,
-  /// Active webapp accepted the dispatch but reported an error.
-  WebappRefused,
-  /// Intent is CLARIFY / NO_INTENT - companion should resolve at its
-  /// own edge rather than asking the daemon to dispatch.
+  WebappNotFound,
   NotDispatchable,
-  /// Stock playback target couldn't be resolved (no Spotify session,
-  /// missing slot, etc.).
+  Unsupported,
   PlaybackFailed,
-  /// Catch-all (io error, internal state machine glitch).
+  BadSlots,
   Internal,
 }
 
@@ -130,11 +171,15 @@ pub enum VoiceDispatchErrorCode {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum VoiceDispatchTarget {
-  /// Stock playback path (PLAY/PAUSE/NEXT/etc) - translated into the
-  /// SLIMO `NluMessage` and handed to the stock webapp.
-  StockPlayback,
-  /// Forwarded to the active webapp's voice handler.
-  ActiveWebapp,
+  /// Transport / playback effect, routed through the daemon's transport
+  /// controller or a player command to the companion.
+  Playback,
+  /// A daemon-local device setting (brightness, discoverable, power).
+  Device,
+  /// Phone call control over the companion's phone surface.
+  Phone,
+  /// Display-shaped intent handed to the active webapp to render.
+  Display,
   /// Switched the active webapp via OPEN_WEBAPP.
   WebappSwitch,
 }

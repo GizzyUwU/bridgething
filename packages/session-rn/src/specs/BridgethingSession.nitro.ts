@@ -372,9 +372,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnPeerDisconnected(callback: (peerId: string) => void): void;
   setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
-  setOnAncsAuthStatusChanged(
-    callback: (deviceId: string, status: BridgethingAncsAuthStatus) => void,
-  ): void;
+  setOnAncsAuthStatusChanged(callback: (deviceId: string, status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
   setLocalLogStreamingEnabled(enabled: boolean): void;

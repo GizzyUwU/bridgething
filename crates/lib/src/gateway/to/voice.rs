@@ -85,7 +85,6 @@ pub struct VoiceDispatched {
 pub struct VoiceDispatchFailed {
   pub code: VoiceDispatchErrorCode,
   pub intent: String,
-  pub webapp_id: Option<String>,
   pub msg: String,
 }
 

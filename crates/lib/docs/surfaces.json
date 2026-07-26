@@ -694,7 +694,7 @@
         },
         {
           "method": "targetsGet",
-          "description": "Webapp asks for the provider's remote endpoints. Served from the\ndaemon's held snapshot, so it costs no phone round trip; changes\nafterwards arrive as `TargetsChanged`.",
+          "description": "Webapp asks for the provider's remote endpoints",
           "response": "PlayerTargetsReply",
           "response_event": "onTargetsReply"
         }
@@ -878,12 +878,17 @@
     {
       "name": "voice",
       "title": "Voice",
-      "description": "Daemon -> webapp voice/NLU surface: mic state-change events and the\nreply to `voice.stateGet`.",
+      "description": "Daemon -> webapp voice/NLU surface: mic state-change events, resolved\ndisplay intents, and the reply to `voice.stateGet`.",
       "events": [
         {
           "method": "onStateChanged",
           "payload": "VoiceState",
           "payload_ref": "VoiceState"
+        },
+        {
+          "method": "onIntent",
+          "payload": "VoiceIntent",
+          "payload_ref": "VoiceIntent"
         }
       ],
       "requests": [
@@ -1745,8 +1750,7 @@
         {
           "name": "Secret",
           "payload": "StringField",
-          "payload_ref": "StringField",
-          "description": "String semantics, masked in companion UI. No actual secure storage."
+          "payload_ref": "StringField"
         }
       ]
     },
@@ -3470,6 +3474,270 @@
         }
       ]
     },
+    "NluBrightnessMode": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Auto"
+        },
+        {
+          "name": "Manual"
+        }
+      ]
+    },
+    "NluDirection": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Up"
+        },
+        {
+          "name": "Down"
+        }
+      ]
+    },
+    "NluPhoneAction": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Answer"
+        },
+        {
+          "name": "Decline"
+        },
+        {
+          "name": "End"
+        },
+        {
+          "name": "Hold"
+        },
+        {
+          "name": "Unhold"
+        },
+        {
+          "name": "Swap"
+        },
+        {
+          "name": "Merge"
+        },
+        {
+          "name": "Mute"
+        },
+        {
+          "name": "Unmute"
+        }
+      ]
+    },
+    "NluPlaybackSpeed": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "One"
+        },
+        {
+          "name": "OnePointTwo"
+        },
+        {
+          "name": "OnePointFive"
+        },
+        {
+          "name": "Two"
+        }
+      ]
+    },
+    "NluRepeatMode": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Off"
+        },
+        {
+          "name": "All"
+        },
+        {
+          "name": "One"
+        }
+      ]
+    },
+    "NluSlots": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "artist",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "track",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "album",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "playlist",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "podcast",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "episode",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "mood",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "genre",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "era",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "popularityFilter",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "entityType",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "webappName",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "preset",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "repeatMode",
+          "type": "NluRepeatMode",
+          "optional": true,
+          "type_ref": "NluRepeatMode"
+        },
+        {
+          "name": "seconds",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "speed",
+          "type": "NluPlaybackSpeed",
+          "optional": true,
+          "type_ref": "NluPlaybackSpeed"
+        },
+        {
+          "name": "direction",
+          "type": "NluDirection",
+          "optional": true,
+          "type_ref": "NluDirection"
+        },
+        {
+          "name": "amount",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "level",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "brightnessMode",
+          "type": "NluBrightnessMode",
+          "optional": true,
+          "type_ref": "NluBrightnessMode"
+        },
+        {
+          "name": "view",
+          "type": "NluView",
+          "optional": true,
+          "type_ref": "NluView"
+        },
+        {
+          "name": "phoneAction",
+          "type": "NluPhoneAction",
+          "optional": true,
+          "type_ref": "NluPhoneAction"
+        },
+        {
+          "name": "systemAction",
+          "type": "NluSystemAction",
+          "optional": true,
+          "type_ref": "NluSystemAction"
+        },
+        {
+          "name": "uri",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "NluSystemAction": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Reboot"
+        },
+        {
+          "name": "PowerOff"
+        }
+      ]
+    },
+    "NluView": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Library"
+        },
+        {
+          "name": "Presets"
+        },
+        {
+          "name": "Songs"
+        },
+        {
+          "name": "SavedEpisodes"
+        },
+        {
+          "name": "NewEpisodes"
+        },
+        {
+          "name": "Queue"
+        },
+        {
+          "name": "ThisArtist"
+        }
+      ]
+    },
     "Notification": {
       "kind": "struct",
       "description": "One notification surfaced from the connected companion's notification\ncenter. `id` is companion-stable for the lifetime of the notification\n- webapps pass it to `invokePositive`/`invokeNegative` and listen for\n`onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all\noptional because ANCS treats them as separate attribute fetches.",
@@ -4174,7 +4442,7 @@
     },
     "PlaybackTarget": {
       "kind": "struct",
-      "description": "A remote endpoint the current provider can move playback to. Only\nmeaningful when `SurfaceAvailability::playback_targets` is set; the\nlist never contains the Car Thing itself, which is a control surface\nand never an audio endpoint.\n\n`volume_percent` is `None` when the endpoint does not report volume.",
+      "description": "A remote endpoint the current provider can move playback to. Only\nmeaningful when `SurfaceAvailability::playback_targets` is set.\n\n`volume_percent` is `None` when the endpoint does not report volume.",
       "fields": [
         {
           "name": "id",
@@ -4393,8 +4661,7 @@
           "name": "target",
           "type": "PlaybackTarget",
           "optional": true,
-          "type_ref": "PlaybackTarget",
-          "description": "The endpoint the audio is coming out of, when it is not the phone\nitself. `None` means local playback, or a provider with no remote\nendpoint concept. Webapps render \"playing on <name>\" from this."
+          "type_ref": "PlaybackTarget"
         }
       ]
     },
@@ -4418,7 +4685,7 @@
     },
     "PlayerTargetsReply": {
       "kind": "struct",
-      "description": "Response to `targetsGet`, also carried by the `TargetsChanged` event.\nEmpty when no companion is attached, or when the provider has no\nremote endpoint concept - check `capabilities.available.playbackTargets`\nto tell \"none right now\" from \"never\".",
+      "description": "Response to `targetsGet`, also carried by the `TargetsChanged` event.",
       "fields": [
         {
           "name": "targets",
@@ -5027,8 +5294,7 @@
         },
         {
           "name": "playbackTargets",
-          "type": "boolean",
-          "description": "The active music provider can enumerate remote endpoints and move\nplayback between them. False for providers whose platform refuses to\nexpose routes (Apple Music), and whenever no glue is attached."
+          "type": "boolean"
         }
       ]
     },
@@ -5191,6 +5457,41 @@
         },
         {
           "name": "locale",
+          "type": "string"
+        }
+      ]
+    },
+    "VoiceDisplayIntent": {
+      "kind": "enum",
+      "description": "The display-shaped intents",
+      "variants": [
+        {
+          "name": "Search"
+        },
+        {
+          "name": "ShowView"
+        },
+        {
+          "name": "MoreLikeThis"
+        }
+      ]
+    },
+    "VoiceIntent": {
+      "kind": "struct",
+      "description": "A resolved display intent for the active webapp to render",
+      "fields": [
+        {
+          "name": "intent",
+          "type": "VoiceDisplayIntent",
+          "type_ref": "VoiceDisplayIntent"
+        },
+        {
+          "name": "slots",
+          "type": "NluSlots",
+          "type_ref": "NluSlots"
+        },
+        {
+          "name": "transcript",
           "type": "string"
         }
       ]
@@ -5416,14 +5717,12 @@
         {
           "name": "iconHash",
           "type": "string",
-          "optional": true,
-          "description": "sha256 of the icon bytes; presence means an icon exists. consumers\nfetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)\nand cache keyed by this hash."
+          "optional": true
         },
         {
           "name": "settingsHash",
           "type": "string",
-          "optional": true,
-          "description": "sha256 of the companion settings page declared by the manifest;\npresence is the companion's cue to offer the settings UI."
+          "optional": true
         },
         {
           "name": "config",
@@ -5435,23 +5734,19 @@
           "type": "string[]"
         },
         {
-          "name": "voiceGrammar",
-          "type": "string",
-          "optional": true,
-          "description": "Plain-English description of the voice intents the webapp wants\nWEBAPP_INTENT routing for. Companion-side NLU folds this into the\n\"currently active extensions\" section of the system prompt at\ninference, which is what makes WEBAPP_INTENT emission context-aware.\n`None` opts the webapp out of voice integration."
+          "name": "rendersVoiceDisplay",
+          "type": "boolean"
         },
         {
           "name": "art",
           "type": "ArtProfile",
           "optional": true,
-          "type_ref": "ArtProfile",
-          "description": "Declared art render sizes; the companion warms exactly these. `None`\nmeans the canonical `{248, 96}` default applies."
+          "type_ref": "ArtProfile"
         },
         {
           "name": "provenance",
           "type": "string",
-          "optional": true,
-          "description": "Opaque provenance token recorded at install time by whoever pushed\nthe bundle, conventionally the catalog source URL. The daemon stores\nand returns it verbatim and never dereferences it."
+          "optional": true
         }
       ]
     },

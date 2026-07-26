@@ -155,27 +155,12 @@ pub struct WebappInfo {
   pub role: WebappRole,
   pub version: String,
   pub description: Option<String>,
-  /// sha256 of the icon bytes; presence means an icon exists. consumers
-  /// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
-  /// and cache keyed by this hash.
   pub icon_hash: Option<String>,
-  /// sha256 of the companion settings page declared by the manifest;
-  /// presence is the companion's cue to offer the settings UI.
   pub settings_hash: Option<String>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
-  /// Plain-English description of the voice intents the webapp wants
-  /// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
-  /// "currently active extensions" section of the system prompt at
-  /// inference, which is what makes WEBAPP_INTENT emission context-aware.
-  /// `None` opts the webapp out of voice integration.
-  pub voice_grammar: Option<String>,
-  /// Declared art render sizes; the companion warms exactly these. `None`
-  /// means the canonical `{248, 96}` default applies.
+  pub renders_voice_display: bool,
   pub art: Option<ArtProfile>,
-  /// Opaque provenance token recorded at install time by whoever pushed
-  /// the bundle, conventionally the catalog source URL. The daemon stores
-  /// and returns it verbatim and never dereferences it.
   pub provenance: Option<String>,
 }
 
@@ -195,8 +180,6 @@ pub struct WebappManifest {
   pub version: String,
   pub description: Option<String>,
   pub icon: Option<String>,
-  /// Bundle-relative path to one self-contained HTML file the companion
-  /// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
   pub settings: Option<String>,
   #[serde(default)]
   pub role: WebappRole,
@@ -204,17 +187,10 @@ pub struct WebappManifest {
   pub config: Vec<ConfigField>,
   #[serde(default)]
   pub permissions: Vec<String>,
-  /// Optional plain-English description of the voice commands this
-  /// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
-  /// the grammars of all installed-and-active webapps into the system
-  /// prompt at inference. Webapps that don't declare a grammar opt out
-  /// of voice integration.
-  pub voice_grammar: Option<String>,
-  /// Declared art render sizes. Omitted falls back to `{248, 96}`.
+  #[serde(default)]
+  pub renders_voice_display: bool,
   #[serde(default)]
   pub art: Option<ArtProfile>,
-  /// Which system overlays the daemon injects into this webapp's page.
-  /// Omitted surfaces (and an omitted field) default to on.
   #[serde(default)]
   pub overlays: OverlayProfile,
 }
@@ -231,7 +207,6 @@ pub enum ConfigField {
   Number(NumberField),
   Boolean(BoolField),
   Enum(EnumField),
-  /// String semantics, masked in companion UI. No actual secure storage.
   Secret(StringField),
 }
 

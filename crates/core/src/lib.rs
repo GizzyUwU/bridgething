@@ -333,8 +333,8 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     install::seed_examples(&state.webapps, &examples_dir, &seed_marker).await;
   }
 
-  let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
-  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota);
+  let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport.clone());
+  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota, transport);
 
   let _input = input::InputManager::spawn(state.clone());
 

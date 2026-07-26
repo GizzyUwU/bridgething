@@ -27,13 +27,11 @@ struct NluSystemPromptTests {
                 "prompt lists intents the grammar rejects: \(prompt.subtracting(grammarIntents).sorted())")
     }
 
-    @Test("active webapps append an extensions block")
-    func webappBlock() {
-        let bare = NluSystemPrompt.build()
-        #expect(!bare.contains("Currently active extensions"))
-
-        let withApp = NluSystemPrompt.build(activeWebapps: [.init(id: "timer", voiceGrammar: "set a timer")])
-        #expect(withApp.contains("Currently active extensions"))
-        #expect(withApp.contains("- timer: set a timer"))
+    @Test("enum slot values are spelled out for every enum slot")
+    func enumSlotValues() {
+        let prompt = NluSystemPrompt.build()
+        for slot in ["repeat_mode", "speed", "direction", "brightness_mode", "view", "phone_action", "system_action"] {
+            #expect(prompt.contains("- \(slot):"), "prompt never lists values for \(slot)")
+        }
     }
 }
