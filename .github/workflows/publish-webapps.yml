@@ -64,6 +64,10 @@ jobs:
           set -euo pipefail
           published='[]'
 
+          # lsf exits 0 for a key that does not exist and simply prints nothing, so the output is the
+          # only usable signal; testing its exit status silently skips every upload.
+          exists() { [ -n "$(rclone lsf "r2:${R2_BUCKET}/$1" 2>/dev/null)" ]; }
+
           for dir in ${CATALOG_DIR}/*/; do
             slug=$(basename "$dir")
             [ -f "$dir/public/manifest.json" ] || { echo "$slug: no manifest, skipping"; continue; }
@@ -76,7 +80,7 @@ jobs:
             version=$(jq -r '.version' <<<"$meta")
 
             key="r/${id}/${version}.zip"
-            if [[ "$FORCE" != "true" ]] && rclone lsf "r2:${R2_BUCKET}/${key}" >/dev/null 2>&1; then
+            if [[ "$FORCE" != "true" ]] && exists "$key"; then
               echo "$slug $version already published; skipping"
               echo "::endgroup::"
               continue

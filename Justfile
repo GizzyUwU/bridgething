@@ -4,6 +4,10 @@
 
 cross_target := 'aarch64-unknown-linux-gnu'
 cross_target_dir := justfile_directory() / 'target-cross'
+cross_release_dir := justfile_directory() / 'target-cross-release'
+device_features := 'superbird'
+dev_profile := '--config profile.release.lto=false --config profile.release.codegen-units=32'
+release_build := 'cargo build --release --locked -p bridgething --target ' + cross_target + ' --no-default-features --features ' + device_features
 device_host := env_var_or_default('SUPERBIRD_HOST', 'bridgething.local')
 device_bt_mac := env_var_or_default('SUPERBIRD_BT_MAC', '30:E3:D6:03:96:1E')
 ssh_args := '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR'
@@ -101,10 +105,19 @@ build-image: submodules
 
 # Cross-build the daemon for the Car Thing.
 cross-build: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird --config profile.release.lto=false --config profile.release.codegen-units=32
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features {{device_features}} {{dev_profile}}
 
 cross-build-test: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "superbird,test-tap" --config profile.release.lto=false --config profile.release.codegen-units=32
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}},test-tap" {{dev_profile}}
+
+# Release-build the daemon inside the cross image. for any host without an aarch64 toolchain (mac).
+cross-release: build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross-release bridgething-build {{release_build}}
+
+# Release-build the daemon against a toolchain already on the host, provisioned by
+# scripts/cross-aarch64-deps.sh. this is the CI path; on a mac use cross-release instead.
+cross-release-native:
+  CARGO_TARGET_DIR={{cross_release_dir}} {{release_build}}
 
 # Cross-build then push the daemon to /opt/bridgething/daemon/
 push: cross-build

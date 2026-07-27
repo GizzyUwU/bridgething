@@ -202,11 +202,19 @@ jobs:
       - name: build the workspace packages the app imports
         run: bunx turbo run build --filter="@bridgething/mobile^..."
 
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: build the spotify client for android
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
-          cargo install cargo-ndk --locked
+          # cargo-ndk is a build-host tool, not part of the artifact; wrapping its own compile in
+          # sccache would evict device object code for something a binstall fetches prebuilt.
+          RUSTC_WRAPPER="" cargo install cargo-ndk --locked
           bash crates/spotify/scripts/build-jnilibs.sh
+          sccache --show-stats
 
       - name: build the release apk
         env:
@@ -328,8 +336,18 @@ jobs:
       - name: build the workspace packages the app imports
         run: bunx turbo run build --filter="@bridgething/mobile^..."
 
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      # five apple targets built from one crate graph, so the cache earns its keep here more than
+      # anywhere else in the pipeline.
       - name: build the spotify client for ios
-        run: bash crates/spotify/scripts/build-xcframework.sh
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: |
+          set -euo pipefail
+          bash crates/spotify/scripts/build-xcframework.sh
+          sccache --show-stats
 
       - name: nitro codegen
         working-directory: packages/session-rn

@@ -143,17 +143,27 @@ jobs:
           no_check_bucket = true
           EOF
 
-      - name: build the cross image
-        run: docker build -f scripts/cross-aarch64.Dockerfile -t bridgething-cross:aarch64 .
+      - uses: extractions/setup-just@v3
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: provision the aarch64 cross environment
+        run: sudo scripts/cross-aarch64-deps.sh crates/swupdate-sys/vendor/swupdate
 
       - name: cross-compile the daemon
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
         run: |
           set -euo pipefail
-          docker run --rm \
-            -v "$PWD:/work" -w /work \
-            bridgething-cross:aarch64 \
-            cargo build --release --locked --target aarch64-unknown-linux-gnu -p bridgething
-          file target/aarch64-unknown-linux-gnu/release/bridgething
+          just cross-release-native
+          file target-cross-release/aarch64-unknown-linux-gnu/release/bridgething
+          sccache --show-stats
 
       - run: bun install --frozen-lockfile
 
@@ -207,7 +217,7 @@ jobs:
         run: |
           set -euo pipefail
           command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
-          bin=target/aarch64-unknown-linux-gnu/release/bridgething
+          bin=target-cross-release/aarch64-unknown-linux-gnu/release/bridgething
           bin_size=$(stat -c%s "$bin")
           bin_sha=$(sha256sum "$bin" | cut -d' ' -f1)
           dispatch=""
@@ -215,7 +225,9 @@ jobs:
           # a key is written once: same version, same bytes, forever. skipping an existing one keeps
           # a re-run cheap and stops a changed-but-unbumped artifact from replacing what devices
           # already pinned a digest against.
-          exists() { rclone lsf "r2:${R2_BUCKET}/$1" >/dev/null 2>&1; }
+          # lsf exits 0 for a key that does not exist and simply prints nothing, so the output is the
+          # only usable signal; testing its exit status silently skips every upload.
+          exists() { [ -n "$(rclone lsf "r2:${R2_BUCKET}/$1" 2>/dev/null)" ]; }
 
           for ch in ${CHANNELS}; do
             echo "::group::$ch"
