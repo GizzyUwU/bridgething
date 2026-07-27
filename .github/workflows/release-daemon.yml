@@ -182,7 +182,17 @@ jobs:
           done
 
           echo "::group::stock"
-          ( cd .external/superbird-webapp && bun install --frozen-lockfile && bun pm trust --all && bun run build )
+          (
+            cd .external/superbird-webapp
+            bun install --frozen-lockfile
+            # bun exits nonzero when nothing was left to trust, which is the normal outcome once a
+            # dependency set stops shipping lifecycle scripts. any other failure is real.
+            if ! trust=$(bun pm trust --all 2>&1); then
+              grep -q '0 scripts ran' <<<"$trust" || { printf '%s\n' "$trust" >&2; exit 1; }
+            fi
+            printf '%s\n' "$trust"
+            bun run build
+          )
           install -m 0644 "$STOCK_FILES/manifest.json" .external/superbird-webapp/dist/manifest.json
           install -m 0644 "$STOCK_FILES/spotify.svg" .external/superbird-webapp/dist/spotify.svg
           zip_it stock .external/superbird-webapp/dist
