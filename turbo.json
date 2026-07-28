@@ -8,6 +8,11 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": ["dist/**", "native/**", "lib/**"]
     },
+    "nitro:codegen": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "nitro.json", "package.json"],
+      "outputs": ["nitrogen/generated/**"]
+    },
     "typecheck": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "ts/**", "scripts/**", "tsconfig*.json", "package.json"],

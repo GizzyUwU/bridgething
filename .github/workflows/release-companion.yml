@@ -202,6 +202,9 @@ jobs:
       - name: build the workspace packages the app imports
         run: bunx turbo run build --filter="@bridgething/mobile^..."
 
+      - name: nitro codegen
+        run: bunx turbo run nitro:codegen
+
       - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: build the spotify client for android
@@ -350,8 +353,7 @@ jobs:
           sccache --show-stats
 
       - name: nitro codegen
-        working-directory: packages/session-rn
-        run: bun run nitro:codegen
+        run: bunx turbo run nitro:codegen
 
       - name: pod install
         working-directory: mobile/ios
