@@ -143,36 +143,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # the runner ships ~19g free on / and the new-arch build spends it on sdk components, aar
-      # transforms, and cargo artifacts; running out corrupts gradle's fileHashes.bin mid-write.
-      # /mnt is the ephemeral disk and has ~50g spare, so the write-heavy caches are moved onto it
-      # rather than fought over on /. the swap grow is headroom for the fat-lto link of the spotify
-      # crate, which is the one step that can spike past what 16g of ram absorbs.
+      # the image leaves ~15g free on a single 72g root volume, and /mnt is part of it rather than a
+      # separate disk, so cargo artifacts, aar transforms and swap all compete for the same space;
+      # running out corrupts gradle's fileHashes.bin mid-write. swap still has to cover the fat-lto
+      # link of the spotify crate spiking past 7.8g of ram, but every gig of it costs build space.
       - name: reclaim runner disk
         run: |
           set -euo pipefail
-          df -h / /mnt
+          df -h /
 
           sudo rm -rf /usr/share/dotnet /usr/share/swift /usr/local/share/powershell \
-            /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/miniconda || true
+            /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/miniconda \
+            /usr/local/lib/node_modules /opt/microsoft /opt/pipx || true
           sudo docker image prune -af >/dev/null 2>&1 || true
 
-          for d in gradle cargo-target tmp; do
-            sudo install -d -o "$(id -u)" -g "$(id -g)" "/mnt/ci/$d"
-          done
-          {
-            echo "GRADLE_USER_HOME=/mnt/ci/gradle"
-            echo "CARGO_TARGET_DIR=/mnt/ci/cargo-target"
-            echo "TMPDIR=/mnt/ci/tmp"
-          } >>"$GITHUB_ENV"
-
           sudo swapoff /mnt/swapfile || true
-          sudo fallocate -l 16G /mnt/swapfile
+          sudo fallocate -l 10G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile >/dev/null
           sudo swapon /mnt/swapfile
 
-          df -h / /mnt
+          df -h /
           free -h
 
       - uses: oven-sh/setup-bun@v2
@@ -183,6 +174,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      # gradle downloads every dependency and redoes every aar transform on a fresh runner; this is
+      # the only thing that carries GRADLE_USER_HOME across runs.
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: install rclone (R2 client)
         if: needs.decide.outputs.publishing == 'true'
@@ -224,7 +219,8 @@ jobs:
           set -euo pipefail
           bash crates/spotify/scripts/build-jnilibs.sh
           sccache --show-stats
-          df -h / /mnt
+          df -h /
+          free -h
 
       - name: build the release apk
         env:
@@ -232,7 +228,7 @@ jobs:
         run: |
           set -euo pipefail
           # gradle dying of ENOSPC also kills the runner's log upload, so leave the disk state behind.
-          trap 'df -h / /mnt' EXIT
+          trap 'df -h /' EXIT
           [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
           bash mobile/scripts/build-apk.sh
 
@@ -410,8 +406,10 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           IPA: ${{ steps.ipa.outputs.path }}
-          GROUPS: ${{ inputs.testflight_groups }}
-          SUBMIT: ${{ inputs.testflight_submit }}
+          # asc refuses to publish without a group, and an external group needs the review
+          # submission before testers ever see the build, so a push has to supply both.
+          GROUPS: ${{ inputs.testflight_groups || 'public' }}
+          SUBMIT: ${{ inputs.testflight_submit || github.event_name == 'push' }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
         run: |
           set -euo pipefail
@@ -432,6 +430,7 @@ jobs:
           SHA256: ${{ steps.ipa.outputs.sha256 }}
         run: |
           set -euo pipefail
+          brew list rclone >/dev/null 2>&1 || brew install rclone
           mkdir -p ~/.config/rclone
           cat > ~/.config/rclone/rclone.conf <<EOF
           [r2]
