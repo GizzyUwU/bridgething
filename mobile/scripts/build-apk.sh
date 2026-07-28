@@ -21,8 +21,8 @@ else
 fi
 
 command -v bun >/dev/null || { echo "bun not found (required for nitro:codegen)" >&2; exit 1; }
-echo "== nitro:codegen (session-rn) =="
-( cd ../packages/session-rn && bun run nitro:codegen )
+echo "== nitro:codegen =="
+( cd .. && bunx turbo run nitro:codegen )
 
 echo "== gradle assembleRelease (jdk: $GRADLE_JAVA) =="
 ( cd android && JAVA_HOME="$GRADLE_JAVA" ./gradlew assembleRelease \

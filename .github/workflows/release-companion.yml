@@ -71,6 +71,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       android: ${{ steps.plan.outputs.android }}
       ios: ${{ steps.plan.outputs.ios }}
+      publishing: ${{ steps.plan.outputs.publishing }}
 
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +120,7 @@ jobs:
             echo "version=$version"
             echo "android=$(decide "$WANT_ANDROID" "$published_android")"
             echo "ios=$(decide "$WANT_IOS" "$published_ios")"
+            echo "publishing=$PUBLISHING"
           } >>"$GITHUB_OUTPUT"
 
           echo "companion $version | published: android ${published_android:-none}, ios ${published_ios:-none}"
@@ -183,7 +185,7 @@ jobs:
           java-version: "21"
 
       - name: install rclone (R2 client)
-        if: inputs.publish
+        if: needs.decide.outputs.publishing == 'true'
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone
@@ -208,6 +210,10 @@ jobs:
       - name: nitro codegen
         run: bunx turbo run nitro:codegen
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
       - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: build the spotify client for android
@@ -216,9 +222,6 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
-          # cargo-ndk is a build-host tool, not part of the artifact; wrapping its own compile in
-          # sccache would evict device object code for something a binstall fetches prebuilt.
-          RUSTC_WRAPPER="" cargo install cargo-ndk --locked
           bash crates/spotify/scripts/build-jnilibs.sh
           sccache --show-stats
           df -h / /mnt
@@ -248,10 +251,10 @@ jobs:
             echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)"
             echo "path=$apk"
           } >>"$GITHUB_OUTPUT"
-          echo "built companion $version"
+          echo "built companion $VERSION"
 
       - name: upload the apk and refresh companion.json
-        if: inputs.publish
+        if: needs.decide.outputs.publishing == 'true'
         env:
           VERSION: ${{ steps.apk.outputs.version }}
           SIZE: ${{ steps.apk.outputs.size }}
@@ -275,7 +278,7 @@ jobs:
             "public, max-age=300, must-revalidate"
 
       - name: purge the cloudflare edge
-        if: always() && inputs.publish
+        if: always() && needs.decide.outputs.publishing == 'true'
         env:
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
@@ -401,7 +404,7 @@ jobs:
           echo "sha256=$(shasum -a 256 "$ipa" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
 
       - name: upload to testflight
-        if: inputs.publish
+        if: needs.decide.outputs.publishing == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -422,7 +425,7 @@ jobs:
       # here. it is a key of its own rather than a field on companion.json, which the android job
       # writes concurrently and the site parses to a fixed shape.
       - name: record what was published
-        if: inputs.publish
+        if: needs.decide.outputs.publishing == 'true'
         env:
           BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
           SIZE: ${{ steps.ipa.outputs.size }}
@@ -455,7 +458,7 @@ jobs:
             "public, max-age=300, must-revalidate"
 
       - name: purge the cloudflare edge
-        if: always() && inputs.publish
+        if: always() && needs.decide.outputs.publishing == 'true'
         env:
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
