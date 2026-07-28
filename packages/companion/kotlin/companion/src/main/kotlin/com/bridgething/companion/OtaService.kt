@@ -37,6 +37,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -211,6 +212,34 @@ public class OtaService(
 
     public val events: Flow<OtaPollEvent> = eventsFlow.asSharedFlow()
 
+    private val storeChangesFlow = MutableSharedFlow<OtaStoreChange>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.SUSPEND,
+    )
+
+    public val storeChanges: Flow<OtaStoreChange> = storeChangesFlow.asSharedFlow()
+
+    private val runStore = OtaRunStore()
+
+    private suspend fun emit(event: OtaPollEvent) {
+        for (change in runStore.ingest(event, System.currentTimeMillis())) storeChangesFlow.emit(change)
+        eventsFlow.emit(event)
+    }
+
+    public fun retainedRuns(): List<OtaRun> = runStore.runs()
+
+    public fun retainedAvailable(): List<OtaAvailable> = runStore.available()
+
+    public fun retainedPollStatus(): OtaPollStatus = runStore.pollStatus()
+
+    public suspend fun dismissRun(deviceId: String) {
+        val cleared = runStore.dismiss(deviceId) ?: return
+        storeChangesFlow.emit(OtaStoreChange.Run(cleared))
+    }
+
+    public fun noteRunMeta(deviceId: String, daemonVersion: String, imageVersion: String): OtaRun? =
+        runStore.noteMeta(deviceId, daemonVersion, imageVersion)
+
     private val metaChangedFlow = MutableSharedFlow<Pair<String, BridgeThingMeta>>(
         replay = 16,
         extraBufferCapacity = 256,
@@ -348,16 +377,73 @@ public class OtaService(
         size: Long,
         provenance: String?,
         cacheDir: File,
+        webappId: String? = null,
+        webappName: String? = null,
     ): WebappInstallResult {
-        val bundle = try {
-            val expected = OtaArtifactDigest(size = size, sha256 = sha256)
-            downloadIfNeeded(url, File(cacheDir, "bridgething-webapp-bundles"), "webapp", url.substringAfterLast('/'), expected, null)
-        } catch (e: Throwable) {
-            return WebappInstallResult.Failed("bundle download failed: ${e.message ?: e.toString()}")
+        if (!tryBeginInFlight(deviceId)) return WebappInstallResult.Failed(IN_FLIGHT_REASON)
+        try {
+            val label = webappName ?: "app"
+            emit(
+                OtaPollEvent.Planned(
+                    deviceId = deviceId,
+                    kind = OtaKind.InstalledWebapp,
+                    release = "",
+                    daemonVersion = "",
+                    imageVersion = "",
+                    steps = listOf(
+                        OtaPlanStep(0, OtaStepKind.DOWNLOAD, label, size),
+                        OtaPlanStep(1, OtaStepKind.STREAM, label, size),
+                        OtaPlanStep(2, OtaStepKind.APPLY, "installing", 0L),
+                    ),
+                )
+            )
+            if (webappId != null || webappName != null) {
+                runStore.annotateWebapp(deviceId, webappId, webappName)?.let {
+                    storeChangesFlow.emit(OtaStoreChange.Run(it))
+                }
+            }
+
+            val onProgress: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
+                val step = if (snapshot is OtaPhaseSnapshot.Downloading) 0 else 1
+                emit(OtaPollEvent.Progress(deviceId, OtaKind.InstalledWebapp, step, snapshot))
+            }
+
+            val bundle = try {
+                val expected = OtaArtifactDigest(size = size, sha256 = sha256)
+                downloadIfNeeded(
+                    url,
+                    File(cacheDir, "bridgething-webapp-bundles"),
+                    "webapp",
+                    url.substringAfterLast('/'),
+                    expected,
+                    onProgress,
+                )
+            } catch (e: Throwable) {
+                val reason = "bundle download failed: ${e.message ?: e.toString()}"
+                emit(OtaPollEvent.Failed(deviceId, OtaKind.InstalledWebapp, reason))
+                return WebappInstallResult.Failed(reason)
+            }
+
+            val result = performWebappInstall(gateway, deviceId, bundle, provenance, onProgress)
+            runCatching { bundle.delete() }
+
+            when (result) {
+                is WebappInstallResult.Installed -> {
+                    emit(
+                        OtaPollEvent.Progress(
+                            deviceId, OtaKind.InstalledWebapp, 2,
+                            OtaPhaseSnapshot.Applying(OtaPhase.Writing, 100, 100, 0L),
+                        )
+                    )
+                    emit(OtaPollEvent.Updated(deviceId, OtaKind.InstalledWebapp, result.info.version))
+                }
+                is WebappInstallResult.Failed ->
+                    emit(OtaPollEvent.Failed(deviceId, OtaKind.InstalledWebapp, result.reason))
+            }
+            return result
+        } finally {
+            endInFlight(deviceId)
         }
-        val result = installWebapp(gateway, deviceId, bundle, provenance)
-        runCatching { bundle.delete() }
-        return result
     }
 
     public suspend fun installWebapp(
@@ -365,6 +451,22 @@ public class OtaService(
         deviceId: String,
         bundlePath: File,
         provenance: String?,
+        onProgress: (suspend (OtaPhaseSnapshot) -> Unit)? = null,
+    ): WebappInstallResult {
+        if (!tryBeginInFlight(deviceId)) return WebappInstallResult.Failed(IN_FLIGHT_REASON)
+        return try {
+            performWebappInstall(gateway, deviceId, bundlePath, provenance, onProgress)
+        } finally {
+            endInFlight(deviceId)
+        }
+    }
+
+    private suspend fun performWebappInstall(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: File,
+        provenance: String?,
+        onProgress: (suspend (OtaPhaseSnapshot) -> Unit)? = null,
     ): WebappInstallResult {
         val totalSize = try {
             bundlePath.length()
@@ -433,7 +535,7 @@ public class OtaService(
                 label = "webapp",
                 startOffset = resumeFrom.toLong(),
                 totalSize = totalSize,
-                emit = null,
+                emit = onProgress,
             )
         } catch (e: Throwable) {
             stopJobs()
@@ -479,15 +581,15 @@ public class OtaService(
 
     public suspend fun applyVersion(deviceId: String, channel: String, version: String, rootUrl: String) {
         val gateway = mutex.withLock { attachedGateway } ?: run {
-            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "gateway not attached"))
+            emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "gateway not attached"))
             return
         }
         val composite = OtaCompositeVersion.parse(version) ?: run {
-            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "'$version' is not a composite version"))
+            emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "'$version' is not a composite version"))
             return
         }
         val meta = deviceMetaMutex.withLock { deviceMeta[deviceId] } ?: run {
-            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "device meta not yet known"))
+            emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "device meta not yet known"))
             return
         }
         if (mutex.withLock { deviceId in inFlight }) return
@@ -581,7 +683,7 @@ public class OtaService(
             if (imageInstallTargets[deviceId] == meta.imageVersion) imageInstallTargets.remove(deviceId) else null
         }
         if (target != null) {
-            eventsFlow.emit(OtaPollEvent.Updated(deviceId = deviceId, kind = OtaKind.Image, version = target))
+            emit(OtaPollEvent.Updated(deviceId = deviceId, kind = OtaKind.Image, version = target))
             noteAutoPushResult(deviceId, failed = false)
         }
         if (isNew) wakePoll()
@@ -599,10 +701,10 @@ public class OtaService(
         val manifest = try {
             fetchManifest("${config.rootUrl.trimEnd('/')}/manifest.json")
         } catch (e: Throwable) {
-            eventsFlow.emit(OtaPollEvent.ManifestPollFailed(reason = e.message ?: e.toString()))
+            emit(OtaPollEvent.ManifestPollFailed(reason = e.message ?: e.toString()))
             return
         }
-        eventsFlow.emit(OtaPollEvent.ManifestPolled(updatedAt = manifest.updatedAt))
+        emit(OtaPollEvent.ManifestPolled(updatedAt = manifest.updatedAt))
 
         val snapshot = deviceMetaMutex.withLock { deviceMeta.toMap() }
         for ((deviceId, meta) in snapshot) {
@@ -637,7 +739,7 @@ public class OtaService(
         val imageDrift = meta.imageVersion != latest.image
         val daemonDrift = meta.appVersion != latest.daemon
         if (!imageDrift && !daemonDrift && webappDrift.isEmpty()) return
-        eventsFlow.emit(
+        emit(
             OtaPollEvent.UpdateAvailable(
                 deviceId = deviceId,
                 release = latest.composite,
@@ -800,7 +902,11 @@ public class OtaService(
         if (deviceId in inFlight) false else { inFlight.add(deviceId); true }
     }
 
-    private suspend fun endInFlight(deviceId: String) = mutex.withLock { inFlight.remove(deviceId) }
+    private suspend fun endInFlight(deviceId: String) = withContext(NonCancellable) {
+        mutex.withLock { inFlight.remove(deviceId) }
+        val kind = runStore.openRunKind(deviceId) ?: return@withContext
+        emit(OtaPollEvent.Failed(deviceId, kind, ABANDONED_REASON))
+    }
 
     private suspend fun autoPushReady(deviceId: String): Boolean {
         if (!linkStable(deviceId)) return false
@@ -877,7 +983,7 @@ public class OtaService(
             val cacheDir = effectiveCacheDir(config)
             val labelKind = if (pieces.any { it.kind == OtaKind.Daemon }) OtaKind.Daemon else OtaKind.BuiltinWebapp
             val plan = bandaidPlan(pieces)
-            eventsFlow.emit(OtaPollEvent.Planned(deviceId, labelKind, release, daemonVersion, imageVersion, plan))
+            emit(OtaPollEvent.Planned(deviceId, labelKind, release, daemonVersion, imageVersion, plan))
 
             suspend fun attempt(usePatch: Boolean): OtaPhaseSnapshot {
                 var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
@@ -885,7 +991,7 @@ public class OtaService(
                 val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
                     last = snapshot
                     cursor = routeStep(plan, cursor, snapshot)
-                    eventsFlow.emit(OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, stepId = plan[cursor].id, snapshot = snapshot))
+                    emit(OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, stepId = plan[cursor].id, snapshot = snapshot))
                 }
                 val artifacts = mutableListOf<BandaidArtifact>()
                 for (piece in pieces) {
@@ -922,11 +1028,11 @@ public class OtaService(
                 finalSnap = attempt(usePatch = false)
             }
             if (finalSnap is OtaPhaseSnapshot.Failed) {
-                eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = labelKind, reason = finalSnap.reason))
+                emit(OtaPollEvent.Failed(deviceId = deviceId, kind = labelKind, reason = finalSnap.reason))
                 noteAutoPushResult(deviceId, failed = true)
             } else {
                 for (piece in pieces) {
-                    eventsFlow.emit(OtaPollEvent.Updated(deviceId = deviceId, kind = piece.kind, version = piece.version))
+                    emit(OtaPollEvent.Updated(deviceId = deviceId, kind = piece.kind, version = piece.version))
                 }
                 noteAutoPushResult(deviceId, failed = false)
             }
@@ -953,13 +1059,13 @@ public class OtaService(
         try {
             val cacheDir = effectiveCacheDir(config)
             val plan = imagePlan(artifacts)
-            eventsFlow.emit(OtaPollEvent.Planned(deviceId, OtaKind.Image, release, daemonVersion, targetVersion, plan))
+            emit(OtaPollEvent.Planned(deviceId, OtaKind.Image, release, daemonVersion, targetVersion, plan))
             var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
             var cursor = 0
             val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
                 last = snapshot
                 cursor = routeStep(plan, cursor, snapshot)
-                eventsFlow.emit(OtaPollEvent.Progress(deviceId = deviceId, kind = OtaKind.Image, stepId = plan[cursor].id, snapshot = snapshot))
+                emit(OtaPollEvent.Progress(deviceId = deviceId, kind = OtaKind.Image, stepId = plan[cursor].id, snapshot = snapshot))
             }
             val swuLocal: File
             val zckLocal: File
@@ -980,7 +1086,7 @@ public class OtaService(
             } catch (e: Throwable) {
                 val reason = "image download failed: ${e.message ?: e.toString()}"
                 emit(OtaPhaseSnapshot.Failed(reason = reason))
-                eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = OtaKind.Image, reason = reason))
+                emit(OtaPollEvent.Failed(deviceId = deviceId, kind = OtaKind.Image, reason = reason))
                 noteAutoPushResult(deviceId, failed = true)
                 return
             }
@@ -1015,11 +1121,11 @@ public class OtaService(
         }
         when (terminal) {
             is OtaPhaseSnapshot.Completed, is OtaPhaseSnapshot.Staged ->
-                eventsFlow.emit(OtaPollEvent.Updated(deviceId = deviceId, kind = kind, version = version))
-            is OtaPhaseSnapshot.Failed -> eventsFlow.emit(
+                emit(OtaPollEvent.Updated(deviceId = deviceId, kind = kind, version = version))
+            is OtaPhaseSnapshot.Failed -> emit(
                 OtaPollEvent.Failed(deviceId = deviceId, kind = kind, reason = terminal.reason)
             )
-            else -> eventsFlow.emit(OtaPollEvent.Failed(
+            else -> emit(OtaPollEvent.Failed(
                 deviceId = deviceId, kind = kind,
                 reason = "update ended before completing (last phase: $terminal)",
             ))
@@ -1471,6 +1577,9 @@ public class OtaService(
     }
 
     private companion object {
+        const val IN_FLIGHT_REASON = "another update is already in flight for this device"
+        const val ABANDONED_REASON = "update ended without reporting a result"
+
         const val IMAGE_SWU_ASSET = "update.swu"
         const val SYSTEM_ZCK_ASSET = "system.img.zck"
         const val BOOT_ZCK_ASSET = "boot.vfat.zck"

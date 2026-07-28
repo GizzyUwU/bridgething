@@ -30,11 +30,14 @@ import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingPlayback
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingTrack
 import com.margelo.nitro.bridgething.session.BridgethingOtaChannelInfo
-import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
-import com.margelo.nitro.bridgething.session.BridgethingOtaEventKind
 import com.margelo.nitro.bridgething.session.BridgethingOtaKind
 import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
 import com.margelo.nitro.bridgething.session.BridgethingOtaPhase
+import com.margelo.nitro.bridgething.session.BridgethingOtaRun
+import com.margelo.nitro.bridgething.session.BridgethingOtaPollStatus
+import com.margelo.nitro.bridgething.session.BridgethingOtaOutcome
+import com.margelo.nitro.bridgething.session.BridgethingOtaAvailable
+import com.margelo.nitro.bridgething.session.BridgethingDeviceWebappsEntry
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingOtaRelease
 import com.margelo.nitro.bridgething.session.BridgethingOtaStep
@@ -47,6 +50,8 @@ import com.margelo.nitro.bridgething.session.BridgethingServiceHealthKind
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
+import com.margelo.nitro.bridgething.session.BridgethingWebappSlot
+import com.margelo.nitro.bridgething.session.BridgethingWebappSlots
 import com.margelo.nitro.bridgething.session.BridgethingWebappRole
 import com.margelo.nitro.bridgething.session.BridgethingWebappSource
 import com.bridgething.companion.AncsSetupKind
@@ -61,6 +66,12 @@ import com.bridgething.companion.OtaDiscoverManifest
 import com.bridgething.companion.OtaPhaseSnapshot
 import com.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import com.bridgething.companion.OtaPollEvent
+import com.bridgething.companion.OtaStoreChange
+import com.bridgething.companion.OtaRunPhase
+import com.bridgething.companion.OtaRunOutcome
+import com.bridgething.companion.OtaRun
+import com.bridgething.companion.OtaPollStatus
+import com.bridgething.companion.OtaAvailable
 import com.bridgething.companion.OtaStepKind
 import com.bridgething.companion.WebappInstallResult
 import com.bridgething.gateway.GatewayEvent
@@ -97,19 +108,22 @@ import com.bridgething.schema.WebappResourceKind
 import com.bridgething.schema.WebappInfo
 import com.bridgething.schema.WebappRole
 import com.bridgething.schema.WebappSource
+import com.bridgething.schema.WebappSetSlot
+import com.bridgething.schema.WebappSlot
+import com.bridgething.schema.WebappSlots
 import com.bridgething.schema.WebappSwitchTo
 import com.bridgething.schema.WebappUninstall
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
-import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -141,6 +155,7 @@ public class HybridBridgethingSessionImpl(
         )
         public var lyricsResolver: LyricsResolver = LrclibResolver()
 
+        private const val WEBAPPS_READ_ATTEMPTS = 3
         private const val REQUEST_DIALER_ROLE = 0xBA02
         private const val AUTO_RESUME_PREFIX = "autoresume."
         private const val CONNECTED_PROVIDERS_KEY = "connectedProviders"
@@ -159,6 +174,9 @@ public class HybridBridgethingSessionImpl(
 
     @Volatile
     private var lastNowPlaying: BridgethingNowPlaying? = null
+
+    private val foregroundGen = java.util.concurrent.atomic.AtomicLong(0)
+    private val webappsGen = ConcurrentHashMap<String, Long>()
 
     private val connectJobs = ConcurrentHashMap<String, Job>()
     private val authStates = ConcurrentHashMap<String, BridgethingAuthState>()
@@ -190,7 +208,7 @@ public class HybridBridgethingSessionImpl(
     private var onLog: ((String, String) -> Unit)? = null
 
     @Volatile
-    private var onWebappsChanged: ((String) -> Unit)? = null
+    private var onWebappsChanged: ((BridgethingDeviceWebappsEntry) -> Unit)? = null
 
     @Volatile
     private var onWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
@@ -199,7 +217,10 @@ public class HybridBridgethingSessionImpl(
     private var onDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
 
     @Volatile
-    private var onOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
+    private var onOtaRunChanged: ((BridgethingOtaRun) -> Unit)? = null
+    private var onOtaAvailableChanged: ((BridgethingOtaAvailable) -> Unit)? = null
+    private var onOtaPollChanged: ((BridgethingOtaPollStatus) -> Unit)? = null
+    private var onResumed: ((BridgethingSessionSnapshot) -> Unit)? = null
 
     private val prefs by lazy {
         context.applicationContext.getSharedPreferences("bridgething.session", Context.MODE_PRIVATE)
@@ -224,10 +245,12 @@ public class HybridBridgethingSessionImpl(
         if (logStreamingDesired) scope.launch { c.setDeviceLogStreaming(true) }
         if (localLogStreamingDesired) c.setLocalLogStreaming(true)
         eventsJob = scope.launch { c.gateway.events.collect { event -> safeEmit { handleGatewayEvent(event) } } }
-        otaJob = scope.launch { c.ota.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onOtaEvent?.invoke(toRnOtaEvent(ev)) } } }
+        otaJob = scope.launch { c.ota.storeChanges.collect { change -> safeEmit { emitOtaStoreChange(change) } } }
         deviceMetaJob = scope.launch {
             c.ota.metaChanged.collect { (id, meta) ->
                 safeEmit { if (CompanionHolder.foreground) onDeviceMetaChanged?.invoke(id, toRnDeviceMeta(meta)) }
+                c.ota.noteRunMeta(id, meta.appVersion, meta.imageVersion)
+                    ?.let { safeEmit { emitOtaStoreChange(OtaStoreChange.Run(it)) } }
             }
         }
         webappDocJob = scope.launch {
@@ -398,6 +421,11 @@ public class HybridBridgethingSessionImpl(
                 deviceMetaEntries.add(BridgethingDeviceMetaEntry(deviceId = id, meta = toRnDeviceMeta(meta)))
             }
         }
+        val webappEntries = mutableListOf<BridgethingDeviceWebappsEntry>()
+        for (peer in peers.values) {
+            if (peer.status != BridgethingPeerLinkStatus.CONNECTED) continue
+            webappsEntry(peer.id)?.let { webappEntries.add(it) }
+        }
         return BridgethingSessionSnapshot(
             hostInfo = rnHostInfo(),
             providers = providerInfos(),
@@ -409,6 +437,10 @@ public class HybridBridgethingSessionImpl(
             deviceMeta = deviceMetaEntries.toTypedArray(),
             capabilityFlags = loadCapabilityFlags(),
             otaPollConfig = loadOtaPollConfig(),
+            webapps = webappEntries.toTypedArray(),
+            otaRuns = (c?.ota?.retainedRuns() ?: emptyList()).map { toRnOtaRun(it) }.toTypedArray(),
+            otaAvailable = (c?.ota?.retainedAvailable() ?: emptyList()).map { toRnOtaAvailable(it) }.toTypedArray(),
+            otaPoll = toRnOtaPollStatus(c?.ota?.retainedPollStatus() ?: OtaPollStatus()),
         )
     }
 
@@ -496,8 +528,8 @@ public class HybridBridgethingSessionImpl(
     override suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp? {
         val c = requireCompanion(deviceId)
         val value = unwrapVoid(c.gateway.webapp.getActive(deviceId), "currentWebapp")
-        val idBytes = value.id ?: return null
-        return BridgethingActiveWebapp(id = uuidFromBytes(idBytes).toString(), name = value.name)
+        val id = value.id ?: return null
+        return BridgethingActiveWebapp(id = id.toString(), name = value.name)
     }
 
     override suspend fun installWebapp(deviceId: String, sourceUri: String): BridgethingWebappInfo {
@@ -528,6 +560,25 @@ public class HybridBridgethingSessionImpl(
         val c = requireCompanion(deviceId)
         unwrapWebapp(c.gateway.webapp.switchTo(deviceId, WebappSwitchTo(uuid)), "switchWebapp")
         emitWebappsChanged(deviceId)
+    }
+
+    override suspend fun getWebappSlots(deviceId: String): BridgethingWebappSlots {
+        val c = requireCompanion(deviceId)
+        return toRnWebappSlots(unwrapWebapp(c.gateway.webapp.getSlots(deviceId), "getWebappSlots"))
+    }
+
+    override suspend fun setWebappSlot(deviceId: String, slot: BridgethingWebappSlot, id: String?): BridgethingWebappSlots {
+        val c = requireCompanion(deviceId)
+        val target = when (slot) {
+            BridgethingWebappSlot.LAUNCHER -> WebappSlot.Launcher
+            BridgethingWebappSlot.OVERLAY -> WebappSlot.Overlay
+        }
+        val reply = unwrapWebapp(
+            c.gateway.webapp.setSlot(deviceId, WebappSetSlot(target, id?.let { parseUuid(it) })),
+            "setWebappSlot",
+        )
+        emitWebappsChanged(deviceId)
+        return toRnWebappSlots(reply)
     }
 
     override suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon? {
@@ -668,6 +719,8 @@ public class HybridBridgethingSessionImpl(
         sha256: String,
         size: Double,
         provenance: String?,
+        webappId: String?,
+        webappName: String?,
     ): BridgethingWebappInfo {
         val c = requireCompanion(deviceId)
         val result = c.ota.installWebappFromUrl(
@@ -678,6 +731,8 @@ public class HybridBridgethingSessionImpl(
             size = size.toLong(),
             provenance = provenance,
             cacheDir = context.cacheDir ?: java.io.File(System.getProperty("java.io.tmpdir") ?: "."),
+            webappId = webappId,
+            webappName = webappName,
         )
         return when (result) {
             is WebappInstallResult.Installed -> {
@@ -948,10 +1003,16 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
+    override fun setOnWebappsChanged(callback: (BridgethingDeviceWebappsEntry) -> Unit) { onWebappsChanged = callback }
     override fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit) { onWebappDocChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
-    override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
+    override fun setOnOtaRunChanged(callback: (BridgethingOtaRun) -> Unit) { onOtaRunChanged = callback }
+
+    override fun setOnOtaAvailableChanged(callback: (BridgethingOtaAvailable) -> Unit) { onOtaAvailableChanged = callback }
+
+    override fun setOnOtaPollChanged(callback: (BridgethingOtaPollStatus) -> Unit) { onOtaPollChanged = callback }
+
+    override fun setOnResumed(callback: (BridgethingSessionSnapshot) -> Unit) { onResumed = callback }
 
     private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
         val c = stateLock.withLock { companion } ?: throw IllegalStateException("session not started")
@@ -965,13 +1026,54 @@ public class HybridBridgethingSessionImpl(
         throw IllegalArgumentException("invalid uuid: $id")
     }
 
-    private fun uuidFromBytes(bytes: ByteArray): UUID {
-        val bb = ByteBuffer.wrap(bytes)
-        return UUID(bb.long, bb.long)
+    private fun emitWebappsChanged(deviceId: String) {
+        val gen = webappsGen.compute(deviceId) { _, prev -> (prev ?: 0L) + 1L }
+        scope.launch {
+            repeat(WEBAPPS_READ_ATTEMPTS) { attempt ->
+                if (webappsGen[deviceId] != gen) return@launch
+                val entry = webappsEntry(deviceId)
+                if (entry != null) {
+                    if (webappsGen[deviceId] != gen) return@launch
+                    safeEmit { if (CompanionHolder.foreground) onWebappsChanged?.invoke(entry) }
+                    return@launch
+                }
+                if (attempt < WEBAPPS_READ_ATTEMPTS - 1) delay(400L * (attempt + 1))
+            }
+        }
     }
 
-    private fun emitWebappsChanged(deviceId: String) {
-        if (CompanionHolder.foreground) onWebappsChanged?.invoke(deviceId)
+    private suspend fun webappsEntry(deviceId: String): BridgethingDeviceWebappsEntry? {
+        val list = runCatching { listWebapps(deviceId) }.getOrNull() ?: return null
+        val active = runCatching { currentWebapp(deviceId) }.getOrNull()
+        return BridgethingDeviceWebappsEntry(deviceId = deviceId, webapps = list, active = active)
+    }
+
+    private fun emitOtaStoreChange(change: OtaStoreChange) {
+        if (!CompanionHolder.foreground) return
+        when (change) {
+            is OtaStoreChange.Run -> onOtaRunChanged?.invoke(toRnOtaRun(change.run))
+            is OtaStoreChange.Available -> onOtaAvailableChanged?.invoke(toRnOtaAvailable(change.available))
+            is OtaStoreChange.Poll -> onOtaPollChanged?.invoke(toRnOtaPollStatus(change.status))
+        }
+    }
+
+    public fun resumeForeground() {
+        val gen = foregroundGen.incrementAndGet()
+        scope.launch {
+            val snap = snapshot()
+            if (foregroundGen.get() != gen) return@launch
+            CompanionHolder.foreground = true
+            safeEmit { onResumed?.invoke(snap) }
+        }
+    }
+
+    init {
+        CompanionHolder.onForeground = { resumeForeground() }
+        CompanionHolder.onBackground = { foregroundGen.incrementAndGet() }
+    }
+
+    override suspend fun dismissOtaRun(deviceId: String) {
+        stateLock.withLock { companion }?.ota?.dismissRun(deviceId)
     }
 
     private fun <T> unwrapVoid(result: RequestResult<T, Nothing>, label: String): T = when (result) {
@@ -1026,8 +1128,14 @@ public class HybridBridgethingSessionImpl(
         description = info.description,
         iconHash = info.iconHash,
         settingsHash = info.settingsHash,
+        overlayHash = info.overlayHash,
         config = info.config.map(::toRnConfigField).toTypedArray(),
         permissions = info.permissions.toTypedArray(),
+    )
+
+    private fun toRnWebappSlots(slots: WebappSlots): BridgethingWebappSlots = BridgethingWebappSlots(
+        launcher = slots.launcher?.toString(),
+        overlay = slots.overlay?.toString(),
     )
 
     private fun toRnConfigField(field: ConfigField): BridgethingConfigField = when (field) {
@@ -1077,6 +1185,7 @@ public class HybridBridgethingSessionImpl(
             }
             is GatewayEvent.Disconnected -> {
                 peers.remove(event.deviceId)
+                webappsGen.remove(event.deviceId)
                 if (CompanionHolder.foreground) onPeerDisconnected?.invoke(event.deviceId)
             }
             is GatewayEvent.LinkFailed -> {
@@ -1178,138 +1287,64 @@ public class HybridBridgethingSessionImpl(
         RepeatMode.All -> BridgethingRepeatMode.ALL
     }
 
-    private fun toRnOtaEvent(ev: OtaPollEvent): BridgethingOtaEvent = when (ev) {
-        is OtaPollEvent.ManifestPolled -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.MANIFESTPOLLED, updatedAt = ev.updatedAt,
-        )
-        is OtaPollEvent.ManifestPollFailed -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.MANIFESTPOLLFAILED, reason = ev.reason,
-        )
-        is OtaPollEvent.UpdateAvailable -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.UPDATEAVAILABLE,
-            deviceId = ev.deviceId, toVersion = ev.release,
-            releaseVersion = ev.release, daemonVersion = ev.daemonVersion, imageVersion = ev.imageVersion,
-        )
-        is OtaPollEvent.Planned -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PLANNED,
-            deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind),
-            releaseVersion = ev.release, daemonVersion = ev.daemonVersion, imageVersion = ev.imageVersion,
-            steps = ev.steps.map { BridgethingOtaStep(it.id.toDouble(), toRnStepKind(it.kind), it.label, it.bytes.toDouble()) }.toTypedArray(),
-        )
-        is OtaPollEvent.Progress -> snapshotToEvent(ev.deviceId, toRnOtaKind(ev.kind), ev.stepId.toDouble(), ev.snapshot)
-        is OtaPollEvent.Updated -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.UPDATED,
-            deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind), toVersion = ev.version,
-        )
-        is OtaPollEvent.Failed -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.FAILED,
-            deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind), reason = ev.reason,
-        )
+    private fun toRnOtaRunPhase(p: OtaRunPhase): BridgethingOtaPhase = when (p) {
+        OtaRunPhase.IDLE -> BridgethingOtaPhase.IDLE
+        OtaRunPhase.DOWNLOADING -> BridgethingOtaPhase.DOWNLOADING
+        OtaRunPhase.STREAMING -> BridgethingOtaPhase.STREAMING
+        OtaRunPhase.VERIFYING -> BridgethingOtaPhase.VERIFYING
+        OtaRunPhase.WRITING -> BridgethingOtaPhase.WRITING
+        OtaRunPhase.CONFIRMING -> BridgethingOtaPhase.CONFIRMING
+        OtaRunPhase.REBOOT -> BridgethingOtaPhase.REBOOT
+        OtaRunPhase.COMPLETED -> BridgethingOtaPhase.COMPLETED
+        OtaRunPhase.FAILED -> BridgethingOtaPhase.FAILED
     }
 
-    private fun bytePercent(n: Long, d: Long): Double =
-        if (d <= 0L) 0.0 else minOf(100.0, n.toDouble() * 100 / d.toDouble())
-
-    private fun snapshotToEvent(
-        deviceId: String,
-        otaKind: BridgethingOtaKind,
-        stepId: Double,
-        snapshot: OtaPhaseSnapshot,
-    ): BridgethingOtaEvent = when (snapshot) {
-        OtaPhaseSnapshot.Idle -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-            phase = BridgethingOtaPhase.IDLE, percent = 0.0,
-        )
-        is OtaPhaseSnapshot.Downloading -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-            phase = BridgethingOtaPhase.DOWNLOADING, percent = bytePercent(snapshot.received, snapshot.total),
-            stageAsset = snapshot.asset, stageReceived = snapshot.received.toDouble(),
-            stageTotal = snapshot.total.toDouble(), stageRatePerSec = snapshot.ratePerSec,
-        )
-        is OtaPhaseSnapshot.Streaming -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-            phase = BridgethingOtaPhase.STREAMING, percent = bytePercent(snapshot.sent, snapshot.total),
-            stageAsset = snapshot.asset, stageReceived = snapshot.sent.toDouble(), stageTotal = snapshot.total.toDouble(),
-            stageRatePerSec = snapshot.ratePerSec, stageEtaSeconds = snapshot.etaSeconds,
-        )
-        is OtaPhaseSnapshot.Applying -> {
-            val rnPhase = when (snapshot.phase) {
-                OtaPhase.Streaming -> BridgethingOtaPhase.STREAMING
-                OtaPhase.Verifying -> BridgethingOtaPhase.VERIFYING
-                OtaPhase.Writing -> BridgethingOtaPhase.WRITING
-                OtaPhase.Confirming -> BridgethingOtaPhase.CONFIRMING
-                OtaPhase.Reboot -> BridgethingOtaPhase.REBOOT
-            }
-            makeOtaEvent(
-                kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-                phase = rnPhase, percent = snapshot.writePercent.toDouble(), dwlPercent = snapshot.dwlPercent.toDouble(),
-                stageReceived = snapshot.dwlBytes.takeIf { snapshot.dwlPercent < 100 && it > 0 }?.toDouble(),
-            )
-        }
-        OtaPhaseSnapshot.Staged -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-            phase = BridgethingOtaPhase.WRITING, percent = 100.0,
-        )
-        OtaPhaseSnapshot.Completed -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind, stepId = stepId,
-            phase = BridgethingOtaPhase.COMPLETED, percent = 100.0,
-        )
-        is OtaPhaseSnapshot.Failed -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.PROGRESS, reason = snapshot.reason, deviceId = deviceId,
-            otaKind = otaKind, stepId = stepId, phase = BridgethingOtaPhase.FAILED, percent = 0.0,
-        )
+    private fun toRnOtaOutcome(o: OtaRunOutcome): BridgethingOtaOutcome = when (o) {
+        OtaRunOutcome.SUCCEEDED -> BridgethingOtaOutcome.SUCCEEDED
+        OtaRunOutcome.FAILED -> BridgethingOtaOutcome.FAILED
+        OtaRunOutcome.CANCELLED -> BridgethingOtaOutcome.CANCELLED
     }
 
-    private fun toRnOtaKind(kind: OtaKind): BridgethingOtaKind = when (kind) {
+    private fun toRnOtaRun(run: OtaRun): BridgethingOtaRun = BridgethingOtaRun(
+        runId = run.runId,
+        deviceId = run.deviceId,
+        otaKind = toRnOtaKind(run.kind),
+        phase = toRnOtaRunPhase(run.phase),
+        steps = run.steps.map {
+            BridgethingOtaStep(it.id.toDouble(), toRnStepKind(it.kind), it.label, it.bytes.toDouble())
+        }.toTypedArray(),
+        stepId = run.stepId.toDouble(),
+        startedAt = run.startedAt.toDouble(),
+        phaseStartedAt = run.phaseStartedAt.toDouble(),
+        stageReceived = run.stageReceived?.toDouble(),
+        stageTotal = run.stageTotal?.toDouble(),
+        ratePerSec = run.ratePerSec,
+        dwlPercent = run.dwlPercent?.toDouble(),
+        outcome = run.outcome?.let { toRnOtaOutcome(it) },
+        error = run.error,
+        releaseVersion = run.releaseVersion,
+        daemonVersion = run.daemonVersion,
+        imageVersion = run.imageVersion,
+        webappId = run.webappId,
+        webappName = run.webappName,
+    )
+
+    private fun toRnOtaAvailable(a: OtaAvailable): BridgethingOtaAvailable = BridgethingOtaAvailable(
+        deviceId = a.deviceId,
+        releaseVersion = a.releaseVersion,
+        daemonVersion = a.daemonVersion,
+        imageVersion = a.imageVersion,
+    )
+
+    private fun toRnOtaPollStatus(s: OtaPollStatus): BridgethingOtaPollStatus =
+        BridgethingOtaPollStatus(lastPolledAt = s.lastPolledAt, error = s.error)
+
+    private fun toRnOtaKind(k: OtaKind): BridgethingOtaKind = when (k) {
         OtaKind.Image -> BridgethingOtaKind.IMAGE
         OtaKind.Daemon -> BridgethingOtaKind.DAEMON
         OtaKind.BuiltinWebapp -> BridgethingOtaKind.BUILTINWEBAPP
-        OtaKind.InstalledWebapp -> error("installed-webapp does not flow through OTA events")
+        OtaKind.InstalledWebapp -> BridgethingOtaKind.INSTALLEDWEBAPP
     }
-
-    private fun makeOtaEvent(
-        kind: BridgethingOtaEventKind,
-        updatedAt: String? = null,
-        reason: String? = null,
-        deviceId: String? = null,
-        otaKind: BridgethingOtaKind? = null,
-        fromVersion: String? = null,
-        toVersion: String? = null,
-        releaseVersion: String? = null,
-        daemonVersion: String? = null,
-        imageVersion: String? = null,
-        steps: Array<BridgethingOtaStep>? = null,
-        stepId: Double? = null,
-        phase: BridgethingOtaPhase? = null,
-        percent: Double? = null,
-        dwlPercent: Double? = null,
-        stageAsset: String? = null,
-        stageReceived: Double? = null,
-        stageTotal: Double? = null,
-        stageRatePerSec: Double? = null,
-        stageEtaSeconds: Double? = null,
-    ): BridgethingOtaEvent = BridgethingOtaEvent(
-        kind = kind,
-        updatedAt = updatedAt,
-        reason = reason,
-        deviceId = deviceId,
-        otaKind = otaKind,
-        fromVersion = fromVersion,
-        toVersion = toVersion,
-        releaseVersion = releaseVersion,
-        daemonVersion = daemonVersion,
-        imageVersion = imageVersion,
-        steps = steps,
-        stepId = stepId,
-        phase = phase,
-        percent = percent,
-        dwlPercent = dwlPercent,
-        stageAsset = stageAsset,
-        stageReceived = stageReceived,
-        stageTotal = stageTotal,
-        stageRatePerSec = stageRatePerSec,
-        stageEtaSeconds = stageEtaSeconds,
-    )
 
     private fun toRnStepKind(k: OtaStepKind): BridgethingOtaStepKind = when (k) {
         OtaStepKind.DOWNLOAD -> BridgethingOtaStepKind.DOWNLOAD
@@ -1317,5 +1352,4 @@ public class HybridBridgethingSessionImpl(
         OtaStepKind.APPLY -> BridgethingOtaStepKind.APPLY
         OtaStepKind.REBOOT -> BridgethingOtaStepKind.REBOOT
     }
-
 }

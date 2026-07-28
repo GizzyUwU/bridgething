@@ -1,12 +1,9 @@
 #!/usr/bin/env bun
-// Build this webapp and install it onto a connected Car Thing: rsync dist/ to
-// the device, then tell the daemon to switch the kiosk to it. You own this
-// script; tweak it freely.
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 function parseUuid(s: string): Uint8Array {
   const hex = s.replace(/-/g, '').toLowerCase();
@@ -25,6 +22,12 @@ function freshMsgId(): Uint8Array {
 function uuidToString(bytes: Uint8Array): string {
   const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function bundleDirName(id: string): string {
+  const hex = id.replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error(`manifest id is not a uuid: ${id}`);
+  return hex;
 }
 
 const FRAME_HEADER_LENGTH = 16;
@@ -98,107 +101,82 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-type SwitchOutcome =
-  | { ok: true; activeId: Uint8Array | null; activeName: string | null }
-  | { ok: false; reason: string };
+const ANNOUNCE_DATA = {
+  type: 'capabilities',
+  data: {
+    event: 'announce',
+    data: {
+      gateway: {
+        address: '',
+        name: 'bridgething-webapp-push',
+        osName: 'host',
+        appName: 'bridgething-webapp-push',
+        appVersion: '0.1.0',
+        adapterVersion: 'host',
+        libVersion: 'v0',
+        libbridgethingVersion: 'v0',
+      },
+      uriSchemes: [],
+      network: { kind: 'unknown', metered: false },
+      available: { geo: false, notifications: false, netFetch: false, netWs: false, audioTts: false },
+      audio: { earcons: [], voices: [] },
+    },
+  },
+};
 
-async function sendSwitchTo(host: string, port: number, manifestId: string): Promise<SwitchOutcome> {
+function sendRequest(host: string, port: number, data: unknown): Promise<unknown | null> {
   const url = `ws://${host}:${port}/`;
-  console.log(`gateway ${url}`);
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
   const acc = new FrameAccumulator();
+  const requestId = freshMsgId();
+  let sent = false;
 
-  const announce: GatewayMsg = {
-    id: freshMsgId(),
-    meta: { kind: 'event' },
-    data: {
-      type: 'capabilities',
-      data: {
-        event: 'announce',
-        data: {
-          gateway: {
-            address: '',
-            name: 'bridgething-webapp-push',
-            osName: 'host',
-            appName: 'bridgething-webapp-push',
-            appVersion: '0.1.0',
-            adapterVersion: 'host',
-            libVersion: 'v0',
-            libbridgethingVersion: 'v0',
-          },
-          uriSchemes: [],
-          network: { kind: 'unknown', metered: false },
-          available: { geo: false, notifications: false, netFetch: false, netWs: false, audioTts: false },
-          audio: { earcons: [], voices: [] },
-        },
-      },
-    },
-  };
-
-  const switchRequestId = freshMsgId();
-  const switchMsg: GatewayMsg = {
-    id: switchRequestId,
-    meta: { kind: 'request' },
-    data: {
-      type: 'webapp',
-      data: { event: 'switchTo', data: { id: parseUuid(manifestId) } },
-    },
-  };
-
-  let switchSent = false;
-
-  return await new Promise<SwitchOutcome>((res, rej) => {
+  return new Promise<unknown | null>((res, rej) => {
     const overall = setTimeout(() => {
       try {
         ws.close();
       } catch {}
-      rej(new Error('gateway switch timed out (15s)'));
+      rej(new Error(`gateway request timed out (15s) against ${url}`));
     }, 15_000);
 
+    const finish = (fn: () => void) => {
+      clearTimeout(overall);
+      try {
+        ws.close();
+      } catch {}
+      fn();
+    };
+
     ws.addEventListener('open', () => {
-      ws.send(frame(announce));
-      ws.send(frame(switchMsg));
-      switchSent = true;
+      ws.send(frame({ id: freshMsgId(), meta: { kind: 'event' }, data: ANNOUNCE_DATA }));
+      ws.send(frame({ id: requestId, meta: { kind: 'request' }, data }));
+      sent = true;
     });
 
     ws.addEventListener('message', (event: MessageEvent) => {
-      const data = event.data;
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data instanceof Uint8Array ? data : null;
+      const raw = event.data;
+      const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw instanceof Uint8Array ? raw : null;
       if (!bytes) return;
       try {
         acc.append(bytes);
-        let msg = acc.next();
-        while (msg !== null) {
+        for (let msg = acc.next(); msg !== null; msg = acc.next()) {
           const meta = msg.meta as { kind?: string; data?: { requestId?: Uint8Array } };
-          if (meta?.kind === 'response') {
-            const respId = meta.data?.requestId;
-            if (respId && bytesEqual(respId, switchRequestId)) {
-              clearTimeout(overall);
-              try {
-                ws.close();
-              } catch {}
-              res(interpretSwitchResponse(msg.data));
-              return;
-            }
+          const respId = meta?.kind === 'response' ? meta.data?.requestId : undefined;
+          if (respId && bytesEqual(respId, requestId)) {
+            finish(() => res(msg.data));
+            return;
           }
-          msg = acc.next();
         }
       } catch (err) {
-        clearTimeout(overall);
-        try {
-          ws.close();
-        } catch {}
-        rej(err instanceof Error ? err : new Error(String(err)));
+        finish(() => rej(err instanceof Error ? err : new Error(String(err))));
       }
     });
 
     ws.addEventListener('close', (event: CloseEvent) => {
       clearTimeout(overall);
-      // the daemon activates the webapp and then drops this ephemeral connection;
-      // a clean close after the switch was sent means it took, ack or not.
-      if (switchSent && (event.code === 1000 || event.code === 1005)) {
-        res({ ok: true, activeId: null, activeName: null });
+      if (sent && (event.code === 1000 || event.code === 1005)) {
+        res(null);
         return;
       }
       rej(new Error(`gateway ws closed before response (code ${event.code})`));
@@ -206,84 +184,202 @@ async function sendSwitchTo(host: string, port: number, manifestId: string): Pro
   });
 }
 
-function interpretSwitchResponse(data: unknown): SwitchOutcome {
+type Outcome<T> = { ok: true; value: T | null } | { ok: false; reason: string };
+
+function interpret<T>(data: unknown | null, expected: string): Outcome<T> {
+  if (data === null) return { ok: true, value: null };
   const outer = data as { type?: string; data?: unknown };
   if (outer?.type !== 'webapp') {
     return { ok: false, reason: `unexpected response type ${JSON.stringify(outer?.type)}` };
   }
   const inner = outer.data as { event?: string; data?: unknown };
-  if (inner?.event === 'switched') {
-    const active = inner.data as { id?: Uint8Array | null; name?: string | null } | null;
-    return { ok: true, activeId: active?.id ?? null, activeName: active?.name ?? null };
-  }
+  if (inner?.event === expected) return { ok: true, value: inner.data as T };
   if (inner?.event === 'webappError') {
-    const errVariant = inner.data as { type?: string; data?: { id?: string; reason?: string } } | undefined;
-    return { ok: false, reason: `daemon refused: ${errVariant?.type} ${JSON.stringify(errVariant?.data ?? {})}` };
+    const err = inner.data as { type?: string; data?: Record<string, unknown> } | undefined;
+    return { ok: false, reason: `daemon refused: ${err?.type} ${JSON.stringify(err?.data ?? {})}` };
   }
   return { ok: false, reason: `unexpected webapp response variant ${JSON.stringify(inner?.event)}` };
 }
 
-function rsync(localDir: string, host: string, remoteName: string): Promise<void> {
-  const sshArgs = 'ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR';
-  const src = localDir.endsWith('/') ? localDir : `${localDir}/`;
-  const dest = `root@${host}:/var/bridgething/webapps/${remoteName}/`;
-  console.log(`rsync ${src} -> ${dest}`);
+type ActiveWebapp = { id?: Uint8Array | null; name?: string | null };
+type Slots = { launcher?: Uint8Array | null; overlay?: Uint8Array | null };
+type Slot = 'launcher' | 'overlay';
+
+async function switchTo(host: string, port: number, id: string): Promise<Outcome<ActiveWebapp>> {
+  const data = { type: 'webapp', data: { event: 'switchTo', data: { id: parseUuid(id) } } };
+  return interpret<ActiveWebapp>(await sendRequest(host, port, data), 'switched');
+}
+
+async function setSlot(host: string, port: number, slot: Slot, id: string | null): Promise<Outcome<Slots>> {
+  const data = {
+    type: 'webapp',
+    data: { event: 'setSlot', data: { slot, id: id === null ? null : parseUuid(id) } },
+  };
+  return interpret<Slots>(await sendRequest(host, port, data), 'slots');
+}
+
+const WEBAPP_ROOT = '/var/bridgething/webapps';
+const SSH_OPTS = ['-o', 'UserKnownHostsFile=/dev/null', '-o', 'StrictHostKeyChecking=no', '-o', 'LogLevel=ERROR'];
+
+function run(cmd: string, args: string[], label: string, cwd?: string): Promise<void> {
   return new Promise<void>((res, rej) => {
-    const child = spawn('rsync', ['-avz', '--delete', '-e', sshArgs, src, dest], { stdio: 'inherit' });
-    child.on('exit', code => (code === 0 ? res() : rej(new Error(`rsync exited ${code}`))));
+    const child = spawn(cmd, args, { stdio: 'inherit', cwd });
+    child.on('exit', code => (code === 0 ? res() : rej(new Error(`${label} exited ${code}`))));
     child.on('error', rej);
   });
+}
+
+async function pushBundle(localDir: string, host: string, dirName: string): Promise<void> {
+  const src = localDir.endsWith('/') ? localDir : `${localDir}/`;
+  const staged = `.push.${dirName}`;
+  const dest = `root@${host}:${WEBAPP_ROOT}/${staged}/`;
+  console.log(`rsync ${src} -> root@${host}:${WEBAPP_ROOT}/${dirName}/`);
+  await run('rsync', ['-avz', '--delete', '-e', ['ssh', ...SSH_OPTS].join(' '), src, dest], 'rsync');
+  const swap = [
+    'set -e',
+    `cd ${WEBAPP_ROOT}`,
+    `rm -rf .old.${dirName}`,
+    `if [ -d ${dirName} ]; then mv ${dirName} .old.${dirName}; fi`,
+    `mv ${staged} ${dirName}`,
+    `rm -rf .old.${dirName}`,
+  ].join('; ');
+  await run('ssh', [...SSH_OPTS, `root@${host}`, swap], 'ssh');
 }
 
 function buildBundle(repoDir: string): Promise<void> {
   console.log('bun run build');
-  return new Promise<void>((res, rej) => {
-    const child = spawn('bun', ['run', 'build'], { cwd: repoDir, stdio: 'inherit' });
-    child.on('exit', code => (code === 0 ? res() : rej(new Error(`bun run build exited ${code}`))));
-    child.on('error', rej);
-  });
+  return run('bun', ['run', 'build'], 'bun run build', repoDir);
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  let skipBuild = process.env.SKIP_BUILD === '1';
-  let switchAfter = true;
-  let host = process.env.SUPERBIRD_HOST ?? 'bridgething.local';
-  for (const arg of args) {
-    if (arg === '--skip-build') skipBuild = true;
-    else if (arg === '--no-switch') switchAfter = false;
-    else if (arg.startsWith('--')) throw new Error(`unknown flag: ${arg}`);
-    else host = arg;
-  }
-  const port = Number(process.env.BRIDGETHING_GATEWAY_PORT ?? 8892);
+type Manifest = { id?: string; name?: string; role?: string; overlay?: string };
 
-  const repoDir = resolve(import.meta.dir, '..');
+function declaredSlots(manifest: Manifest): Slot[] {
+  const slots: Slot[] = [];
+  if (manifest.role === 'launcher') slots.push('launcher');
+  if (manifest.overlay) slots.push('overlay');
+  return slots;
+}
+
+type Args = {
+  host: string;
+  port: number;
+  skipBuild: boolean;
+  claimSlots: boolean;
+  release: boolean;
+  switchAfter: boolean | null;
+};
+
+function parseArgs(argv: string[]): Args {
+  const args: Args = {
+    host: process.env.SUPERBIRD_HOST ?? 'bridgething.local',
+    port: Number(process.env.BRIDGETHING_GATEWAY_PORT ?? 8892),
+    skipBuild: process.env.SKIP_BUILD === '1',
+    claimSlots: true,
+    release: false,
+    switchAfter: null,
+  };
+  for (const arg of argv) {
+    if (arg === '--skip-build') args.skipBuild = true;
+    else if (arg === '--no-switch') args.switchAfter = false;
+    else if (arg === '--switch') args.switchAfter = true;
+    else if (arg === '--no-slot') args.claimSlots = false;
+    else if (arg === '--release') args.release = true;
+    else if (arg === '--help' || arg === '-h') {
+      printHelp();
+      process.exit(0);
+    } else if (arg.startsWith('--')) throw new Error(`unknown flag: ${arg}`);
+    else args.host = arg;
+  }
+  return args;
+}
+
+function printHelp(): void {
+  console.log(`Usage: bun run push [host] [options]
+
+Build, rsync dist/ onto a connected Car Thing, and make it visible.
+
+A plain webapp becomes the active app. A launcher also takes the home-screen
+slot; an overlay takes the overlay slot and the daemon reloads the kiosk so it
+is injected into whatever app is showing. Overlay-only bundles are not switched
+to by default, since switching away is the opposite of what you want to test.
+
+Options:
+  --release      hand this bundle's slots back to the built-in ones and stop.
+                 the recovery path when a build wedges the screen.
+  --no-slot      push without claiming any slot.
+  --switch       switch to this bundle even if it is overlay-only.
+  --no-switch    push without switching.
+  --skip-build   rsync whatever is already in dist/.
+
+Env: SUPERBIRD_HOST, BRIDGETHING_GATEWAY_PORT, SKIP_BUILD=1
+`);
+}
+
+export type BridgethingPushOptions = {
+  scriptUrl: string;
+};
+
+export async function bridgethingPush({ scriptUrl }: BridgethingPushOptions): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+
+  const repoDir = resolve(dirname(new URL(scriptUrl).pathname), '..');
   const distDir = resolve(repoDir, 'dist');
   const manifestPath = resolve(distDir, 'manifest.json');
 
-  if (!skipBuild) await buildBundle(repoDir);
+  const readManifest = (): Manifest => {
+    if (!existsSync(manifestPath)) {
+      throw new Error(`no manifest.json at ${manifestPath}; run 'bun run build' first or drop --skip-build`);
+    }
+    const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
+    if (!parsed.id) throw new Error(`${manifestPath} has no 'id' field`);
+    return parsed;
+  };
 
-  if (!existsSync(manifestPath)) {
-    throw new Error(`no manifest.json at ${manifestPath}; run 'bun run build' first or drop --skip-build`);
-  }
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { id?: string };
-  if (!manifest.id) throw new Error(`${manifestPath} has no 'id' field`);
-
-  const remoteName = process.env.BRIDGETHING_BUNDLE_NAME ?? manifest.id;
-  await rsync(distDir, host, remoteName);
-
-  if (!switchAfter) {
-    console.log('skipping switch (--no-switch)');
+  if (args.release) {
+    const manifest = readManifest();
+    for (const slot of declaredSlots(manifest)) {
+      const result = await setSlot(args.host, args.port, slot, null);
+      if (!result.ok) throw new Error(result.reason);
+      console.log(`${slot} slot: reverted to the built-in one`);
+    }
+    if (declaredSlots(manifest).length === 0) console.log('this bundle declares no slots; nothing to release');
     return;
   }
 
-  const outcome = await sendSwitchTo(host, port, manifest.id);
-  if (!outcome.ok) throw new Error(outcome.reason);
-  const activeStr = outcome.activeId ? uuidToString(outcome.activeId) : '(none)';
-  console.log(`active webapp: ${outcome.activeName ?? '(unnamed)'} ${activeStr}`);
+  if (!args.skipBuild) await buildBundle(repoDir);
+  const manifest = readManifest();
+  const id = manifest.id as string;
+  const slots = declaredSlots(manifest);
+
+  await pushBundle(distDir, args.host, bundleDirName(id));
+
+  if (args.claimSlots) {
+    for (const slot of slots) {
+      const result = await setSlot(args.host, args.port, slot, id);
+      if (!result.ok) throw new Error(result.reason);
+      console.log(`${slot} slot: ${manifest.name ?? id}`);
+    }
+  }
+
+  const overlayOnly = slots.length > 0 && slots.every(s => s === 'overlay');
+  const shouldSwitch = args.switchAfter ?? !overlayOnly;
+  if (!shouldSwitch) {
+    console.log(overlayOnly ? 'overlay pushed; the kiosk reloaded with it injected' : 'skipping switch');
+    return;
+  }
+
+  const switched = await switchTo(args.host, args.port, id);
+  if (!switched.ok) throw new Error(switched.reason);
+  const active = switched.value;
+  if (!active) {
+    console.log('switched (the daemon dropped the push connection reloading the kiosk)');
+    return;
+  }
+  const activeStr = active.id ? uuidToString(active.id) : '(none)';
+  console.log(`active webapp: ${active.name ?? '(unnamed)'} ${activeStr}`);
 }
 
-main().catch(err => {
+bridgethingPush({ scriptUrl: import.meta.url }).catch(err => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

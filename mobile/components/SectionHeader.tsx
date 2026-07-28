@@ -1,20 +1,21 @@
+import { RefreshCw } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 
-/**
- * Inset section label: small, uppercase, tracked. Optional trailing
- * action button (rendered as a primary-tinted text link).
- */
+import { Press } from './Press';
+
 export function SectionHeader({
   title,
   hint,
   action,
   onActionPress,
+  actionPending = false,
 }: {
   title: string;
   hint?: string;
   action?: string;
   onActionPress?: () => void;
+  actionPending?: boolean;
 }) {
   return (
     <View className="mb-2 flex-row items-end justify-between px-1">
@@ -29,11 +30,23 @@ export function SectionHeader({
         ) : null}
       </View>
       {action ? (
-        <Pressable onPress={onActionPress} hitSlop={10}>
-          <Text className="text-[12px] font-semibold uppercase tracking-[0.16em] text-primary">
-            {action}
-          </Text>
-        </Pressable>
+        <Press
+          onPress={onActionPress}
+          disabled={actionPending}
+          scaleTo={0.9}
+          hitSlop={8}
+        >
+          <View className="-mr-1 flex-row items-center gap-1.5 px-2 py-1">
+            {actionPending ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <RefreshCw size={15} color="hsl(215 14% 45%)" strokeWidth={2.4} />
+            )}
+            <Text className="text-[13px] font-semibold text-muted-foreground">
+              {action}
+            </Text>
+          </View>
+        </Press>
       ) : null}
     </View>
   );

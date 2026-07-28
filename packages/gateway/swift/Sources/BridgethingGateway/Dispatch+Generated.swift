@@ -1424,6 +1424,23 @@ public struct SystemSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `System::OtaFinished` messages.
+  public var otaFinished: AsyncStream<(deviceId: String, msg: OtaFinished)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .otaFinished(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Cross-peer stream of `System::OtaBeginAck` messages.
   public var otaBeginAck: AsyncStream<(deviceId: String, msg: OtaBeginAck)> {
     AsyncStream { continuation in
@@ -2167,6 +2184,23 @@ public struct WebappSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Webapp::Slots` messages.
+  public var slots: AsyncStream<(deviceId: String, msg: WebappSlots)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .slots(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Cross-peer stream of `Webapp::ConfigGet` messages.
   public var configGet: AsyncStream<(deviceId: String, msg: WebappConfigGetReply)> {
     AsyncStream { continuation in
@@ -2370,6 +2404,35 @@ public struct WebappSurface: Sendable {
     case .webapp(let inner):
       switch inner {
       case .uninstalled(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func getSlots(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappSlots, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.getSlots), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .slots(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func setSlot(deviceId: String, _ req: WebappSetSlot, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappSlots, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.setSlot(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .slots(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
@@ -4010,6 +4073,24 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `System::OtaFinished` from this peer.
+  public var otaFinished: AsyncStream<OtaFinished> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .otaFinished(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of `System::OtaBeginAck` from this peer.
   public var otaBeginAck: AsyncStream<OtaBeginAck> {
     AsyncStream { continuation in
@@ -4689,6 +4770,24 @@ public struct WebappSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Webapp::Slots` from this peer.
+  public var slots: AsyncStream<WebappSlots> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .slots(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of `Webapp::ConfigGet` from this peer.
   public var configGet: AsyncStream<WebappConfigGetReply> {
     AsyncStream { continuation in
@@ -4901,6 +5000,35 @@ public struct WebappSurfaceForDevice: Sendable {
     case .webapp(let inner):
       switch inner {
       case .uninstalled(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func getSlots(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappSlots, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.getSlots), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .slots(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func setSlot(_ req: WebappSetSlot, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappSlots, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.setSlot(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .slots(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }

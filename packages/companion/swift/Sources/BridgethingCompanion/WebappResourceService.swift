@@ -121,6 +121,7 @@ public actor WebappResourceService {
         if mime.contains("webp") { return "webp" }
         if mime.contains("gif") { return "gif" }
         if mime.contains("html") { return "html" }
+        if mime.contains("javascript") { return "js" }
         return "bin"
     }
 
@@ -132,6 +133,7 @@ public actor WebappResourceService {
         case "webp": "image/webp"
         case "gif": "image/gif"
         case "html": "text/html"
+        case "js": "text/javascript"
         default: nil
         }
     }

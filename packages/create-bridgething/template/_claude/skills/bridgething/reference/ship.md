@@ -21,6 +21,13 @@ activating. Iterating on hardware, rerun `bun run push` after each change. For
 the fast edit loop, drive a local browser instead (see the develop reference) and
 save the device for final checks.
 
+If `manifest.json` declares `role: launcher` or an `overlay`, `push` also claims
+the matching device slot, so the bundle is live rather than merely installed. A
+launcher is switched to; an overlay is not, since switching away from the app it
+draws over defeats the point. `--no-slot` pushes without claiming, and
+`--release` gives the slots back to the built-in hub and overlay - the recovery
+path when a build wedges the screen.
+
 ## Make a shareable zip
 
 ```bash

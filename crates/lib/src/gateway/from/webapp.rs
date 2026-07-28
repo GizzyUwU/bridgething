@@ -72,6 +72,47 @@ pub struct WebappUninstall {
 pub enum WebappResourceKind {
   Icon,
   Settings,
+  Overlay,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub enum WebappSlot {
+  Launcher,
+  Overlay,
+}
+
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = GetSlots,
+  response = crate::gateway::WebappSlots,
+  response_variant = Slots,
+)]
+pub struct GetWebappSlots;
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = SetSlot,
+  response = crate::gateway::WebappSlots,
+  response_variant = Slots,
+  error = crate::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappSetSlot {
+  pub slot: WebappSlot,
+  #[ts(type = "string | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub id: Option<Uuid>,
 }
 
 #[typeshare]
@@ -281,6 +322,10 @@ pub enum GatewayToBridgeWebappMsg {
   Uninstall(WebappUninstall),
   #[bridge_request]
   Resource(WebappResource),
+  #[bridge_request]
+  GetSlots,
+  #[bridge_request]
+  SetSlot(WebappSetSlot),
   #[bridge_request]
   ConfigGet(WebappConfigGet),
   #[bridge_request]

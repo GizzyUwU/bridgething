@@ -1,5 +1,4 @@
 import {
-  BridgethingSession,
   type BridgethingAncsAuthStatus,
   type BridgethingAuthState,
   type BridgethingDeviceMeta,
@@ -11,14 +10,20 @@ import {
   type BridgethingSessionSnapshot,
   type SessionEvent,
 } from '@bridgething/session-react-native';
-import { Alert, AppState, Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
+import {
+  getSession,
+  reconcileAll,
+  registerDomain,
+  startBridge,
+} from './bridge';
 import { startDiagnostics } from './diagnostics';
-import { startOta } from './ota';
+import { registerOtaDomain } from './ota';
 import { requestBluetoothConnect } from './permissions';
-import { refreshWebapps, startWebapps } from './webapps';
+import { registerWebappsDomain } from './webapps';
 import {
   DEFAULT_CAPABILITY_FLAGS,
   DEFAULT_OTA_POLL_CONFIG,
@@ -30,15 +35,11 @@ import {
   setDeviceNickname,
 } from './storage';
 
-let sessionSingleton: BridgethingSession | null = null;
-
-export function getSession(): BridgethingSession {
-  if (!sessionSingleton) sessionSingleton = new BridgethingSession();
-  return sessionSingleton;
-}
+export { getSession } from './bridge';
 
 type SessionState = {
   started: boolean;
+  reconciled: boolean;
 
   providers: BridgethingProviderInfo[];
   providerPriority: string[];
@@ -51,14 +52,11 @@ type SessionState = {
   ledger: Record<string, DeviceLedgerEntry>;
   capabilityFlags: typeof DEFAULT_CAPABILITY_FLAGS;
   otaPollConfig: typeof DEFAULT_OTA_POLL_CONFIG | null;
-
-  apply(event: SessionEvent): void;
-  reconcile(snapshot: BridgethingSessionSnapshot): void;
-  reset(): void;
 };
 
-const initial: Omit<SessionState, 'apply' | 'reconcile' | 'reset'> = {
+const initial: SessionState = {
   started: false,
+  reconciled: false,
   providers: [],
   providerPriority: [],
   libraryProvider: null,
@@ -72,127 +70,115 @@ const initial: Omit<SessionState, 'apply' | 'reconcile' | 'reset'> = {
   otaPollConfig: null,
 };
 
-export const useSessionStore = create<SessionState>((set, _get) => ({
-  ...initial,
-  apply: event => {
-    switch (event.type) {
-      case 'providersChanged':
-        set({ providers: event.providers });
-        return;
-      case 'peerConnected':
-        set(s => {
-          const others = s.peers.filter(p => p.id !== event.peer.id);
-          const ledger = recordDeviceSeen(
-            event.peer.id,
-            event.peer.name,
-            Date.now(),
-          );
-          return { peers: [...others, event.peer], ledger };
-        });
-        return;
-      case 'peerLinkFailed':
-        set(s => {
-          const others = s.peers.filter(p => p.id !== event.peer.id);
-          return { peers: [...others, event.peer] };
-        });
-        return;
-      case 'peerDisconnected':
-        set(s => ({
-          peers: s.peers.filter(p => p.id !== event.peerId),
-          deviceMeta: omit(s.deviceMeta, event.peerId),
-        }));
-        return;
-      case 'ancsAuthStatusChanged':
-        set(s => ({
-          ancsAuthStatus: {
-            ...s.ancsAuthStatus,
-            [event.deviceId]: event.status,
-          },
-        }));
-        return;
-      case 'nowPlayingChanged':
-        set({ nowPlaying: event.nowPlaying });
-        return;
-      case 'deviceMetaChanged':
-        set(s => ({
-          deviceMeta: { ...s.deviceMeta, [event.deviceId]: event.meta },
-          ledger: event.meta.serialNumber
-            ? recordDeviceSerial(event.deviceId, event.meta.serialNumber)
-            : s.ledger,
-        }));
-        return;
-      case 'webappsChanged':
-      case 'otaEvent':
-      case 'log':
-        return;
-    }
-  },
-  reconcile: snapshot => {
-    const now = Date.now();
-    let ledger = getLedger();
-    for (const peer of snapshot.peers) {
-      if (peer.status === 'connected') {
-        ledger = recordDeviceSeen(peer.id, peer.name, now);
+export const useSessionStore = create<SessionState>(() => ({ ...initial }));
+
+const set = useSessionStore.setState;
+
+export function registerSessionDomain(): void {
+  registerDomain({
+    name: 'session',
+    apply: event => {
+      switch (event.type) {
+        case 'providersChanged':
+          set({ providers: event.providers });
+          return;
+        case 'peerConnected':
+          set(s => ({
+            peers: [...s.peers.filter(p => p.id !== event.peer.id), event.peer],
+            ledger: recordDeviceSeen(
+              event.peer.id,
+              event.peer.name,
+              Date.now(),
+            ),
+          }));
+          return;
+        case 'peerLinkFailed':
+          set(s => ({
+            peers: [...s.peers.filter(p => p.id !== event.peer.id), event.peer],
+          }));
+          return;
+        case 'peerDisconnected':
+          set(s => ({
+            peers: s.peers.filter(p => p.id !== event.peerId),
+            deviceMeta: omit(s.deviceMeta, event.peerId),
+          }));
+          return;
+        case 'ancsAuthStatusChanged':
+          set(s => ({
+            ancsAuthStatus: {
+              ...s.ancsAuthStatus,
+              [event.deviceId]: event.status,
+            },
+          }));
+          return;
+        case 'nowPlayingChanged':
+          set({ nowPlaying: event.nowPlaying });
+          return;
+        case 'deviceMetaChanged':
+          set(s => ({
+            deviceMeta: { ...s.deviceMeta, [event.deviceId]: event.meta },
+            ledger: event.meta.serialNumber
+              ? recordDeviceSerial(event.deviceId, event.meta.serialNumber)
+              : s.ledger,
+          }));
+          return;
+        case 'webappsChanged':
+        case 'webappDocChanged':
+        case 'otaRunChanged':
+        case 'otaAvailableChanged':
+        case 'otaPollChanged':
+        case 'resumed':
+        case 'log':
+          return;
       }
-    }
-    for (const entry of snapshot.deviceMeta) {
-      if (entry.meta.serialNumber) {
-        ledger = recordDeviceSerial(entry.deviceId, entry.meta.serialNumber);
+    },
+    reconcile: snapshot => {
+      const now = Date.now();
+      let ledger = getLedger();
+      for (const peer of snapshot.peers) {
+        if (peer.status === 'connected')
+          ledger = recordDeviceSeen(peer.id, peer.name, now);
       }
-    }
-    set({
-      providers: snapshot.providers,
-      providerPriority: snapshot.providerPriority,
-      libraryProvider: snapshot.libraryProvider ?? null,
-      peers: snapshot.peers,
-      ancsAuthStatus: Object.fromEntries(
-        snapshot.ancsAuthStatuses.map(e => [e.deviceId, e.status]),
-      ),
-      nowPlaying: snapshot.nowPlaying ?? null,
-      deviceMeta: Object.fromEntries(
-        snapshot.deviceMeta.map(e => [e.deviceId, e.meta]),
-      ),
-      hostInfo: snapshot.hostInfo,
-      capabilityFlags: snapshot.capabilityFlags,
-      otaPollConfig: snapshot.otaPollConfig ?? null,
-      ledger,
-    });
-  },
-  reset: () => set({ ...initial }),
-}));
-
-let wired = false;
-
-export async function bootstrapSession(): Promise<void> {
-  const session = getSession();
-  const store = useSessionStore.getState();
-
-  if (!wired) {
-    session.subscribe(event => store.apply(event));
-    AppState.addEventListener('change', state => {
-      if (state === 'active') void reconcileSnapshot();
-    });
-    wired = true;
-  }
-
-  if (store.started) return;
-  await session.start();
-  useSessionStore.setState({ started: true });
-  await reconcileSnapshot();
-  await startDiagnostics();
-  startOta();
-  startWebapps();
-  for (const peer of useSessionStore.getState().peers)
-    if (peer.status === 'connected') void refreshWebapps(peer.id);
+      for (const entry of snapshot.deviceMeta) {
+        if (entry.meta.serialNumber)
+          ledger = recordDeviceSerial(entry.deviceId, entry.meta.serialNumber);
+      }
+      set({
+        providers: snapshot.providers,
+        providerPriority: snapshot.providerPriority,
+        libraryProvider: snapshot.libraryProvider ?? null,
+        peers: snapshot.peers,
+        ancsAuthStatus: Object.fromEntries(
+          snapshot.ancsAuthStatuses.map(e => [e.deviceId, e.status]),
+        ),
+        nowPlaying: snapshot.nowPlaying ?? null,
+        deviceMeta: Object.fromEntries(
+          snapshot.deviceMeta.map(e => [e.deviceId, e.meta]),
+        ),
+        hostInfo: snapshot.hostInfo,
+        capabilityFlags: snapshot.capabilityFlags,
+        otaPollConfig: snapshot.otaPollConfig ?? null,
+        ledger,
+      });
+    },
+  });
 }
 
-export async function reconcileSnapshot(): Promise<void> {
+export async function bootstrapSession(): Promise<void> {
+  registerSessionDomain();
+  registerWebappsDomain();
+  registerOtaDomain();
+  startBridge();
+  if (useSessionStore.getState().started) return;
+  await getSession().start();
+  useSessionStore.setState({ started: true });
   try {
-    const snapshot = await getSession().snapshot();
-    useSessionStore.getState().reconcile(snapshot);
+    await reconcileAll();
   } catch (err) {
-    console.warn('[bridgething] snapshot reconcile failed', err);
+    console.warn('[bridgething] initial reconcile failed', err);
   }
+  useSessionStore.setState({ reconciled: true });
+  await startDiagnostics();
 }
 
 export async function updateCapabilityFlags(

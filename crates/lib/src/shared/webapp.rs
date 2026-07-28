@@ -32,9 +32,13 @@ pub enum WebappError {
   MissingIndexHtml,
   /// manifest.json missing, unparseable, or failed schema validation.
   InvalidManifest { reason: String },
-  /// The requested resource (icon / settings page) isn't declared by the
-  /// webapp's manifest or its file is missing on disk.
+  /// The requested resource (icon / settings page / overlay) isn't declared
+  /// by the webapp's manifest or its file is missing on disk.
   ResourceNotAvailable { id: String },
+  /// Launcher slot rejected: the bundle does not declare `role: launcher`.
+  NotALauncher { id: String },
+  /// Overlay slot rejected: the bundle declares no overlay entry.
+  NoOverlay { id: String },
   /// Config key is not declared in the webapp's manifest schema.
   UnknownConfigKey { key: String },
   /// Value failed schema validation (out of range, regex mismatch, not in enum).
@@ -59,6 +63,8 @@ pub enum WebappSource {
 /// listings (the hub grid, etc); `Launcher` is itself a launcher and is
 /// hidden from those listings. The daemon filters `Launcher` bundles
 /// out of `client.webapp.list`; the gateway list keeps everything.
+/// Declaring `Launcher` is also what makes a bundle eligible for the
+/// device's launcher slot.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +163,7 @@ pub struct WebappInfo {
   pub description: Option<String>,
   pub icon_hash: Option<String>,
   pub settings_hash: Option<String>,
+  pub overlay_hash: Option<String>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
   #[serde(default)]
@@ -182,6 +189,7 @@ pub struct WebappManifest {
   pub description: Option<String>,
   pub icon: Option<String>,
   pub settings: Option<String>,
+  pub overlay: Option<String>,
   #[serde(default)]
   pub role: WebappRole,
   #[serde(default)]

@@ -1031,6 +1031,15 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `System::OtaFinished` messages. */
+  public val otaFinished: Flow<Pair<String, OtaFinished>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaFinished ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Cross-peer stream of `System::OtaBeginAck` messages. */
   public val otaBeginAck: Flow<Pair<String, OtaBeginAck>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1581,6 +1590,15 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Webapp::Slots` messages. */
+  public val slots: Flow<Pair<String, WebappSlots>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayWebappMsg.Slots ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Cross-peer stream of `Webapp::ConfigGet` messages. */
   public val configGet: Flow<Pair<String, WebappConfigGetReply>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1712,6 +1730,35 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Uninstalled -> RequestResult.Ok(inner.data)
+        is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun getSlots(deviceId: String, timeout: Duration = 30.seconds): RequestResult<WebappSlots, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.GetSlots)
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
+        is BridgeToGatewayWebappMsg.Slots -> RequestResult.Ok(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun setSlot(deviceId: String, req: WebappSetSlot, timeout: Duration = 30.seconds): RequestResult<WebappSlots, WebappError> {
+    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.SetSlot(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
+        is BridgeToGatewayWebappMsg.Slots -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
@@ -2956,6 +3003,16 @@ public class SystemSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `System::OtaFinished` from this peer. */
+  public val otaFinished: Flow<OtaFinished> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaFinished ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Stream of `System::OtaBeginAck` from this peer. */
   public val otaBeginAck: Flow<OtaBeginAck> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -3462,6 +3519,16 @@ public class WebappSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Webapp::Slots` from this peer. */
+  public val slots: Flow<WebappSlots> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayWebappMsg.Slots ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Stream of `Webapp::ConfigGet` from this peer. */
   public val configGet: Flow<WebappConfigGetReply> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -3602,6 +3669,35 @@ public class WebappSurfaceForDevice(
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Uninstalled -> RequestResult.Ok(inner.data)
+        is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun getSlots(timeout: Duration = 30.seconds): RequestResult<WebappSlots, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.GetSlots)
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
+        is BridgeToGatewayWebappMsg.Slots -> RequestResult.Ok(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun setSlot(req: WebappSetSlot, timeout: Duration = 30.seconds): RequestResult<WebappSlots, WebappError> {
+    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.SetSlot(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
+        is BridgeToGatewayWebappMsg.Slots -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }

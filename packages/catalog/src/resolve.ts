@@ -30,6 +30,10 @@ export function satisfies(deviceVersion: string, minimum: string): boolean {
   return compareVersions(deviceVersion, minimum) >= 0;
 }
 
+export function isUpgrade(candidate: string, installed: string): boolean {
+  return compareVersions(candidate, installed) > 0;
+}
+
 function compareVersions(a: string, b: string): number {
   const pa = versionComponents(a);
   const pb = versionComponents(b);
@@ -99,7 +103,7 @@ export function aggregate(args: {
       sourceUrl: primary.url,
       newestCompatible: newest,
       installedVersion,
-      updateAvailable: installedVersion !== null && newest !== null && newest.version !== installedVersion,
+      updateAvailable: installedVersion !== null && newest !== null && isUpgrade(newest.version, installedVersion),
       alsoAvailableFrom,
     });
   }
@@ -121,10 +125,10 @@ export function updates(args: {
     const id = info.id.toLowerCase();
     const sourceUrl = pins.get(id);
     if (!sourceUrl) continue;
-    const app = catalogs.get(sourceUrl)?.apps.find(a => a.id === id);
+    const app = catalogs.get(sourceUrl)?.apps.find(a => a.id.toLowerCase() === id);
     if (!app) continue;
     const newest = newestCompatible(app, deviceLibVersion);
-    if (!newest || newest.version === info.version) continue;
+    if (!newest || !isUpgrade(newest.version, info.version)) continue;
     out.push({
       appId: id,
       name: app.name,

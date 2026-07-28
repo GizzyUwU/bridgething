@@ -796,8 +796,12 @@
           "payload_ref": "OtaError"
         },
         {
+          "method": "onOtaFinished",
+          "payload": "OtaFinished",
+          "payload_ref": "OtaFinished"
+        },
+        {
           "method": "onDeviceNicknameChanged",
-          "description": "event broadcast when the nickname changes, including changes made from another surface",
           "payload": "DeviceNicknameReply",
           "payload_ref": "DeviceNicknameReply"
         }
@@ -4006,6 +4010,39 @@
         }
       ]
     },
+    "OtaFinished": {
+      "kind": "struct",
+      "description": "Terminal success from the OTA orchestrator, emitted for every `OtaKind`.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "OtaKind",
+          "type_ref": "OtaKind"
+        },
+        {
+          "name": "updateId",
+          "type": "string"
+        }
+      ]
+    },
+    "OtaKind": {
+      "kind": "enum",
+      "description": "What the streamed bytes are going to be applied as.\n\n`Image` streams a `.swu` through libswupdate + slot flip + reboot.\n`Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on\nthe bandaid bind-mount, restarts the service. `BuiltinWebapp`\nstreams a zip bundle of hub or stock, validates the manifest id is\none of the reserved built-ins, atomic-rotates the bundle dir on the\nbandaid bind-mount, restarts the service. `InstalledWebapp` streams\na zip bundle of a third-party (non-reserved) webapp and installs it\ninto the writable registry; it neither stages on the bandaid nor\nrestarts, and is never part of an `OtaActivate` batch.\n\nCompanions key reboot expectations off this: image means the device\npower-cycles; daemon and builtin-webapp mean the daemon process\nrestarts and the gateway link drops and reconnects; installed-webapp\napplies in place with no restart, and the terminal signal is the\n`WebappInstalled` event (or an `OtaError`).",
+      "variants": [
+        {
+          "name": "Image"
+        },
+        {
+          "name": "Daemon"
+        },
+        {
+          "name": "BuiltinWebapp"
+        },
+        {
+          "name": "InstalledWebapp"
+        }
+      ]
+    },
     "OtaPhase": {
       "kind": "enum",
       "description": "Stage of the OTA orchestrator. The phase set is shared between\nkinds, with non-image kinds emitting a subset.\n\nImage: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)\n-> `Confirming` (try-counter reset) -> `Reboot`.\n\nDaemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,\nwhere `Writing`/100 means the piece is validated and staged on the\nbandaid (not yet live). The atomic rotate and the single `systemctl\nrestart` happen later, on `OtaActivate`, which emits the terminal\n`Reboot` for the whole batch. `Confirming` is image-only.\n\nInstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the\nbundle installs into the writable registry. There is no `Writing`/100,\nno `Confirming`, and no `Reboot`; the terminal signal is the\n`WebappInstalled` event (or an `OtaError`).",
@@ -5637,7 +5674,15 @@
         },
         {
           "name": "ResourceNotAvailable",
-          "description": "The requested resource (icon / settings page) isn't declared by the\nwebapp's manifest or its file is missing on disk."
+          "description": "The requested resource (icon / settings page / overlay) isn't declared\nby the webapp's manifest or its file is missing on disk."
+        },
+        {
+          "name": "NotALauncher",
+          "description": "Launcher slot rejected: the bundle does not declare `role: launcher`."
+        },
+        {
+          "name": "NoOverlay",
+          "description": "Overlay slot rejected: the bundle declares no overlay entry."
         },
         {
           "name": "UnknownConfigKey",
@@ -5725,6 +5770,11 @@
           "optional": true
         },
         {
+          "name": "overlayHash",
+          "type": "string",
+          "optional": true
+        },
+        {
           "name": "config",
           "type": "ConfigField[]",
           "type_ref": "ConfigField"
@@ -5763,7 +5813,7 @@
     },
     "WebappRole": {
       "kind": "enum",
-      "description": "A webapp's launcher visibility. `Standard` shows up in user-facing\nlistings (the hub grid, etc); `Launcher` is itself a launcher and is\nhidden from those listings. The daemon filters `Launcher` bundles\nout of `client.webapp.list`; the gateway list keeps everything.",
+      "description": "A webapp's launcher visibility. `Standard` shows up in user-facing\nlistings (the hub grid, etc); `Launcher` is itself a launcher and is\nhidden from those listings. The daemon filters `Launcher` bundles\nout of `client.webapp.list`; the gateway list keeps everything.\nDeclaring `Launcher` is also what makes a bundle eligible for the\ndevice's launcher slot.",
       "variants": [
         {
           "name": "Standard"

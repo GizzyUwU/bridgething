@@ -30,6 +30,20 @@ pub struct WebappResourceReply {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+pub struct WebappSlots {
+  #[ts(type = "string | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub launcher: Option<Uuid>,
+  #[ts(type = "string | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub overlay: Option<Uuid>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
 pub struct WebappConfigGetReply {
   pub key: String,
   pub value: Option<String>,
@@ -149,6 +163,8 @@ pub enum BridgeToGatewayWebappMsg {
   WebappError(WebappError),
   #[bridge_response]
   Resource(WebappResourceReply),
+  #[bridge_response]
+  Slots(WebappSlots),
   #[bridge_response]
   ConfigGet(WebappConfigGetReply),
   #[bridge_response]

@@ -84,9 +84,11 @@ export function Launcher({ client }: { client: BridgethingClient }) {
     const offError = client.system.onOtaError(error => {
       setOta(prev => ({ attempt: prev.attempt + 1, progress: null, error, dismissed: prev.dismissed }));
     });
+    const offFinished = client.system.onOtaFinished(() => setOta(OTA_IDLE));
     return () => {
       offProgress();
       offError();
+      offFinished();
     };
   }, [client]);
 

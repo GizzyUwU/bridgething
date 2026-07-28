@@ -157,6 +157,17 @@ pub struct OtaError {
   pub msg: String,
 }
 
+/// Terminal success from the OTA orchestrator, emitted for every `OtaKind`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct OtaFinished {
+  pub kind: OtaKind,
+  pub update_id: String,
+}
+
 /// Half-open byte range the daemon's range proxy asks the companion
 /// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
 /// inclusive, `length` bytes. The proxy caps the multi-range count at

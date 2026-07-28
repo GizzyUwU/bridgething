@@ -14,4 +14,6 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 pub const KEY_ACTIVE_WEBAPP: &str = "active_webapp";
+pub const KEY_LAUNCHER_WEBAPP: &str = "launcher_webapp";
+pub const KEY_OVERLAY_WEBAPP: &str = "overlay_webapp";
 pub const KEY_LAST_DEVICE: &str = "last_device";

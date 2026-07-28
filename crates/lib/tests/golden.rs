@@ -34,11 +34,8 @@ const FIXED_DEMO_WEBAPP: &str = "0192f2a0-bbb0-7c00-a000-000000000101";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct GoldenFile {
-  /// Wire-format version number (matches the codec's `VERSION` constant).
   version: u8,
-  /// Hex string of the magic bytes (matches the codec's `MAGIC`).
   magic: String,
-  /// Header layout, for cross-language readers that don't want to chase the spec.
   header: HeaderSpec,
   fixtures: Vec<GoldenFixture>,
 }
@@ -59,25 +56,12 @@ struct HeaderField {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct GoldenFixture {
-  /// Stable identifier; tests reference fixtures by this name.
   name: String,
-  /// Plain-language description for humans reading the JSON.
   description: String,
-  /// Which direction (and therefore which Rust type) this message decodes to.
   direction: Direction,
-  /// Priority lane this fixture was framed with; recorded in header byte 5.
-  /// `"normal"` (0x00) or `"bulk"` (0x01). Cross-language SDKs round-trip
-  /// the byte and surface it on decode.
   priority: String,
-  /// Canonical structural form of the decoded message. Cross-language tests
-  /// should compare structurally, not by string match - field order from
-  /// msgpack named maps is implementation-defined.
   decoded_json: serde_json::Value,
-  /// Hex string of `rmp_serde::to_vec_named(&msg)`. The framed payload, pre-
-  /// compression. Useful for testing the msgpack layer in isolation.
   msgpack_hex: String,
-  /// Hex string of the full wire frame: 16-byte header (compression=0,
-  /// encoding=0) followed by `msgpack_hex` bytes.
   framed_hex: String,
 }
 
@@ -242,8 +226,6 @@ fn gateway_capabilities() -> GatewayCapabilities {
 }
 
 fn fingerprint_bytes() -> Vec<u8> {
-  // PNG magic + a couple bytes - small but distinctive payload for the binary
-  // path.
   vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 }
 
@@ -310,6 +292,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             description: Some("Spotify Car Thing stock UI".into()),
             icon_hash: None,
             settings_hash: None,
+            overlay_hash: None,
             config: vec![],
             permissions: vec![],
             renders_voice_display: false,
@@ -325,6 +308,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             description: None,
             icon_hash: Some("2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae".into()),
             settings_hash: Some("fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9".into()),
+            overlay_hash: None,
             config: vec![],
             permissions: vec![],
             renders_voice_display: false,
@@ -377,6 +361,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
         description: None,
         icon_hash: None,
         settings_hash: None,
+        overlay_hash: None,
         config: vec![],
         permissions: vec![],
         renders_voice_display: false,
@@ -850,7 +835,6 @@ fn priority_round_trips_through_codec_on_all_lanes() {
   };
 
   for priority in [Priority::Normal, Priority::Bulk, Priority::Background] {
-    // Daemon -> phone: encode with BridgeEndec, decode with GatewayEndec.
     let mut wire = BytesMut::new();
     BridgeEndec::default()
       .encode(
@@ -869,7 +853,6 @@ fn priority_round_trips_through_codec_on_all_lanes() {
     assert_eq!(decoded.priority, priority, "decoded priority preserved");
     assert_eq!(decoded.msg, bridge_msg, "decoded payload matches");
 
-    // Phone -> daemon: encode with GatewayEndec, decode with BridgeEndec.
     let mut wire = BytesMut::new();
     GatewayEndec::default()
       .encode(
@@ -892,9 +875,6 @@ fn priority_round_trips_through_codec_on_all_lanes() {
 
 #[test]
 fn legacy_zero_priority_byte_decodes_as_normal() {
-  // Locks in the back-compat property that motivated picking byte 5 of the
-  // existing reserved range: any frame produced by a pre-priority sender
-  // (the priority byte sits at zero) decodes as Normal.
   use libbridgething::{
     Priority,
     protocol::{BridgeEndec, GatewayEndec},

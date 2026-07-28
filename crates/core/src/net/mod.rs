@@ -281,10 +281,13 @@ async fn try_serve_hub(state: &BridgeThingState, req: Request<Body>) -> Result<R
   if !req.uri().path().starts_with(HUB_PREFIX) {
     return Err(req);
   }
-  let Some(hash) = state.webapps.bundle_hash(crate::state::HUB_WEBAPP_ID).await else {
+  let Ok(Some(launcher)) = state.launcher_webapp().await else {
     return Err(req);
   };
-  let Some(bundle_path) = state.webapps.resolve(crate::state::HUB_WEBAPP_ID).await else {
+  let Some(hash) = state.webapps.bundle_hash(launcher).await else {
+    return Err(req);
+  };
+  let Some(bundle_path) = state.webapps.resolve(launcher).await else {
     return Err(req);
   };
 

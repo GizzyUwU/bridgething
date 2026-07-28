@@ -8,6 +8,7 @@ import type {
   Notification,
   NowPlayingUpdate,
   OtaError,
+  OtaFinished,
   OtaProgress,
   PhoneCall,
   Position,
@@ -272,6 +273,7 @@ export type SystemInboundHandlers = {
   logEntry: (msg: LogEntry) => void;
   otaProgress: (msg: OtaProgress) => void;
   otaError: (msg: OtaError) => void;
+  otaFinished: (msg: OtaFinished) => void;
   deviceNickname: (msg: DeviceNicknameReply) => void;
   deviceNicknameChanged: (msg: DeviceNicknameReply) => void;
 };
@@ -2714,6 +2716,18 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::OtaFinished` from the daemon. */
+  onOtaFinished(handler: (msg: OtaFinished) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaFinished') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `System::DeviceNickname` from the daemon. */
   onDeviceNickname(handler: (msg: DeviceNicknameReply) => void): () => void {
     return this._client.on(event => {
@@ -2781,6 +2795,10 @@ export class SystemSurface {
         }
         case 'otaError': {
           handlers.otaError?.(inner.data);
+          return;
+        }
+        case 'otaFinished': {
+          handlers.otaFinished?.(inner.data);
           return;
         }
         case 'deviceNickname': {
@@ -4305,6 +4323,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'otaError': {
             innerHandlers.otaError?.(inner.data);
+            return;
+          }
+          case 'otaFinished': {
+            innerHandlers.otaFinished?.(inner.data);
             return;
           }
           case 'deviceNickname': {

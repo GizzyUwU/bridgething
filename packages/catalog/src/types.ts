@@ -30,6 +30,8 @@ export type AppVersion = {
   released_at: string;
   download: Download;
   permissions: string[];
+  role?: 'standard' | 'launcher';
+  provides_overlay?: boolean;
   min_libbridgething_version: string;
   changelog: string | null;
 };

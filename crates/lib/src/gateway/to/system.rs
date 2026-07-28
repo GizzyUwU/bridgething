@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{LogEntry, OtaError, OtaProgress, RangeSpec};
+use crate::{LogEntry, OtaError, OtaFinished, OtaProgress, RangeSpec};
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -119,6 +119,8 @@ pub enum BridgeToGatewaySystemMsg {
   OtaProgress(OtaProgress),
   #[bridge_event]
   OtaError(OtaError),
+  #[bridge_event]
+  OtaFinished(OtaFinished),
   #[bridge_response]
   OtaBeginAck(OtaBeginAck),
   #[bridge_response]

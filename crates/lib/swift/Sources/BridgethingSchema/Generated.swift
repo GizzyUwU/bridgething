@@ -2892,6 +2892,17 @@ public struct OtaError: Codable, Sendable {
 	}
 }
 
+/// Terminal success from the OTA orchestrator, emitted for every `OtaKind`.
+public struct OtaFinished: Codable, Sendable {
+	public let kind: OtaKind
+	public let updateId: String
+
+	public init(kind: OtaKind, updateId: String) {
+		self.kind = kind
+		self.updateId = updateId
+	}
+}
+
 /// Stage of the OTA orchestrator. The phase set is shared between
 /// kinds, with non-image kinds emitting a subset.
 /// 
@@ -4409,6 +4420,8 @@ public enum WebappSource: String, Codable, Sendable {
 /// listings (the hub grid, etc); `Launcher` is itself a launcher and is
 /// hidden from those listings. The daemon filters `Launcher` bundles
 /// out of `client.webapp.list`; the gateway list keeps everything.
+/// Declaring `Launcher` is also what makes a bundle eligible for the
+/// device's launcher slot.
 public enum WebappRole: String, Codable, Sendable {
 	case standard
 	case launcher
@@ -4500,13 +4513,14 @@ public struct WebappInfo: Codable, Sendable {
 	public let description: String?
 	public let iconHash: String?
 	public let settingsHash: String?
+	public let overlayHash: String?
 	public let config: [ConfigField]
 	public let permissions: [String]
 	@WireDefault<WireDefaultWebappInfoRendersVoiceDisplay> public var rendersVoiceDisplay: Bool
 	public let art: ArtProfile?
 	public let provenance: String?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, provenance: String?) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, overlayHash: String?, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, provenance: String?) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -4515,6 +4529,7 @@ public struct WebappInfo: Codable, Sendable {
 		self.description = description
 		self.iconHash = iconHash
 		self.settingsHash = settingsHash
+		self.overlayHash = overlayHash
 		self.config = config
 		self.permissions = permissions
 		self.rendersVoiceDisplay = rendersVoiceDisplay
@@ -4541,6 +4556,7 @@ public struct WebappManifest: Codable, Sendable {
 	public let description: String?
 	public let icon: String?
 	public let settings: String?
+	public let overlay: String?
 	@WireDefault<WireDefaultWebappManifestRole> public var role: WebappRole
 	@WireDefault<WireDefaultWebappManifestConfig> public var config: [ConfigField]
 	@WireDefault<WireDefaultWebappManifestPermissions> public var permissions: [String]
@@ -4548,13 +4564,14 @@ public struct WebappManifest: Codable, Sendable {
 	public let art: ArtProfile?
 	@WireDefault<WireDefaultWebappManifestOverlays> public var overlays: OverlayProfile
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, overlays: OverlayProfile) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, overlay: String?, role: WebappRole, config: [ConfigField], permissions: [String], rendersVoiceDisplay: Bool, art: ArtProfile?, overlays: OverlayProfile) {
 		self.id = id
 		self.name = name
 		self.version = version
 		self.description = description
 		self.icon = icon
 		self.settings = settings
+		self.overlay = overlay
 		self.role = role
 		self.config = config
 		self.permissions = permissions
@@ -4567,6 +4584,7 @@ public struct WebappManifest: Codable, Sendable {
 public enum WebappResourceKind: String, Codable, Sendable {
 	case icon
 	case settings
+	case overlay
 }
 
 public struct WebappResource: Codable, Sendable {
@@ -4594,6 +4612,31 @@ public struct WebappResourceReply: Codable, Sendable {
 		self.sha256 = sha256
 		self.mime = mime
 		self.body = body
+	}
+}
+
+public enum WebappSlot: String, Codable, Sendable {
+	case launcher
+	case overlay
+}
+
+public struct WebappSetSlot: Codable, Sendable {
+	public let slot: WebappSlot
+	@OptionalMsgpackUuid public var id: UUID?
+
+	public init(slot: WebappSlot, id: UUID?) {
+		self.slot = slot
+		self.id = id
+	}
+}
+
+public struct WebappSlots: Codable, Sendable {
+	@OptionalMsgpackUuid public var launcher: UUID?
+	@OptionalMsgpackUuid public var overlay: UUID?
+
+	public init(launcher: UUID?, overlay: UUID?) {
+		self.launcher = launcher
+		self.overlay = overlay
 	}
 }
 
@@ -5458,6 +5501,7 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case otaProgress(OtaProgress)
 	case otaError(OtaError)
+	case otaFinished(OtaFinished)
 	case otaBeginAck(OtaBeginAck)
 	case otaBeginRejected(OtaBeginRejected)
 	case otaAssetRange(OtaAssetRange)
@@ -5473,6 +5517,7 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
 			otaError,
+			otaFinished,
 			otaBeginAck,
 			otaBeginRejected,
 			otaAssetRange,
@@ -5502,6 +5547,11 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			case .otaError:
 				if let content = try? container.decode(OtaError.self, forKey: .data) {
 					self = .otaError(content)
+					return
+				}
+			case .otaFinished:
+				if let content = try? container.decode(OtaFinished.self, forKey: .data) {
+					self = .otaFinished(content)
 					return
 				}
 			case .otaBeginAck:
@@ -5572,6 +5622,9 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .otaError(let content):
 			try container.encode(CodingKeys.otaError, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaFinished(let content):
+			try container.encode(CodingKeys.otaFinished, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .otaBeginAck(let content):
 			try container.encode(CodingKeys.otaBeginAck, forKey: .event)
@@ -5802,6 +5855,7 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	case uninstalled(WebappActive)
 	case webappError(WebappError)
 	case resource(WebappResourceReply)
+	case slots(WebappSlots)
 	case configGet(WebappConfigGetReply)
 	case configList(WebappConfigListReply)
 	case configAck(WebappConfigAck)
@@ -5819,6 +5873,7 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			uninstalled,
 			webappError,
 			resource,
+			slots,
 			configGet,
 			configList,
 			configAck,
@@ -5866,6 +5921,11 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			case .resource:
 				if let content = try? container.decode(WebappResourceReply.self, forKey: .data) {
 					self = .resource(content)
+					return
+				}
+			case .slots:
+				if let content = try? container.decode(WebappSlots.self, forKey: .data) {
+					self = .slots(content)
 					return
 				}
 			case .configGet:
@@ -5938,6 +5998,9 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .resource(let content):
 			try container.encode(CodingKeys.resource, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .slots(let content):
+			try container.encode(CodingKeys.slots, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .configGet(let content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
@@ -7154,6 +7217,8 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 	case switchTo(WebappSwitchTo)
 	case uninstall(WebappUninstall)
 	case resource(WebappResource)
+	case getSlots
+	case setSlot(WebappSetSlot)
 	case configGet(WebappConfigGet)
 	case configList(WebappConfigList)
 	case configSet(WebappConfigSet)
@@ -7169,6 +7234,8 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 			switchTo,
 			uninstall,
 			resource,
+			getSlots,
+			setSlot,
 			configGet,
 			configList,
 			configSet,
@@ -7206,6 +7273,14 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 			case .resource:
 				if let content = try? container.decode(WebappResource.self, forKey: .data) {
 					self = .resource(content)
+					return
+				}
+			case .getSlots:
+				self = .getSlots
+				return
+			case .setSlot:
+				if let content = try? container.decode(WebappSetSlot.self, forKey: .data) {
+					self = .setSlot(content)
 					return
 				}
 			case .configGet:
@@ -7268,6 +7343,11 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .resource(let content):
 			try container.encode(CodingKeys.resource, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .getSlots:
+			try container.encode(CodingKeys.getSlots, forKey: .event)
+		case .setSlot(let content):
+			try container.encode(CodingKeys.setSlot, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .configGet(let content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
@@ -7640,6 +7720,24 @@ public struct WebappErrorResourceNotAvailableInner: Codable, Sendable {
 	}
 }
 
+/// Generated type representing the anonymous struct variant `NotALauncher` of the `WebappError` Rust enum
+public struct WebappErrorNotALauncherInner: Codable, Sendable {
+	public let id: String
+
+	public init(id: String) {
+		self.id = id
+	}
+}
+
+/// Generated type representing the anonymous struct variant `NoOverlay` of the `WebappError` Rust enum
+public struct WebappErrorNoOverlayInner: Codable, Sendable {
+	public let id: String
+
+	public init(id: String) {
+		self.id = id
+	}
+}
+
 /// Generated type representing the anonymous struct variant `UnknownConfigKey` of the `WebappError` Rust enum
 public struct WebappErrorUnknownConfigKeyInner: Codable, Sendable {
 	public let key: String
@@ -7699,9 +7797,13 @@ public enum WebappError: Codable, Sendable {
 	case missingIndexHtml
 	/// manifest.json missing, unparseable, or failed schema validation.
 	case invalidManifest(WebappErrorInvalidManifestInner)
-	/// The requested resource (icon / settings page) isn't declared by the
-	/// webapp's manifest or its file is missing on disk.
+	/// The requested resource (icon / settings page / overlay) isn't declared
+	/// by the webapp's manifest or its file is missing on disk.
 	case resourceNotAvailable(WebappErrorResourceNotAvailableInner)
+	/// Launcher slot rejected: the bundle does not declare `role: launcher`.
+	case notALauncher(WebappErrorNotALauncherInner)
+	/// Overlay slot rejected: the bundle declares no overlay entry.
+	case noOverlay(WebappErrorNoOverlayInner)
 	/// Config key is not declared in the webapp's manifest schema.
 	case unknownConfigKey(WebappErrorUnknownConfigKeyInner)
 	/// Value failed schema validation (out of range, regex mismatch, not in enum).
@@ -7722,6 +7824,8 @@ public enum WebappError: Codable, Sendable {
 			missingIndexHtml,
 			invalidManifest,
 			resourceNotAvailable,
+			notALauncher,
+			noOverlay,
 			unknownConfigKey,
 			invalidConfigValue,
 			invalidDocValue,
@@ -7779,6 +7883,16 @@ public enum WebappError: Codable, Sendable {
 					self = .resourceNotAvailable(content)
 					return
 				}
+			case .notALauncher:
+				if let content = try? container.decode(WebappErrorNotALauncherInner.self, forKey: .data) {
+					self = .notALauncher(content)
+					return
+				}
+			case .noOverlay:
+				if let content = try? container.decode(WebappErrorNoOverlayInner.self, forKey: .data) {
+					self = .noOverlay(content)
+					return
+				}
 			case .unknownConfigKey:
 				if let content = try? container.decode(WebappErrorUnknownConfigKeyInner.self, forKey: .data) {
 					self = .unknownConfigKey(content)
@@ -7832,6 +7946,12 @@ public enum WebappError: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .resourceNotAvailable(let content):
 			try container.encode(CodingKeys.resourceNotAvailable, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .notALauncher(let content):
+			try container.encode(CodingKeys.notALauncher, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noOverlay(let content):
+			try container.encode(CodingKeys.noOverlay, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .unknownConfigKey(let content):
 			try container.encode(CodingKeys.unknownConfigKey, forKey: .type)

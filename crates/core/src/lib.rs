@@ -506,6 +506,7 @@ fn spawn_ota_event_forwarder(
       let client_mirror = match &event {
         BridgeToGatewaySystemMsgEvent::OtaProgress(p) => Some(BridgeToClientSystemMsgEvent::OtaProgress(*p)),
         BridgeToGatewaySystemMsgEvent::OtaError(e) => Some(BridgeToClientSystemMsgEvent::OtaError(e.clone())),
+        BridgeToGatewaySystemMsgEvent::OtaFinished(f) => Some(BridgeToClientSystemMsgEvent::OtaFinished(f.clone())),
         BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(_) => None,
         BridgeToGatewaySystemMsgEvent::LogEntry(_) => None,
       };

@@ -8,17 +8,22 @@ import type {
   BridgethingConfigEntry,
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
+  BridgethingDeviceWebappsEntry,
   BridgethingDocEntry,
   BridgethingLogArchive,
   BridgethingNowPlaying,
-  BridgethingOtaEvent,
+  BridgethingOtaAvailable,
   BridgethingOtaManifest,
   BridgethingOtaPollConfig,
+  BridgethingOtaPollStatus,
+  BridgethingOtaRun,
   BridgethingProviderInfo,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
+  BridgethingWebappSlot,
+  BridgethingWebappSlots,
   BridgethingSession as NativeBridgethingSession,
 } from './specs/BridgethingSession.nitro';
 
@@ -44,14 +49,16 @@ export type {
   BridgethingNowPlaying,
   BridgethingNowPlayingPlayback,
   BridgethingNowPlayingTrack,
+  BridgethingOtaAvailable,
   BridgethingOtaChannelInfo,
-  BridgethingOtaEvent,
-  BridgethingOtaEventKind,
   BridgethingOtaKind,
   BridgethingOtaManifest,
+  BridgethingOtaOutcome,
   BridgethingOtaPhase,
   BridgethingOtaPollConfig,
+  BridgethingOtaPollStatus,
   BridgethingOtaRelease,
+  BridgethingOtaRun,
   BridgethingOtaStep,
   BridgethingOtaStepKind,
   BridgethingPeerLinkStatus,
@@ -63,6 +70,8 @@ export type {
   BridgethingSessionSnapshot,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
+  BridgethingWebappSlot,
+  BridgethingWebappSlots,
 } from './specs/BridgethingSession.nitro';
 
 export type SessionEvent =
@@ -76,10 +85,13 @@ export type SessionEvent =
       deviceId: string;
       status: BridgethingAncsAuthStatus;
     }
-  | { type: 'webappsChanged'; deviceId: string }
+  | { type: 'webappsChanged'; entry: BridgethingDeviceWebappsEntry }
   | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
-  | { type: 'otaEvent'; event: BridgethingOtaEvent }
+  | { type: 'otaRunChanged'; run: BridgethingOtaRun }
+  | { type: 'otaAvailableChanged'; available: BridgethingOtaAvailable }
+  | { type: 'otaPollChanged'; status: BridgethingOtaPollStatus }
+  | { type: 'resumed'; snapshot: BridgethingSessionSnapshot }
   | { type: 'log'; level: string; message: string };
 
 export class BridgethingSession {
@@ -204,6 +216,14 @@ export class BridgethingSession {
     await this.native.switchWebapp(deviceId, id);
   }
 
+  async getWebappSlots(deviceId: string): Promise<BridgethingWebappSlots> {
+    return this.native.getWebappSlots(deviceId);
+  }
+
+  async setWebappSlot(deviceId: string, slot: BridgethingWebappSlot, id?: string): Promise<BridgethingWebappSlots> {
+    return this.native.setWebappSlot(deviceId, slot, id);
+  }
+
   async webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null> {
     return this.native.webappIcon(deviceId, id);
   }
@@ -273,14 +293,20 @@ export class BridgethingSession {
     await this.native.applyOtaUpdate(deviceId, channel, version, rootUrl);
   }
 
+  async dismissOtaRun(deviceId: string): Promise<void> {
+    await this.native.dismissOtaRun(deviceId);
+  }
+
   async installWebappFromUrl(
     deviceId: string,
     url: string,
     sha256: string,
     size: number,
     provenance: string | null = null,
+    webappId: string | null = null,
+    webappName: string | null = null,
   ): Promise<BridgethingWebappInfo> {
-    return this.native.installWebappFromUrl(deviceId, url, sha256, size, provenance);
+    return this.native.installWebappFromUrl(deviceId, url, sha256, size, provenance, webappId, webappName);
   }
 
   async reconnectPeer(deviceId: string): Promise<void> {
@@ -364,8 +390,8 @@ export class BridgethingSession {
     this.native.setOnAncsAuthStatusChanged((deviceId, status) => {
       this.dispatch({ type: 'ancsAuthStatusChanged', deviceId, status });
     });
-    this.native.setOnWebappsChanged(deviceId => {
-      this.dispatch({ type: 'webappsChanged', deviceId });
+    this.native.setOnWebappsChanged(entry => {
+      this.dispatch({ type: 'webappsChanged', entry });
     });
     this.native.setOnWebappDocChanged((deviceId, webappId, key, value) => {
       this.dispatch({ type: 'webappDocChanged', deviceId, webappId, key, value: value ?? null });
@@ -373,8 +399,17 @@ export class BridgethingSession {
     this.native.setOnDeviceMetaChanged((deviceId, meta) => {
       this.dispatch({ type: 'deviceMetaChanged', deviceId, meta });
     });
-    this.native.setOnOtaEvent(event => {
-      this.dispatch({ type: 'otaEvent', event });
+    this.native.setOnOtaRunChanged(run => {
+      this.dispatch({ type: 'otaRunChanged', run });
+    });
+    this.native.setOnOtaAvailableChanged(available => {
+      this.dispatch({ type: 'otaAvailableChanged', available });
+    });
+    this.native.setOnOtaPollChanged(status => {
+      this.dispatch({ type: 'otaPollChanged', status });
+    });
+    this.native.setOnResumed(snapshot => {
+      this.dispatch({ type: 'resumed', snapshot });
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });
@@ -415,8 +450,15 @@ export class BridgethingDevice {
   deleteConfigField(webappId: string, key: string) {
     return this.session.deleteWebappConfigField(this.id, webappId, key);
   }
-  installAppFromUrl(url: string, sha256: string, size: number, provenance: string | null) {
-    return this.session.installWebappFromUrl(this.id, url, sha256, size, provenance);
+  installAppFromUrl(
+    url: string,
+    sha256: string,
+    size: number,
+    provenance: string | null,
+    webappId: string | null = null,
+    webappName: string | null = null,
+  ) {
+    return this.session.installWebappFromUrl(this.id, url, sha256, size, provenance, webappId, webappName);
   }
 }
 

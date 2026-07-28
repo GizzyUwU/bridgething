@@ -10,5 +10,5 @@ pub mod webapp_provenance_store;
 
 pub use device_store::DeviceStore;
 pub use kv_store::KvStore;
-pub use meta_store::MetaStore;
+pub use meta_store::{MetaStore, SlotsReleased};
 pub use webapp_provenance_store::WebappProvenanceStore;

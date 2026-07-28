@@ -10,13 +10,15 @@ import {
   type RecommendedSource,
   type SourceCatalog,
 } from '@bridgething/catalog';
+import type { BridgethingWebappInfo } from '@bridgething/session-react-native';
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
-import { getSession } from './session';
+import { getSession } from './bridge';
 import { useSessionStore } from './session';
 import { storage } from './storage';
-import { refreshWebapps, useWebappsStore } from './webapps';
+import { useWebappsStore } from './webapps';
 
 export const OFFICIAL_CATALOG_URL = 'https://apps.bridgething.com/catalog.json';
 
@@ -32,19 +34,18 @@ type CatalogState = {
   directory: Catalog | null;
   failures: SourceFailure[];
   refreshing: boolean;
+  previews: Record<string, { catalog: Catalog; fetchedAt: number }>;
 };
 
-type CatalogStore = CatalogState & {
-  patch(next: Partial<CatalogState>): void;
-};
+const PREVIEW_TTL_MS = 5 * 60 * 1000;
 
-const useCatalogStore = create<CatalogStore>(set => ({
+const useCatalogStore = create<CatalogState>(() => ({
   sources: loadSources(),
   catalogs: [],
   directory: null,
   failures: [],
   refreshing: false,
-  patch: next => set(next),
+  previews: {},
 }));
 
 function loadSources(): string[] {
@@ -65,24 +66,21 @@ function saveSources(urls: string[]): void {
   storage.set(SOURCES_KEY, JSON.stringify(urls));
 }
 
-async function fetchCatalog(url: string): Promise<Catalog> {
+export async function fetchCatalog(url: string): Promise<Catalog> {
   const response = await fetch(url, {
     headers: { accept: 'application/json' },
   });
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return validate(await response.json());
 }
 
 export async function refreshCatalog(): Promise<void> {
-  const store = useCatalogStore.getState();
-  store.patch({ refreshing: true });
+  const { sources } = useCatalogStore.getState();
+  useCatalogStore.setState({ refreshing: true });
 
   type Fetched = { url: string; catalog: Catalog } | SourceFailure;
-
   const results = await Promise.all<Fetched>(
-    [...store.sources, SOURCE_DIRECTORY_URL].map(async url => {
+    [...sources, SOURCE_DIRECTORY_URL].map(async url => {
       try {
         return { url, catalog: await fetchCatalog(url) };
       } catch (err) {
@@ -97,17 +95,13 @@ export async function refreshCatalog(): Promise<void> {
   const catalogs: SourceCatalog[] = [];
   const failures: SourceFailure[] = [];
   let directory: Catalog | null = null;
-
   for (const result of results) {
-    if ('reason' in result) {
-      failures.push(result);
-      continue;
-    }
-    if (result.url === SOURCE_DIRECTORY_URL) directory = result.catalog;
+    if ('reason' in result) failures.push(result);
+    else if (result.url === SOURCE_DIRECTORY_URL) directory = result.catalog;
     else catalogs.push(result);
   }
 
-  useCatalogStore.getState().patch({
+  useCatalogStore.setState({
     catalogs,
     directory,
     failures,
@@ -115,32 +109,52 @@ export async function refreshCatalog(): Promise<void> {
   });
 }
 
+export async function previewSource(url: string): Promise<Catalog> {
+  const cached = useCatalogStore.getState().previews[url];
+  if (cached && Date.now() - cached.fetchedAt < PREVIEW_TTL_MS) {
+    return cached.catalog;
+  }
+  const catalog = await fetchCatalog(url);
+  useCatalogStore.setState(s => ({
+    previews: { ...s.previews, [url]: { catalog, fetchedAt: Date.now() } },
+  }));
+  return catalog;
+}
+
+export function usePreview(url: string | null): Catalog | null {
+  return useCatalogStore(s =>
+    url ? (s.previews[url]?.catalog ?? null) : null,
+  );
+}
+
+export function useIsSubscribed(url: string): boolean {
+  return useCatalogStore(s => s.sources.includes(url));
+}
+
 export async function addSource(url: string): Promise<void> {
   const trimmed = url.trim();
-  const store = useCatalogStore.getState();
-  if (!trimmed || store.sources.includes(trimmed)) return;
-  const next = [...store.sources, trimmed];
+  const { sources } = useCatalogStore.getState();
+  if (!trimmed || sources.includes(trimmed)) return;
+  const next = [...sources, trimmed];
   saveSources(next);
-  store.patch({ sources: next });
+  useCatalogStore.setState({ sources: next });
   await refreshCatalog();
 }
 
 export async function removeSource(url: string): Promise<void> {
-  const store = useCatalogStore.getState();
-  if (!store.sources.includes(url)) return;
-  const next = store.sources.filter(u => u !== url);
+  const { sources, catalogs } = useCatalogStore.getState();
+  if (!sources.includes(url)) return;
+  const next = sources.filter(u => u !== url);
   saveSources(next);
-  store.patch({
+  useCatalogStore.setState({
     sources: next,
-    catalogs: store.catalogs.filter(entry => entry.url !== url),
+    catalogs: catalogs.filter(e => e.url !== url),
   });
   await refreshCatalog();
 }
 
-function installedFor(deviceId: string | null): InstalledWebapp[] {
-  if (!deviceId) return [];
-  const entry = useWebappsStore.getState().byDevice[deviceId];
-  return (entry?.list ?? []).map(info => ({
+function toInstalled(list: BridgethingWebappInfo[]): InstalledWebapp[] {
+  return list.map(info => ({
     id: info.id,
     version: info.version,
     source: info.source,
@@ -149,38 +163,75 @@ function installedFor(deviceId: string | null): InstalledWebapp[] {
   }));
 }
 
-function deviceLibVersion(deviceId: string | null): string | null {
-  if (!deviceId) return null;
-  return (
-    useSessionStore.getState().deviceMeta[deviceId]?.libbridgethingVersion ??
-    null
+function useDerivedInputs(deviceId: string | null) {
+  const catalogs = useCatalogStore(s => s.catalogs);
+  const installed = useWebappsStore(
+    useShallow(s => (deviceId ? (s.byDevice[deviceId]?.list ?? []) : [])),
+  );
+  const deviceLibVersion = useSessionStore(s =>
+    deviceId ? (s.deviceMeta[deviceId]?.libbridgethingVersion ?? null) : null,
+  );
+  return { catalogs, installed, deviceLibVersion };
+}
+
+export function useListings(deviceId: string | null): CatalogAppListing[] {
+  const { catalogs, installed, deviceLibVersion } = useDerivedInputs(deviceId);
+  return useMemo(
+    () =>
+      aggregate({
+        orderedCatalogs: catalogs,
+        installed: toInstalled(installed),
+        deviceLibVersion,
+      }),
+    [catalogs, installed, deviceLibVersion],
   );
 }
 
-export function listingsFor(deviceId: string | null): CatalogAppListing[] {
-  const { catalogs } = useCatalogStore.getState();
-  return aggregate({
-    orderedCatalogs: catalogs,
-    installed: installedFor(deviceId),
-    deviceLibVersion: deviceLibVersion(deviceId),
-  });
+export function useSourceListings(
+  url: string | null,
+  deviceId: string | null,
+): CatalogAppListing[] {
+  const preview = usePreview(url);
+  const { catalogs, installed, deviceLibVersion } = useDerivedInputs(deviceId);
+  return useMemo(() => {
+    if (!url) return [];
+    const catalog = preview ?? catalogs.find(c => c.url === url)?.catalog;
+    if (!catalog) return [];
+    return aggregate({
+      orderedCatalogs: [{ url, catalog }],
+      installed: toInstalled(installed),
+      deviceLibVersion,
+    });
+  }, [url, preview, catalogs, installed, deviceLibVersion]);
 }
 
-export function updatesFor(deviceId: string): CatalogAppUpdate[] {
-  const { catalogs } = useCatalogStore.getState();
-  return resolveUpdates({
-    catalogs: new Map(catalogs.map(entry => [entry.url, entry.catalog])),
-    installed: installedFor(deviceId),
-    deviceLibVersion: deviceLibVersion(deviceId),
-  });
+export function useUpdates(deviceId: string | null): CatalogAppUpdate[] {
+  const { catalogs, installed, deviceLibVersion } = useDerivedInputs(deviceId);
+  return useMemo(
+    () =>
+      resolveUpdates({
+        catalogs: new Map(catalogs.map(e => [e.url, e.catalog])),
+        installed: toInstalled(installed),
+        deviceLibVersion,
+      }),
+    [catalogs, installed, deviceLibVersion],
+  );
 }
 
-export function quickAddSources(): RecommendedSource[] {
-  const { catalogs, directory, sources } = useCatalogStore.getState();
-  const ordered: SourceCatalog[] = directory
-    ? [{ url: SOURCE_DIRECTORY_URL, catalog: directory }, ...catalogs]
-    : catalogs;
-  return resolveRecommended({ orderedCatalogs: ordered, subscribed: sources });
+export function useQuickAddSources(): RecommendedSource[] {
+  const catalogs = useCatalogStore(s => s.catalogs);
+  const directory = useCatalogStore(s => s.directory);
+  const sources = useCatalogStore(s => s.sources);
+
+  return useMemo(() => {
+    const ordered: SourceCatalog[] = directory
+      ? [{ url: SOURCE_DIRECTORY_URL, catalog: directory }, ...catalogs]
+      : catalogs;
+    return resolveRecommended({
+      orderedCatalogs: ordered,
+      subscribed: sources,
+    });
+  }, [catalogs, directory, sources]);
 }
 
 export async function installApp(
@@ -195,8 +246,9 @@ export async function installApp(
     version.download.sha256,
     version.download.size,
     listing.sourceUrl,
+    listing.app.id,
+    listing.app.name,
   );
-  await refreshWebapps(deviceId);
 }
 
 export function useCatalog<T>(selector: (state: CatalogState) => T): T {

@@ -212,7 +212,7 @@ var require_validator = __commonJS((exports, module) => {
   var func1 = require_ucs2length().default;
   var schema33 = { type: "object", additionalProperties: false, required: ["id", "name", "description", "author", "icon", "homepage", "source", "versions"], properties: { id: { $ref: "#/$defs/Uuid" }, name: { type: "string", minLength: 1, maxLength: 100, description: "Display name." }, description: { type: "string", minLength: 1, maxLength: 300, description: "One-line tagline for store cards." }, author: { type: "string", minLength: 1, maxLength: 100 }, icon: { type: ["string", "null"], format: "uri", description: "Hosted square icon. The publish step extracts the bundle's icon and uploads it; null until then." }, homepage: { type: ["string", "null"], format: "uri" }, source: { type: ["string", "null"], format: "uri", description: "Repository or source URL, for users who want to check it themselves." }, versions: { type: "array", minItems: 1, items: { $ref: "#/$defs/AppVersion" }, description: "Published versions, newest-first. The companion installs the newest version compatible with the connected device." } } };
   var formats8 = /^(?:urn:uuid:)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-  var schema35 = { type: "object", additionalProperties: false, required: ["version", "released_at", "download", "permissions", "min_libbridgething_version", "changelog"], properties: { version: { $ref: "#/$defs/Version" }, released_at: { type: "string", format: "date-time" }, download: { $ref: "#/$defs/Download" }, permissions: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true, description: "Permission catalog keys this version requests (net.fetch, geo, ...). Shown at install, informational, never a gate." }, min_libbridgething_version: { $ref: "#/$defs/Semver" }, changelog: { type: ["string", "null"], description: "Markdown changelog for this version." } } };
+  var schema35 = { type: "object", additionalProperties: false, required: ["version", "released_at", "download", "permissions", "min_libbridgething_version", "changelog"], properties: { version: { $ref: "#/$defs/Version" }, released_at: { type: "string", format: "date-time" }, download: { $ref: "#/$defs/Download" }, permissions: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true, description: "Permission catalog keys this version requests (net.fetch, geo, ...). Shown at install, informational, never a gate." }, role: { enum: ["standard", "launcher"], description: "Mirrors the bundle manifest's role. A launcher can take the device's launcher slot and replace the built-in hub. Absent means standard." }, provides_overlay: { type: "boolean", description: "Whether this version ships an overlay the device can inject over every webapp. Absent means it does not." }, min_libbridgething_version: { $ref: "#/$defs/Semver" }, changelog: { type: ["string", "null"], description: "Markdown changelog for this version." } } };
   var pattern4 = new RegExp("^[A-Za-z0-9](?:[A-Za-z0-9.+\\-]*[A-Za-z0-9])?$", "u");
   var pattern6 = new RegExp("^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+\\-][0-9A-Za-z.\\-]+)?$", "u");
   var pattern5 = new RegExp("^[a-f0-9]{64}$", "u");
@@ -411,7 +411,7 @@ var require_validator = __commonJS((exports, module) => {
         errors++;
       }
       for (const key0 in data) {
-        if (!(key0 === "version" || key0 === "released_at" || key0 === "download" || key0 === "permissions" || key0 === "min_libbridgething_version" || key0 === "changelog")) {
+        if (!(key0 === "version" || key0 === "released_at" || key0 === "download" || key0 === "permissions" || key0 === "role" || key0 === "provides_overlay" || key0 === "min_libbridgething_version" || key0 === "changelog")) {
           const err6 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
           if (vErrors === null) {
             vErrors = [err6];
@@ -548,20 +548,21 @@ var require_validator = __commonJS((exports, module) => {
           errors++;
         }
       }
-      if (data.min_libbridgething_version !== undefined) {
-        let data5 = data.min_libbridgething_version;
-        if (typeof data5 === "string") {
-          if (!pattern6.test(data5)) {
-            const err17 = { instancePath: instancePath + "/min_libbridgething_version", schemaPath: "#/$defs/Semver/pattern", keyword: "pattern", params: { pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+\\-][0-9A-Za-z.\\-]+)?$" }, message: 'must match pattern "' + "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+\\-][0-9A-Za-z.\\-]+)?$" + '"' };
-            if (vErrors === null) {
-              vErrors = [err17];
-            } else {
-              vErrors.push(err17);
-            }
-            errors++;
+      if (data.role !== undefined) {
+        let data5 = data.role;
+        if (!(data5 === "standard" || data5 === "launcher")) {
+          const err17 = { instancePath: instancePath + "/role", schemaPath: "#/properties/role/enum", keyword: "enum", params: { allowedValues: schema35.properties.role.enum }, message: "must be equal to one of the allowed values" };
+          if (vErrors === null) {
+            vErrors = [err17];
+          } else {
+            vErrors.push(err17);
           }
-        } else {
-          const err18 = { instancePath: instancePath + "/min_libbridgething_version", schemaPath: "#/$defs/Semver/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+          errors++;
+        }
+      }
+      if (data.provides_overlay !== undefined) {
+        if (typeof data.provides_overlay !== "boolean") {
+          const err18 = { instancePath: instancePath + "/provides_overlay", schemaPath: "#/properties/provides_overlay/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
           if (vErrors === null) {
             vErrors = [err18];
           } else {
@@ -570,24 +571,46 @@ var require_validator = __commonJS((exports, module) => {
           errors++;
         }
       }
-      if (data.changelog !== undefined) {
-        let data6 = data.changelog;
-        if (typeof data6 !== "string" && data6 !== null) {
-          const err19 = { instancePath: instancePath + "/changelog", schemaPath: "#/properties/changelog/type", keyword: "type", params: { type: schema35.properties.changelog.type }, message: "must be string,null" };
+      if (data.min_libbridgething_version !== undefined) {
+        let data7 = data.min_libbridgething_version;
+        if (typeof data7 === "string") {
+          if (!pattern6.test(data7)) {
+            const err19 = { instancePath: instancePath + "/min_libbridgething_version", schemaPath: "#/$defs/Semver/pattern", keyword: "pattern", params: { pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+\\-][0-9A-Za-z.\\-]+)?$" }, message: 'must match pattern "' + "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[.+\\-][0-9A-Za-z.\\-]+)?$" + '"' };
+            if (vErrors === null) {
+              vErrors = [err19];
+            } else {
+              vErrors.push(err19);
+            }
+            errors++;
+          }
+        } else {
+          const err20 = { instancePath: instancePath + "/min_libbridgething_version", schemaPath: "#/$defs/Semver/type", keyword: "type", params: { type: "string" }, message: "must be string" };
           if (vErrors === null) {
-            vErrors = [err19];
+            vErrors = [err20];
           } else {
-            vErrors.push(err19);
+            vErrors.push(err20);
+          }
+          errors++;
+        }
+      }
+      if (data.changelog !== undefined) {
+        let data8 = data.changelog;
+        if (typeof data8 !== "string" && data8 !== null) {
+          const err21 = { instancePath: instancePath + "/changelog", schemaPath: "#/properties/changelog/type", keyword: "type", params: { type: schema35.properties.changelog.type }, message: "must be string,null" };
+          if (vErrors === null) {
+            vErrors = [err21];
+          } else {
+            vErrors.push(err21);
           }
           errors++;
         }
       }
     } else {
-      const err20 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+      const err22 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
       if (vErrors === null) {
-        vErrors = [err20];
+        vErrors = [err22];
       } else {
-        vErrors.push(err20);
+        vErrors.push(err22);
       }
       errors++;
     }

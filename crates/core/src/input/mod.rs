@@ -50,7 +50,10 @@ async fn run(_state: State, cancel: CancellationToken) {
 
 #[cfg_attr(not(feature = "input"), allow(dead_code))]
 pub(crate) async fn trigger_hub_switch(state: &State) {
-  let id = crate::state::HUB_WEBAPP_ID;
+  let Ok(Some(id)) = state.launcher_webapp().await else {
+    tracing::warn!("hub gesture fired but no launcher resolves; ignoring");
+    return;
+  };
   if matches!(state.active_webapp().await, Ok(Some(active)) if active == id) {
     tracing::debug!("hub gesture fired while already on the launcher; ignoring");
     return;
@@ -59,7 +62,7 @@ pub(crate) async fn trigger_hub_switch(state: &State) {
     state.webapps.rescan().await;
   }
   if state.webapps.resolve(id).await.is_none() {
-    tracing::warn!("hub gesture fired but hub webapp is not installed; ignoring");
+    tracing::warn!("hub gesture fired but launcher {id} is not installed; ignoring");
     return;
   }
   if let Err(e) = state.set_active_webapp(id).await {

@@ -59,6 +59,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private let stateLock = NSLock()
     private var foreground = false
+    private var foregroundGen: UInt64 = 0
+    private var webappsGen: [String: UInt64] = [:]
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var reloadDetacher: ReloadDetacher?
     private var companion: BridgethingCompanion?
@@ -81,10 +83,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
     private var onAncsAuthStatusChanged: (@Sendable (String, BridgethingAncsAuthStatus) -> Void)?
     private var onLog: (@Sendable (String, String) -> Void)?
-    private var onWebappsChanged: (@Sendable (String) -> Void)?
+    private var onWebappsChanged: (@Sendable (BridgethingDeviceWebappsEntry) -> Void)?
     private var onWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
-    private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
+    private var onOtaRunChanged: (@Sendable (BridgethingOtaRun) -> Void)?
+    private var onOtaAvailableChanged: (@Sendable (BridgethingOtaAvailable) -> Void)?
+    private var onOtaPollChanged: (@Sendable (BridgethingOtaPollStatus) -> Void)?
+    private var onResumed: (@Sendable (BridgethingSessionSnapshot) -> Void)?
     private var logStreamingDesired: Bool = false
     private var localLogStreamingDesired: Bool = false
 
@@ -110,7 +115,27 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
     private func setForeground(_ value: Bool) {
-        stateLock.withLock { foreground = value }
+        if !value {
+            stateLock.withLock {
+                foreground = false
+                foregroundGen &+= 1
+            }
+            return
+        }
+        let gen = stateLock.withLock { () -> UInt64 in
+            foregroundGen &+= 1
+            return foregroundGen
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.snapshot()
+            let callback = self.stateLock.withLock { () -> (@Sendable (BridgethingSessionSnapshot) -> Void)? in
+                guard self.foregroundGen == gen else { return nil }
+                self.foreground = true
+                return self.onResumed
+            }
+            callback?(snapshot)
+        }
     }
 
     private func registerReloadDetach() {
@@ -131,7 +156,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             onWebappsChanged = nil
             onWebappDocChanged = nil
             onDeviceMetaChanged = nil
-            onOtaEvent = nil
+            onOtaRunChanged = nil
+            onOtaAvailableChanged = nil
+            onOtaPollChanged = nil
+            onResumed = nil
         }
     }
 
@@ -169,16 +197,24 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             }
         }
         let ota = await companion.ota
-        let otaStream = ota.events
+        let otaStream = ota.storeChanges
         let otaTask = Task { [weak self] in
-            for await event in otaStream {
-                self?.emitOtaEvent(toRNOtaEvent(event))
+            for await change in otaStream {
+                self?.emitOtaStoreChange(change)
             }
         }
         let metaStream = ota.metaChanged
         let metaTask = Task { [weak self] in
             for await (deviceId, meta) in metaStream {
-                self?.emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
+                guard let self else { return }
+                self.emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
+                if let cleared = ota.noteRunMeta(
+                    deviceId: deviceId,
+                    daemonVersion: meta.appVersion,
+                    imageVersion: meta.imageVersion
+                ) {
+                    self.emitOtaStoreChange(.run(cleared))
+                }
             }
         }
         let docStream = companion.gateway.webapp.docChanged
@@ -356,6 +392,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             (Array(self.peers.values), self.lastNowPlaying, self.priority)
         }
 
+        var webappEntries: [BridgethingDeviceWebappsEntry] = []
+        for peer in peerList where peer.status == .connected {
+            if let entry = await webappsEntry(deviceId: peer.id) { webappEntries.append(entry) }
+        }
+
+        let ota = await companion?.ota
+
         return BridgethingSessionSnapshot(
             hostInfo: rnHostInfo(),
             providers: providerInfos(),
@@ -366,8 +409,17 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             nowPlaying: nowPlaying,
             deviceMeta: deviceMetaEntries,
             capabilityFlags: Self.loadCapabilityFlags(),
-            otaPollConfig: Self.loadOtaPollConfig()
+            otaPollConfig: Self.loadOtaPollConfig(),
+            webapps: webappEntries,
+            otaRuns: (ota?.retainedRuns() ?? []).map(toRNOtaRun),
+            otaAvailable: (ota?.retainedAvailable() ?? []).map(toRNOtaAvailable),
+            otaPoll: toRNOtaPollStatus(ota?.retainedPollStatus() ?? OtaPollStatus())
         )
+    }
+
+    public func dismissOtaRun(deviceId: String) async {
+        guard let companion = stateLock.withLock({ self.companion }) else { return }
+        await companion.ota.dismissRun(deviceId: deviceId)
     }
 
     public func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine] {
@@ -503,6 +555,23 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let result = try await companion.gateway.webapp.switchTo(deviceId: deviceId, req)
         _ = try unwrapWebappErr(result, label: "switchWebapp")
         emitWebappsChanged(deviceId)
+    }
+
+    public func getWebappSlots(deviceId: String) async throws -> BridgethingWebappSlots {
+        let companion = try requirePeerConnected(deviceId)
+        let result = try await companion.gateway.webapp.getSlots(deviceId: deviceId)
+        return Self.toRNWebappSlots(try unwrapVoidErr(result, label: "getWebappSlots"))
+    }
+
+    public func setWebappSlot(deviceId: String, slot: BridgethingWebappSlot, id: String?) async throws
+        -> BridgethingWebappSlots
+    {
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappSetSlot(slot: slot == .launcher ? .launcher : .overlay, id: try id.map(parseUuid))
+        let result = try await companion.gateway.webapp.setSlot(deviceId: deviceId, req)
+        let slots = try unwrapWebappErr(result, label: "setWebappSlot")
+        emitWebappsChanged(deviceId)
+        return Self.toRNWebappSlots(slots)
     }
 
     public func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon? {
@@ -675,7 +744,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         url: String,
         sha256: String,
         size: Double,
-        provenance: String?
+        provenance: String?,
+        webappId: String?,
+        webappName: String?
     ) async throws -> BridgethingWebappInfo {
         let companion = try requirePeerConnected(deviceId)
         guard let parsed = URL(string: url), size >= 0 else { throw SessionError.invalidArchive }
@@ -685,7 +756,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             url: parsed,
             sha256: sha256.lowercased(),
             size: UInt64(size),
-            provenance: provenance
+            provenance: provenance,
+            webappId: webappId,
+            webappName: webappName
         )
         switch result {
         case let .installed(info):
@@ -897,7 +970,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    public func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void) {
+    public func setOnWebappsChanged(_ callback: @escaping @Sendable (BridgethingDeviceWebappsEntry) -> Void) {
         stateLock.withLock { onWebappsChanged = callback }
     }
 
@@ -910,8 +983,20 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
 
-    public func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void) {
-        stateLock.withLock { onOtaEvent = callback }
+    public func setOnOtaRunChanged(_ callback: @escaping @Sendable (BridgethingOtaRun) -> Void) {
+        stateLock.withLock { onOtaRunChanged = callback }
+    }
+
+    public func setOnOtaAvailableChanged(_ callback: @escaping @Sendable (BridgethingOtaAvailable) -> Void) {
+        stateLock.withLock { onOtaAvailableChanged = callback }
+    }
+
+    public func setOnOtaPollChanged(_ callback: @escaping @Sendable (BridgethingOtaPollStatus) -> Void) {
+        stateLock.withLock { onOtaPollChanged = callback }
+    }
+
+    public func setOnResumed(_ callback: @escaping @Sendable (BridgethingSessionSnapshot) -> Void) {
+        stateLock.withLock { onResumed = callback }
     }
 
     // MARK: - Cross-platform AccessorySetupKit picker
@@ -1000,7 +1085,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             stateLock.withLock { peers[device.id] = peer }
             emitPeerConnected(peer)
         case let .disconnected(id):
-            stateLock.withLock { _ = peers.removeValue(forKey: id) }
+            stateLock.withLock {
+                _ = peers.removeValue(forKey: id)
+                _ = webappsGen.removeValue(forKey: id)
+            }
             emitPeerDisconnected(id)
         case let .linkFailed(device, reason):
             let peer = BridgethingSessionPeer(id: device.id, name: device.name, status: .linkfailed, linkError: reason)
@@ -1094,7 +1182,48 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
     private func emitWebappsChanged(_ deviceId: String) {
-        stateLock.withLock { foreground ? onWebappsChanged : nil }?(deviceId)
+        let gen = stateLock.withLock { () -> UInt64 in
+            let next = (webappsGen[deviceId] ?? 0) &+ 1
+            webappsGen[deviceId] = next
+            return next
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            for attempt in 1...Self.webappsReadAttempts {
+                let superseded = self.stateLock.withLock { self.webappsGen[deviceId] != gen }
+                if superseded { return }
+                if let entry = await self.webappsEntry(deviceId: deviceId) {
+                    let cb = self.stateLock.withLock { () -> (@Sendable (BridgethingDeviceWebappsEntry) -> Void)? in
+                        guard self.webappsGen[deviceId] == gen, self.foreground else { return nil }
+                        return self.onWebappsChanged
+                    }
+                    cb?(entry)
+                    return
+                }
+                if attempt < Self.webappsReadAttempts {
+                    try? await Task.sleep(for: .milliseconds(400 * attempt))
+                }
+            }
+        }
+    }
+
+    private static let webappsReadAttempts = 3
+
+    private func webappsEntry(deviceId: String) async -> BridgethingDeviceWebappsEntry? {
+        guard let list = try? await listWebapps(deviceId: deviceId) else { return nil }
+        let active = try? await currentWebapp(deviceId: deviceId)
+        return BridgethingDeviceWebappsEntry(deviceId: deviceId, webapps: list, active: active ?? nil)
+    }
+
+    private func emitOtaStoreChange(_ change: OtaStoreChange) {
+        switch change {
+        case let .run(run):
+            stateLock.withLock { foreground ? onOtaRunChanged : nil }?(toRNOtaRun(run))
+        case let .available(available):
+            stateLock.withLock { foreground ? onOtaAvailableChanged : nil }?(toRNOtaAvailable(available))
+        case let .poll(status):
+            stateLock.withLock { foreground ? onOtaPollChanged : nil }?(toRNOtaPollStatus(status))
+        }
     }
 
     private func emitWebappDocChanged(_ deviceId: String, _ webappId: String, _ key: String, _ value: String?) {
@@ -1106,9 +1235,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
 
-    private func emitOtaEvent(_ event: BridgethingOtaEvent) {
-        stateLock.withLock { foreground ? onOtaEvent : nil }?(event)
-    }
+
 
     // MARK: - Wire → RN conversion
 
@@ -1190,8 +1317,16 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             description: info.description,
             iconHash: info.iconHash,
             settingsHash: info.settingsHash,
+            overlayHash: info.overlayHash,
             config: info.config.map(toRNConfigField),
             permissions: info.permissions
+        )
+    }
+
+    private static func toRNWebappSlots(_ slots: BridgethingSchema.WebappSlots) -> BridgethingWebappSlots {
+        BridgethingWebappSlots(
+            launcher: slots.launcher?.uuidString.lowercased(),
+            overlay: slots.overlay?.uuidString.lowercased()
         )
     }
 
@@ -1346,25 +1481,6 @@ private func toRNAncsSetupResult(_ result: AncsSetupResult) -> BridgethingAncsSe
 }
 
 
-private func rnOtaEvent(
-    kind: BridgethingOtaEventKind,
-    updatedAt: String? = nil, reason: String? = nil, deviceId: String? = nil,
-    otaKind: BridgethingOtaKind? = nil, fromVersion: String? = nil, toVersion: String? = nil,
-    releaseVersion: String? = nil, daemonVersion: String? = nil, imageVersion: String? = nil,
-    steps: [BridgethingOtaStep]? = nil, stepId: Double? = nil,
-    phase: BridgethingOtaPhase? = nil, percent: Double? = nil, dwlPercent: Double? = nil,
-    stageAsset: String? = nil, stageReceived: Double? = nil, stageTotal: Double? = nil,
-    stageRatePerSec: Double? = nil, stageEtaSeconds: Double? = nil
-) -> BridgethingOtaEvent {
-    BridgethingOtaEvent(
-        kind: kind, updatedAt: updatedAt, reason: reason, deviceId: deviceId, otaKind: otaKind,
-        fromVersion: fromVersion, toVersion: toVersion,
-        releaseVersion: releaseVersion, daemonVersion: daemonVersion, imageVersion: imageVersion,
-        steps: steps, stepId: stepId, phase: phase, percent: percent, dwlPercent: dwlPercent,
-        stageAsset: stageAsset, stageReceived: stageReceived, stageTotal: stageTotal,
-        stageRatePerSec: stageRatePerSec, stageEtaSeconds: stageEtaSeconds
-    )
-}
 
 private func rnOtaStepKind(_ k: OtaStepKind) -> BridgethingOtaStepKind {
     switch k {
@@ -1375,77 +1491,73 @@ private func rnOtaStepKind(_ k: OtaStepKind) -> BridgethingOtaStepKind {
     }
 }
 
-private func bytePercent(_ n: UInt64, _ d: UInt64) -> Double {
-    d == 0 ? 0 : min(100, Double(n) * 100 / Double(d))
+
+private func toRNOtaRunPhase(_ p: OtaRunPhase) -> BridgethingOtaPhase {
+    switch p {
+    case .idle: .idle
+    case .downloading: .downloading
+    case .streaming: .streaming
+    case .verifying: .verifying
+    case .writing: .writing
+    case .confirming: .confirming
+    case .reboot: .reboot
+    case .completed: .completed
+    case .failed: .failed
+    }
 }
 
-private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
-    switch event {
-    case let .manifestPolled(updatedAt):
-        return rnOtaEvent(kind: .manifestpolled, updatedAt: updatedAt)
-    case let .manifestPollFailed(reason):
-        return rnOtaEvent(kind: .manifestpollfailed, reason: reason)
-    case let .updateAvailable(deviceId, release, daemonVersion, imageVersion):
-        return rnOtaEvent(
-            kind: .updateavailable, deviceId: deviceId,
-            toVersion: release, releaseVersion: release,
-            daemonVersion: daemonVersion, imageVersion: imageVersion
-        )
-    case let .planned(deviceId, kind, release, daemonVersion, imageVersion, steps):
-        return rnOtaEvent(
-            kind: .planned, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon,
-            releaseVersion: release, daemonVersion: daemonVersion, imageVersion: imageVersion,
-            steps: steps.map {
-                BridgethingOtaStep(id: Double($0.id), kind: rnOtaStepKind($0.kind), label: $0.label, bytes: Double($0.bytes))
-            }
-        )
-    case let .progress(deviceId, kind, stepId, snapshot):
-        let otaKind: BridgethingOtaKind = kind == .image ? .image : .daemon
-        let sid = Double(stepId)
-        switch snapshot {
-        case .idle:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .idle, percent: 0)
-        case let .downloading(asset, received, total, rate):
-            return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
-                phase: .downloading, percent: bytePercent(received, total),
-                stageAsset: asset, stageReceived: Double(received), stageTotal: Double(total),
-                stageRatePerSec: rate
-            )
-        case let .streaming(asset, sent, total, rate, eta):
-            return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
-                phase: .streaming, percent: bytePercent(sent, total),
-                stageAsset: asset, stageReceived: Double(sent), stageTotal: Double(total),
-                stageRatePerSec: rate, stageEtaSeconds: eta
-            )
-        case let .applying(phase: ph, writePercent: wp, dwlPercent: dp, dwlBytes: db):
-            let mapped: BridgethingOtaPhase = switch ph {
-            case .streaming: .streaming
-            case .verifying: .verifying
-            case .writing: .writing
-            case .confirming: .confirming
-            case .reboot: .reboot
-            }
-            return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
-                phase: mapped, percent: Double(wp), dwlPercent: Double(dp),
-                stageReceived: dp < 100 && db > 0 ? Double(db) : nil
-            )
-        case .staged:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .writing, percent: 100)
-        case .completed:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .completed, percent: 100)
-        case let .failed(r):
-            return rnOtaEvent(kind: .progress, reason: r, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .failed, percent: 0)
-        }
-    case let .updated(deviceId, kind, version):
-        return rnOtaEvent(
-            kind: .updated, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon, toVersion: version
-        )
-    case let .failed(deviceId, kind, reason):
-        return rnOtaEvent(
-            kind: .failed, reason: reason, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon
-        )
+private func toRNOtaKind(_ k: OtaKind) -> BridgethingOtaKind {
+    switch k {
+    case .image: .image
+    case .daemon: .daemon
+    case .builtinWebapp: .builtinwebapp
+    case .installedWebapp: .installedwebapp
     }
+}
+
+private func toRNOtaOutcome(_ o: OtaRunOutcome) -> BridgethingOtaOutcome {
+    switch o {
+    case .succeeded: .succeeded
+    case .failed: .failed
+    case .cancelled: .cancelled
+    }
+}
+
+func toRNOtaRun(_ run: OtaRun) -> BridgethingOtaRun {
+    BridgethingOtaRun(
+        runId: run.runId,
+        deviceId: run.deviceId,
+        otaKind: toRNOtaKind(run.kind),
+        phase: toRNOtaRunPhase(run.phase),
+        steps: run.steps.map {
+            BridgethingOtaStep(id: Double($0.id), kind: rnOtaStepKind($0.kind), label: $0.label, bytes: Double($0.bytes))
+        },
+        stepId: Double(run.stepId),
+        startedAt: run.startedAt.timeIntervalSince1970 * 1000,
+        phaseStartedAt: run.phaseStartedAt.timeIntervalSince1970 * 1000,
+        stageReceived: run.stageReceived.map(Double.init),
+        stageTotal: run.stageTotal.map(Double.init),
+        ratePerSec: run.ratePerSec,
+        dwlPercent: run.dwlPercent.map(Double.init),
+        outcome: run.outcome.map(toRNOtaOutcome),
+        error: run.error,
+        releaseVersion: run.releaseVersion,
+        daemonVersion: run.daemonVersion,
+        imageVersion: run.imageVersion,
+        webappId: run.webappId,
+        webappName: run.webappName
+    )
+}
+
+func toRNOtaAvailable(_ a: OtaAvailable) -> BridgethingOtaAvailable {
+    BridgethingOtaAvailable(
+        deviceId: a.deviceId,
+        releaseVersion: a.releaseVersion,
+        daemonVersion: a.daemonVersion,
+        imageVersion: a.imageVersion
+    )
+}
+
+func toRNOtaPollStatus(_ s: OtaPollStatus) -> BridgethingOtaPollStatus {
+    BridgethingOtaPollStatus(lastPolledAt: s.lastPolledAt, error: s.error)
 }

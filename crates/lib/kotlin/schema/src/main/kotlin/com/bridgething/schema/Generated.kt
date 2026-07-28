@@ -1753,6 +1753,13 @@ data class OtaError (
 	val msg: String
 )
 
+/// Terminal success from the OTA orchestrator, emitted for every `OtaKind`.
+@Serializable
+data class OtaFinished (
+	val kind: OtaKind,
+	val updateId: String
+)
+
 /// Stage of the OTA orchestrator. The phase set is shared between
 /// kinds, with non-image kinds emitting a subset.
 /// 
@@ -2674,13 +2681,13 @@ data class VolumeChanged (
 
 @Serializable
 data class WebappActive (
-	val id: ByteArray? = null,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID? = null,
 	val name: String? = null
 )
 
 @Serializable
 data class WebappActiveChanged (
-	val id: ByteArray? = null,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID? = null,
 	val name: String? = null,
 	val art: ArtProfile? = null
 )
@@ -2786,6 +2793,8 @@ enum class WebappSource(val string: String) {
 /// listings (the hub grid, etc); `Launcher` is itself a launcher and is
 /// hidden from those listings. The daemon filters `Launcher` bundles
 /// out of `client.webapp.list`; the gateway list keeps everything.
+/// Declaring `Launcher` is also what makes a bundle eligible for the
+/// device's launcher slot.
 @Serializable
 enum class WebappRole(val string: String) {
 	@SerialName("standard")
@@ -2825,6 +2834,7 @@ data class WebappInfo (
 	val description: String? = null,
 	val iconHash: String? = null,
 	val settingsHash: String? = null,
+	val overlayHash: String? = null,
 	val config: List<ConfigField>,
 	val permissions: List<String>,
 	val rendersVoiceDisplay: Boolean = false,
@@ -2848,6 +2858,7 @@ data class WebappManifest (
 	val description: String? = null,
 	val icon: String? = null,
 	val settings: String? = null,
+	val overlay: String? = null,
 	val role: WebappRole = WebappRole.Standard,
 	val config: List<ConfigField> = emptyList(),
 	val permissions: List<String> = emptyList(),
@@ -2862,6 +2873,8 @@ enum class WebappResourceKind(val string: String) {
 	Icon("icon"),
 	@SerialName("settings")
 	Settings("settings"),
+	@SerialName("overlay")
+	Overlay("overlay"),
 }
 
 @Serializable
@@ -2878,6 +2891,26 @@ data class WebappResourceReply (
 	val sha256: String,
 	val mime: String? = null,
 	val body: TransferBody? = null
+)
+
+@Serializable
+enum class WebappSlot(val string: String) {
+	@SerialName("launcher")
+	Launcher("launcher"),
+	@SerialName("overlay")
+	Overlay("overlay"),
+}
+
+@Serializable
+data class WebappSetSlot (
+	val slot: WebappSlot,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID? = null
+)
+
+@Serializable
+data class WebappSlots (
+	@Serializable(with = MsgpackUuidSerializer::class) val launcher: UUID? = null,
+	@Serializable(with = MsgpackUuidSerializer::class) val overlay: UUID? = null
 )
 
 @Serializable
@@ -3147,6 +3180,9 @@ sealed class BridgeToGatewaySystemMsg {
 	@SerialName("otaError")
 	data class OtaError(val data: com.bridgething.schema.OtaError): BridgeToGatewaySystemMsg()
 	@Serializable
+	@SerialName("otaFinished")
+	data class OtaFinished(val data: com.bridgething.schema.OtaFinished): BridgeToGatewaySystemMsg()
+	@Serializable
 	@SerialName("otaBeginAck")
 	data class OtaBeginAck(val data: com.bridgething.schema.OtaBeginAck): BridgeToGatewaySystemMsg()
 	@Serializable
@@ -3246,6 +3282,9 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("resource")
 	data class Resource(val data: WebappResourceReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("slots")
+	data class Slots(val data: WebappSlots): BridgeToGatewayWebappMsg()
 	@Serializable
 	@SerialName("configGet")
 	data class ConfigGet(val data: WebappConfigGetReply): BridgeToGatewayWebappMsg()
@@ -3587,6 +3626,12 @@ sealed class GatewayToBridgeWebappMsg {
 	@SerialName("resource")
 	data class Resource(val data: WebappResource): GatewayToBridgeWebappMsg()
 	@Serializable
+	@SerialName("getSlots")
+	object GetSlots: GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("setSlot")
+	data class SetSlot(val data: WebappSetSlot): GatewayToBridgeWebappMsg()
+	@Serializable
 	@SerialName("configGet")
 	data class ConfigGet(val data: WebappConfigGet): GatewayToBridgeWebappMsg()
 	@Serializable
@@ -3782,6 +3827,18 @@ data class WebappErrorResourceNotAvailableInner (
 	val id: String
 )
 
+/// Generated type representing the anonymous struct variant `NotALauncher` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorNotALauncherInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `NoOverlay` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorNoOverlayInner (
+	val id: String
+)
+
 /// Generated type representing the anonymous struct variant `UnknownConfigKey` of the `WebappError` Rust enum
 @Serializable
 data class WebappErrorUnknownConfigKeyInner (
@@ -3845,11 +3902,19 @@ sealed class WebappError {
 	@Serializable
 	@SerialName("invalidManifest")
 	data class InvalidManifest(val data: WebappErrorInvalidManifestInner): WebappError()
-	/// The requested resource (icon / settings page) isn't declared by the
-	/// webapp's manifest or its file is missing on disk.
+	/// The requested resource (icon / settings page / overlay) isn't declared
+	/// by the webapp's manifest or its file is missing on disk.
 	@Serializable
 	@SerialName("resourceNotAvailable")
 	data class ResourceNotAvailable(val data: WebappErrorResourceNotAvailableInner): WebappError()
+	/// Launcher slot rejected: the bundle does not declare `role: launcher`.
+	@Serializable
+	@SerialName("notALauncher")
+	data class NotALauncher(val data: WebappErrorNotALauncherInner): WebappError()
+	/// Overlay slot rejected: the bundle declares no overlay entry.
+	@Serializable
+	@SerialName("noOverlay")
+	data class NoOverlay(val data: WebappErrorNoOverlayInner): WebappError()
 	/// Config key is not declared in the webapp's manifest schema.
 	@Serializable
 	@SerialName("unknownConfigKey")

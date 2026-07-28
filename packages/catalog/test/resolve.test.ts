@@ -160,6 +160,26 @@ describe('aggregate', () => {
     expect(weather.alsoAvailableFrom).toEqual([]);
   });
 
+  test('a newer listing than what is installed is an update', () => {
+    const a = catalog([app(CALENDAR_ID, 'Calendar', [ver('0.2.0')])]);
+    const listings = aggregate({
+      orderedCatalogs: [{ url: SOURCE_A, catalog: a }],
+      installed: [installed(CALENDAR_ID, '0.1.0', { provenance: SOURCE_A })],
+      deviceLibVersion: 'v0.4.1',
+    });
+    expect(listings[0]!.updateAvailable).toBe(true);
+  });
+
+  test('an older listing than what is installed is not an update', () => {
+    const a = catalog([app(CALENDAR_ID, 'Calendar', [ver('0.1.0', { released: '2026-06-01T00:00:00Z' })])]);
+    const listings = aggregate({
+      orderedCatalogs: [{ url: SOURCE_A, catalog: a }],
+      installed: [installed(CALENDAR_ID, '0.2.0', { provenance: SOURCE_A })],
+      deviceLibVersion: 'v0.4.1',
+    });
+    expect(listings[0]!.updateAvailable).toBe(false);
+  });
+
   test('defaults to first source when unpinned', () => {
     const listings = aggregate({ orderedCatalogs: orderedCatalogs(), installed: [], deviceLibVersion: 'v0.4.1' });
     const cal = listings.find(l => l.app.id === CALENDAR_ID)!;
@@ -257,5 +277,31 @@ describe('updates', () => {
         deviceLibVersion: 'v0.4.1',
       }),
     ).toHaveLength(0);
+  });
+
+  test('an older version published later is not an update', () => {
+    const a = catalog([
+      app(CALENDAR_ID, 'Calendar', [
+        ver('0.1.0', { released: '2026-06-01T00:00:00Z' }),
+        ver('0.2.0', { released: '2026-05-01T00:00:00Z' }),
+      ]),
+    ]);
+    const found = updates({
+      catalogs: new Map([[SOURCE_A, a]]),
+      installed: [installed(CALENDAR_ID, '0.2.0', { provenance: SOURCE_A })],
+      deviceLibVersion: 'v0.4.1',
+    });
+    expect(found).toHaveLength(0);
+  });
+
+  test('matches a catalog id that differs only in case', () => {
+    const a = catalog([app(CALENDAR_ID.toUpperCase(), 'Calendar', [ver('0.2.0')])]);
+    const found = updates({
+      catalogs: new Map([[SOURCE_A, a]]),
+      installed: [installed(CALENDAR_ID, '0.1.0', { provenance: SOURCE_A })],
+      deviceLibVersion: 'v0.4.1',
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.target.version).toBe('0.2.0');
   });
 });

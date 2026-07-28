@@ -3,6 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   ChevronRight,
   Download,
+  LayoutGrid,
   Link as LinkIcon,
   Lock,
   Store as StoreIcon,
@@ -63,7 +64,7 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
         }
       />
 
-      <View className="mb-6">
+      <View className="mb-3">
         <Button
           onPress={() => navigation.navigate('Store', { deviceId })}
           disabled={!peer}
@@ -71,6 +72,18 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
           size="lg"
         >
           browse the app store
+        </Button>
+      </View>
+
+      <View className="mb-6">
+        <Button
+          onPress={() => navigation.navigate('WebappSlots', { deviceId })}
+          disabled={!peer}
+          icon={LayoutGrid}
+          variant="secondary"
+          size="lg"
+        >
+          home screen and overlay
         </Button>
       </View>
 

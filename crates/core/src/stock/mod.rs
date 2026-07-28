@@ -312,6 +312,7 @@ impl From<BridgeToClientSystemMsg> for StockSendMsg {
       | BridgeToClientSystemMsg::LogEntry(_)
       | BridgeToClientSystemMsg::OtaProgress(_)
       | BridgeToClientSystemMsg::OtaError(_)
+      | BridgeToClientSystemMsg::OtaFinished(_)
       | BridgeToClientSystemMsg::DeviceNickname(_)
       | BridgeToClientSystemMsg::DeviceNicknameChanged(_) => StockSendMsg::Unsupported,
     }

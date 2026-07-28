@@ -668,6 +668,11 @@ export type OtaErrorCode =
   | 'internal';
 
 /**
+ * Terminal success from the OTA orchestrator, emitted for every `OtaKind`.
+ */
+export type OtaFinished = { kind: OtaKind; updateId: string };
+
+/**
  * What the streamed bytes are going to be applied as.
  *
  * `Image` streams a `.swu` through libswupdate + slot flip + reboot.
@@ -1292,6 +1297,8 @@ export type WebappError =
   | { type: 'missingIndexHtml' }
   | { type: 'invalidManifest'; data: { reason: string } }
   | { type: 'resourceNotAvailable'; data: { id: string } }
+  | { type: 'notALauncher'; data: { id: string } }
+  | { type: 'noOverlay'; data: { id: string } }
   | { type: 'unknownConfigKey'; data: { key: string } }
   | { type: 'invalidConfigValue'; data: { key: string; reason: string } }
   | { type: 'invalidDocValue'; data: { key: string; reason: string } }
@@ -1306,6 +1313,7 @@ export type WebappInfo = {
   description: string | null;
   iconHash: string | null;
   settingsHash: string | null;
+  overlayHash: string | null;
   config: Array<ConfigField>;
   permissions: Array<string>;
   rendersVoiceDisplay: boolean;
@@ -1325,6 +1333,7 @@ export type WebappManifest = {
   description: string | null;
   icon: string | null;
   settings: string | null;
+  overlay: string | null;
   role: WebappRole;
   config: Array<ConfigField>;
   permissions: Array<string>;
@@ -1338,6 +1347,8 @@ export type WebappManifest = {
  * listings (the hub grid, etc); `Launcher` is itself a launcher and is
  * hidden from those listings. The daemon filters `Launcher` bundles
  * out of `client.webapp.list`; the gateway list keeps everything.
+ * Declaring `Launcher` is also what makes a bundle eligible for the
+ * device's launcher slot.
  */
 export type WebappRole = 'standard' | 'launcher';
 

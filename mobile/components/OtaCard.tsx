@@ -1,9 +1,13 @@
-import { ChevronRight } from 'lucide-react-native';
+import type {
+  BridgethingOtaAvailable,
+  BridgethingOtaRun,
+} from '@bridgething/session-react-native';
+import { ChevronRight, X } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
 import { Button } from './Button';
 import { Press } from './Press';
-import type { OtaDeviceStatus } from '../lib/ota';
+import { dismissOtaRun, useOtaProgress, type OtaProgress } from '../lib/ota';
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${Math.round(n)} B`;
@@ -20,134 +24,155 @@ function formatEta(seconds: number): string {
   return r ? `${m}m ${r}s` : `${m}m`;
 }
 
-function isPullingDeltas(status: OtaDeviceStatus): boolean {
-  return status.dwlPercent != null && status.dwlPercent < 100;
+function isPullingDeltas(run: BridgethingOtaRun): boolean {
+  return run.dwlPercent != null && run.dwlPercent < 100;
 }
 
-function phaseLabel(status: OtaDeviceStatus): string {
-  const leg = status.stepLabel;
-  switch (status.phase) {
+function phaseLabel(run: BridgethingOtaRun, stepLabel: string | null): string {
+  switch (run.phase) {
     case 'downloading':
-      return leg ? `downloading ${leg}` : 'downloading update';
+      return stepLabel ? `downloading ${stepLabel}` : 'downloading update';
     case 'streaming':
-      return leg ? `${leg} to device` : 'sending to device';
+      return stepLabel ? `${stepLabel} to device` : 'sending to device';
     case 'verifying':
       return 'verifying';
     case 'writing':
-      return isPullingDeltas(status) ? 'pulling deltas' : 'writing to device';
+      return isPullingDeltas(run) ? 'pulling deltas' : 'writing to device';
     case 'confirming':
       return 'confirming';
     case 'reboot':
       return 'rebooting device';
-    case 'completed':
-      return 'done';
-    case 'failed':
-      return 'failed';
     default:
       return 'preparing update';
   }
 }
 
-function phaseHint(status: OtaDeviceStatus): string | null {
-  if (status.phase === 'writing' && !isPullingDeltas(status)) {
-    return 'this can take several minutes';
-  }
-  return null;
-}
-
-function releaseLabel(status: OtaDeviceStatus): string | null {
-  if (status.availableDaemon && status.availableImage) {
-    return `daemon ${status.availableDaemon} · image ${status.availableImage}`;
-  }
-  return status.availableRelease;
-}
-
-function stageDetail(status: OtaDeviceStatus): string | null {
+function stageDetail(
+  run: BridgethingOtaRun,
+  etaSeconds: number | null,
+): string | null {
   const parts: string[] = [];
-  if (status.stageReceived != null) {
+  if (run.stageReceived != null) {
     parts.push(
-      status.stageTotal != null && status.stageTotal > 0
-        ? `${formatBytes(status.stageReceived)} / ${formatBytes(status.stageTotal)}`
-        : formatBytes(status.stageReceived),
+      run.stageTotal != null && run.stageTotal > 0
+        ? `${formatBytes(run.stageReceived)} / ${formatBytes(run.stageTotal)}`
+        : formatBytes(run.stageReceived),
     );
   }
-  if (status.stageRatePerSec != null && status.stageRatePerSec > 0) {
-    parts.push(`${formatBytes(status.stageRatePerSec)}/s`);
-  }
-  if (status.stageEtaSeconds != null && status.stageEtaSeconds > 0) {
-    parts.push(`${formatEta(status.stageEtaSeconds)} left`);
+  if (run.ratePerSec != null && run.ratePerSec > 0)
+    parts.push(`${formatBytes(run.ratePerSec)}/s`);
+  if (etaSeconds != null && etaSeconds > 0)
+    parts.push(`${formatEta(etaSeconds)} left`);
+  if (parts.length === 0 && run.phase === 'writing' && !isPullingDeltas(run)) {
+    return 'this can take several minutes';
   }
   return parts.length ? parts.join(' · ') : null;
 }
 
-function UpdateProgress({ status }: { status: OtaDeviceStatus }) {
-  const detail = stageDetail(status) ?? phaseHint(status);
-  const pct = Math.max(0, Math.min(100, status.overallPercent));
-  const stepHint =
-    status.stepCount > 0
-      ? `step ${status.stepIndex + 1}/${status.stepCount}`
-      : null;
+function UpdateProgress({
+  run,
+  progress,
+}: {
+  run: BridgethingOtaRun;
+  progress: OtaProgress;
+}) {
+  const detail = stageDetail(run, progress.etaSeconds);
   return (
     <View className="mt-2">
       <View className="flex-row items-baseline justify-between">
         <Text className="text-[13px] font-semibold text-foreground">
-          {phaseLabel(status)}
+          {phaseLabel(run, progress.stepLabel)}
         </Text>
         <Text className="text-[12px] text-muted-foreground">
-          {Math.round(pct)}%
+          {progress.percent}%
         </Text>
       </View>
       <View className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
         <View
           className="h-full rounded-full bg-primary"
-          style={{ width: `${pct}%` }}
+          style={{ width: `${progress.percent}%` }}
         />
       </View>
       <View className="mt-1 flex-row items-baseline justify-between">
         <Text className="text-[11px] text-muted-foreground">
           {detail ?? ''}
         </Text>
-        {stepHint ? (
-          <Text className="text-[11px] text-muted-foreground">{stepHint}</Text>
+        {progress.stepCount > 0 ? (
+          <Text className="text-[11px] text-muted-foreground">
+            step {progress.stepIndex + 1}/{progress.stepCount}
+          </Text>
         ) : null}
       </View>
     </View>
   );
 }
 
-export function otaHasActivity(status?: OtaDeviceStatus): boolean {
-  if (!status) return false;
-  return (
-    status.installing ||
-    status.availableRelease != null ||
-    status.phase === 'completed' ||
-    status.error != null
-  );
+function releaseLabel(
+  available: BridgethingOtaAvailable | undefined,
+): string | null {
+  if (!available) return null;
+  if (available.daemonVersion && available.imageVersion) {
+    return `daemon ${available.daemonVersion} · image ${available.imageVersion}`;
+  }
+  return available.releaseVersion ?? null;
+}
+
+export function otaHasActivity(
+  run?: BridgethingOtaRun,
+  available?: BridgethingOtaAvailable,
+): boolean {
+  return run !== undefined || releaseLabel(available) !== null;
 }
 
 export function OtaCard({
+  deviceId,
   name,
-  status,
+  available,
   onInstall,
   onPickVersion,
 }: {
+  deviceId: string;
   name: string;
-  status?: OtaDeviceStatus;
+  available?: BridgethingOtaAvailable;
   onInstall?: () => void;
   onPickVersion?: () => void;
 }) {
-  const available = status ? releaseLabel(status) : null;
-  const installing = status?.installing ?? false;
+  const progress = useOtaProgress(deviceId);
+  const run = progress?.run;
+  const offer = releaseLabel(available);
+  const title = run?.webappName ?? name;
 
   return (
     <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
-      <Text className="text-[14px] font-semibold text-foreground">{name}</Text>
-      {installing && status ? (
-        <UpdateProgress status={status} />
-      ) : available ? (
+      <View className="flex-row items-center justify-between">
+        <Text className="text-[14px] font-semibold text-foreground">
+          {title}
+        </Text>
+        {run?.outcome ? (
+          <Press
+            onPress={() => dismissOtaRun(deviceId)}
+            scaleTo={0.9}
+            hitSlop={10}
+          >
+            <X size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+          </Press>
+        ) : null}
+      </View>
+
+      {progress && run && !run.outcome ? (
+        <UpdateProgress run={run} progress={progress} />
+      ) : run?.outcome === 'succeeded' ? (
+        <Text className="mt-1 text-[12px] text-muted-foreground">
+          update installed
+        </Text>
+      ) : run?.outcome === 'cancelled' ? (
+        <Text className="mt-1 text-[12px] text-muted-foreground">
+          update cancelled
+        </Text>
+      ) : offer ? (
         <View className="mt-2">
           <Text className="mb-2 text-[12px] text-muted-foreground">
-            update available: {available}
+            update available: {offer}
           </Text>
           {onInstall ? (
             <Button onPress={onInstall} size="md">
@@ -155,20 +180,20 @@ export function OtaCard({
             </Button>
           ) : null}
         </View>
-      ) : status?.phase === 'completed' ? (
+      ) : run?.outcome === 'failed' ? (
         <Text className="mt-1 text-[12px] text-muted-foreground">
-          update installed
+          update failed
         </Text>
       ) : (
         <Text className="mt-1 text-[12px] text-muted-foreground">
           up to date
         </Text>
       )}
-      {status?.error ? (
-        <Text className="mt-2 text-[12px] text-destructive">
-          {status.error}
-        </Text>
+
+      {run?.error ? (
+        <Text className="mt-2 text-[12px] text-destructive">{run.error}</Text>
       ) : null}
+
       {onPickVersion ? (
         <Press
           onPress={onPickVersion}

@@ -229,10 +229,15 @@ public actor OtaService {
 
     private let eventContinuation: AsyncStream<OtaPollEvent>.Continuation
     private let metaChangedContinuation: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>.Continuation
+    private let storeContinuation: AsyncStream<OtaStoreChange>.Continuation
 
     public nonisolated let events: AsyncStream<OtaPollEvent>
 
     public nonisolated let metaChanged: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>
+
+    public nonisolated let storeChanges: AsyncStream<OtaStoreChange>
+
+    private nonisolated let runStore = OtaRunStore()
 
     public init() {
         let (stream, continuation) = AsyncStream.makeStream(of: OtaPollEvent.self)
@@ -241,6 +246,27 @@ public actor OtaService {
         let (metaStream, metaContinuation) = AsyncStream.makeStream(of: (deviceId: String, meta: BridgeThingMeta).self)
         metaChanged = metaStream
         metaChangedContinuation = metaContinuation
+        let (storeStream, storeCont) = AsyncStream.makeStream(of: OtaStoreChange.self)
+        storeChanges = storeStream
+        storeContinuation = storeCont
+    }
+
+    private nonisolated func emit(_ event: OtaPollEvent) {
+        for change in runStore.ingest(event, now: Date()) { storeContinuation.yield(change) }
+        eventContinuation.yield(event)
+    }
+
+    public nonisolated func retainedRuns() -> [OtaRun] { runStore.runs() }
+    public nonisolated func retainedAvailable() -> [OtaAvailable] { runStore.available() }
+    public nonisolated func retainedPollStatus() -> OtaPollStatus { runStore.pollStatus() }
+
+    public nonisolated func dismissRun(deviceId: String) {
+        guard let cleared = runStore.dismiss(deviceId: deviceId) else { return }
+        storeContinuation.yield(.run(cleared))
+    }
+
+    public nonisolated func noteRunMeta(deviceId: String, daemonVersion: String, imageVersion: String) -> OtaRun? {
+        runStore.noteMeta(deviceId: deviceId, daemonVersion: daemonVersion, imageVersion: imageVersion)
     }
 
     public func start(gateway: BridgethingGateway) async {
@@ -379,8 +405,37 @@ public actor OtaService {
         url: URL,
         sha256: String,
         size: UInt64,
-        provenance: String?
+        provenance: String?,
+        webappId: String? = nil,
+        webappName: String? = nil
     ) async -> WebappInstallResult {
+        guard tryBeginInFlight(deviceId) else { return .failed(reason: Self.inFlightReason) }
+        defer { endInFlight(deviceId) }
+
+        let steps = [
+            OtaPlanStep(id: 0, kind: .download, label: webappName ?? "app", bytes: size),
+            OtaPlanStep(id: 1, kind: .stream, label: webappName ?? "app", bytes: size),
+            OtaPlanStep(id: 2, kind: .apply, label: "installing", bytes: 0),
+        ]
+        emit(.planned(
+            deviceId: deviceId,
+            kind: .installedWebapp,
+            release: "",
+            daemonVersion: "",
+            imageVersion: "",
+            steps: steps
+        ))
+        noteWebappRun(deviceId: deviceId, webappId: webappId, webappName: webappName)
+
+        let (progressStream, progress) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
+        let pump = Task { [weak self] in
+            for await snapshot in progressStream {
+                guard let self else { return }
+                let step = if case .downloading = snapshot { 0 } else { 1 }
+                self.emit(.progress(deviceId: deviceId, kind: .installedWebapp, stepId: step, snapshot: snapshot))
+            }
+        }
+
         let bundle: URL
         do {
             bundle = try await downloadIfNeeded(
@@ -389,20 +444,47 @@ public actor OtaService {
                 filename: "webapp",
                 asset: url.lastPathComponent,
                 expected: OtaArtifactDigest(size: size, sha256: sha256),
-                progress: nil
+                progress: progress
             )
         } catch {
-            return .failed(reason: "bundle download failed: \(error.localizedDescription)")
+            progress.finish()
+            pump.cancel()
+            let reason = "bundle download failed: \(error.localizedDescription)"
+            emit(.failed(deviceId: deviceId, kind: .installedWebapp, reason: reason))
+            return .failed(reason: reason)
         }
 
-        let result = await installWebapp(
+        let result = await performWebappInstall(
             gateway: gateway,
             deviceId: deviceId,
             bundlePath: bundle,
-            provenance: provenance
+            provenance: provenance,
+            progress: progress
         )
+        progress.finish()
+        pump.cancel()
         try? FileManager.default.removeItem(at: bundle)
+
+        switch result {
+        case let .installed(info):
+            emit(.progress(
+                deviceId: deviceId,
+                kind: .installedWebapp,
+                stepId: 2,
+                snapshot: .applying(phase: .writing, writePercent: 100, dwlPercent: 100, dwlBytes: 0)
+            ))
+            emit(.updated(deviceId: deviceId, kind: .installedWebapp, version: info.version))
+        case let .failed(reason):
+            emit(.failed(deviceId: deviceId, kind: .installedWebapp, reason: reason))
+        }
         return result
+    }
+
+    private nonisolated func noteWebappRun(deviceId: String, webappId: String?, webappName: String?) {
+        guard webappId != nil || webappName != nil else { return }
+        if let updated = runStore.annotateWebapp(deviceId: deviceId, webappId: webappId, webappName: webappName) {
+            storeContinuation.yield(.run(updated))
+        }
     }
 
     private func webappCacheDirectory() -> URL {
@@ -415,14 +497,24 @@ public actor OtaService {
         gateway: BridgethingGateway,
         deviceId: String,
         bundlePath: URL,
-        provenance: String?
+        provenance: String?,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation? = nil
     ) async -> WebappInstallResult {
-        if inFlight.contains(deviceId) {
-            return .failed(reason: "another update is already in flight for this device")
-        }
-        inFlight.insert(deviceId)
-        defer { inFlight.remove(deviceId) }
+        guard tryBeginInFlight(deviceId) else { return .failed(reason: Self.inFlightReason) }
+        defer { endInFlight(deviceId) }
+        return await performWebappInstall(
+            gateway: gateway, deviceId: deviceId, bundlePath: bundlePath,
+            provenance: provenance, progress: progress
+        )
+    }
 
+    private func performWebappInstall(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: URL,
+        provenance: String?,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation?
+    ) async -> WebappInstallResult {
         let totalSize: UInt64
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: bundlePath.path)
@@ -508,7 +600,7 @@ public actor OtaService {
                 label: "webapp",
                 startOffset: UInt64(resumeFromOffset),
                 totalSize: totalSize,
-                progress: nil
+                progress: progress
             )
         } catch {
             terminalTask.cancel()
@@ -572,15 +664,15 @@ public actor OtaService {
 
     public func applyVersion(deviceId: String, channel: String, version: String, rootURL: URL) async {
         guard let gateway = attachedGateway else {
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "gateway not attached"))
+            emit(.failed(deviceId: deviceId, kind: .image, reason: "gateway not attached"))
             return
         }
         guard let composite = OtaCompositeVersion.parse(version) else {
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "'\(version)' is not a composite version"))
+            emit(.failed(deviceId: deviceId, kind: .image, reason: "'\(version)' is not a composite version"))
             return
         }
         guard let meta = deviceMeta[deviceId] else {
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "device meta not yet known"))
+            emit(.failed(deviceId: deviceId, kind: .image, reason: "device meta not yet known"))
             return
         }
         if inFlight.contains(deviceId) { return }
@@ -666,7 +758,7 @@ public actor OtaService {
         metaChangedContinuation.yield((deviceId: deviceId, meta: meta))
         if let target = imageInstallTargets[deviceId], meta.imageVersion == target {
             imageInstallTargets.removeValue(forKey: deviceId)
-            eventContinuation.yield(.updated(deviceId: deviceId, kind: .image, version: target))
+            emit(.updated(deviceId: deviceId, kind: .image, version: target))
             noteAutoPushResult(deviceId, failed: false)
         }
         if isNew { wakePoll() }
@@ -709,10 +801,10 @@ public actor OtaService {
         do {
             manifest = try await fetchManifest(url: manifestURL)
         } catch {
-            eventContinuation.yield(.manifestPollFailed(reason: error.localizedDescription))
+            emit(.manifestPollFailed(reason: error.localizedDescription))
             return
         }
-        eventContinuation.yield(.manifestPolled(updatedAt: manifest.updatedAt))
+        emit(.manifestPolled(updatedAt: manifest.updatedAt))
 
         let snapshot = deviceMeta
         for (deviceId, meta) in snapshot {
@@ -755,7 +847,7 @@ public actor OtaService {
         let imageDrift = meta.imageVersion != latest.image
         let daemonDrift = meta.appVersion != latest.daemon
         guard imageDrift || daemonDrift || !webappDrift.isEmpty else { return }
-        eventContinuation.yield(.updateAvailable(
+        emit(.updateAvailable(
             deviceId: deviceId,
             release: latest.composite,
             daemonVersion: latest.daemon,
@@ -852,6 +944,15 @@ public actor OtaService {
         return map
     }
 
+    static let inFlightReason = "another update is already in flight for this device"
+    static let abandonedReason = "update ended without reporting a result"
+
+    private func endInFlight(_ deviceId: String) {
+        inFlight.remove(deviceId)
+        guard let kind = runStore.openRunKind(deviceId: deviceId) else { return }
+        emit(.failed(deviceId: deviceId, kind: kind, reason: Self.abandonedReason))
+    }
+
     private func tryBeginInFlight(_ deviceId: String) -> Bool {
         if inFlight.contains(deviceId) { return false }
         inFlight.insert(deviceId)
@@ -918,11 +1019,11 @@ public actor OtaService {
     ) async {
         guard !pieces.isEmpty else { return }
         guard tryBeginInFlight(deviceId) else { return }
-        defer { inFlight.remove(deviceId) }
+        defer { endInFlight(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
         let labelKind: OtaKind = pieces.contains { $0.kind == .daemon } ? .daemon : .builtinWebapp
         let plan = Self.bandaidPlan(pieces: pieces)
-        eventContinuation.yield(.planned(
+        emit(.planned(
             deviceId: deviceId, kind: labelKind, release: release,
             daemonVersion: daemonVersion, imageVersion: imageVersion, steps: plan
         ))
@@ -937,11 +1038,11 @@ public actor OtaService {
             )
         }
         if case let .failed(reason) = terminal {
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: labelKind, reason: reason))
+            emit(.failed(deviceId: deviceId, kind: labelKind, reason: reason))
             noteAutoPushResult(deviceId, failed: true)
         } else {
             for piece in pieces {
-                eventContinuation.yield(.updated(deviceId: deviceId, kind: piece.kind, version: piece.version))
+                emit(.updated(deviceId: deviceId, kind: piece.kind, version: piece.version))
             }
             noteAutoPushResult(deviceId, failed: false)
         }
@@ -1010,12 +1111,12 @@ public actor OtaService {
         gateway: BridgethingGateway
     ) async {
         guard tryBeginInFlight(deviceId) else { return }
-        defer { inFlight.remove(deviceId) }
+        defer { endInFlight(deviceId) }
         imageInstallTargets[deviceId] = targetVersion
         let cacheDir = effectiveCacheDir(config: config)
         let plan = Self.imagePlan(artifacts: artifacts)
         let (stream, continuation) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
-        eventContinuation.yield(.planned(
+        emit(.planned(
             deviceId: deviceId, kind: .image, release: release,
             daemonVersion: daemonVersion, imageVersion: targetVersion, steps: plan
         ))
@@ -1041,7 +1142,7 @@ public actor OtaService {
             continuation.yield(.failed(reason: reason))
             continuation.finish()
             _ = await forwarder.value
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: reason))
+            emit(.failed(deviceId: deviceId, kind: .image, reason: reason))
             noteAutoPushResult(deviceId, failed: true)
             return
         }
@@ -1069,11 +1170,11 @@ public actor OtaService {
         }
         switch terminal {
         case .completed, .staged:
-            eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
+            emit(.updated(deviceId: deviceId, kind: kind, version: version))
         case let .failed(reason):
-            eventContinuation.yield(.failed(deviceId: deviceId, kind: kind, reason: reason))
+            emit(.failed(deviceId: deviceId, kind: kind, reason: reason))
         case .idle, .downloading, .streaming, .applying:
-            eventContinuation.yield(.failed(
+            emit(.failed(
                 deviceId: deviceId, kind: kind,
                 reason: "update ended before completing (last phase: \(terminal))"
             ))

@@ -42,7 +42,7 @@ pub use lyrics::LyricsCache;
 pub use playback_targets::{PlaybackTargetError, PlaybackTargetStore};
 pub use root_browse::RootBrowseCache;
 pub use routes::RouteTable;
-pub use storage::{DeviceStore, KvStore, MetaStore};
+pub use storage::{DeviceStore, KvStore, MetaStore, SlotsReleased};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
@@ -179,6 +179,29 @@ impl AppState {
     self.meta_store.active_webapp(&self.webapps).await
   }
 
+  pub async fn launcher_webapp(&self) -> StateResult<Option<Uuid>> {
+    self.meta_store.launcher_webapp(&self.webapps).await
+  }
+
+  pub async fn webapp_slots(&self) -> StateResult<libbridgething::gateway::WebappSlots> {
+    Ok(libbridgething::gateway::WebappSlots {
+      launcher: self.meta_store.launcher_slot(&self.webapps).await?,
+      overlay: self.meta_store.overlay_slot(&self.webapps).await?,
+    })
+  }
+
+  pub async fn set_launcher_slot(&self, id: Option<Uuid>) -> StateResult<()> {
+    self.meta_store.set_launcher_slot(id).await
+  }
+
+  pub async fn set_overlay_slot(&self, id: Option<Uuid>) -> StateResult<()> {
+    self.meta_store.set_overlay_slot(id).await
+  }
+
+  pub async fn release_slots_for(&self, id: Uuid) -> StateResult<SlotsReleased> {
+    self.meta_store.release_slots_for(id).await
+  }
+
   pub async fn active_webapp_changed_event(&self) -> libbridgething::gateway::WebappActiveChanged {
     let id = self.active_webapp().await.ok().flatten();
     let (name, art) = match id {
@@ -201,12 +224,31 @@ impl AppState {
     Ok(())
   }
 
-  pub async fn sync_overlay(&self, run_immediately: bool) {
+  pub async fn resolve_overlay_script(&self) -> Option<std::sync::Arc<String>> {
     let profile = match self.active_webapp().await.ok().flatten() {
       Some(id) => self.webapps.manifest(id).await.map(|m| m.overlays).unwrap_or_default(),
       None => libbridgething::OverlayProfile::default(),
     };
-    let script = crate::overlay::overlay_script(&profile, self.modern_port).map(chrome::OverlayScript);
+    let custom = match self.meta_store.overlay_slot(&self.webapps).await {
+      Ok(Some(id)) => self.webapps.read_overlay(id).await,
+      Ok(None) => None,
+      Err(e) => {
+        tracing::warn!("overlay slot read failed; using builtin overlay: {e:?}");
+        None
+      }
+    };
+    let custom = custom.and_then(|bytes| match String::from_utf8(bytes) {
+      Ok(text) => Some(text),
+      Err(_) => {
+        tracing::warn!("designated overlay is not valid utf-8; using builtin overlay");
+        None
+      }
+    });
+    crate::overlay::overlay_script(&profile, self.modern_port, custom.as_deref())
+  }
+
+  pub async fn sync_overlay(&self, run_immediately: bool) {
+    let script = self.resolve_overlay_script().await.map(chrome::OverlayScript);
     if let Err(e) = self
       .chrome
       .send(chrome::ChromeCommand::SetOverlay {

@@ -24,9 +24,12 @@
   },
   "files": [
     "dist",
-    "template"
+    "template",
+    "template-launcher",
+    "template-overlay"
   ],
   "scripts": {
+    "prebuild": "bun scripts/sync-push.ts",
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit"

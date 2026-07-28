@@ -8,7 +8,7 @@ pub fn kiosk_origin(modern_port: u16) -> String {
   format!("http://127.0.0.1:{modern_port}")
 }
 
-pub fn overlay_script(profile: &OverlayProfile, modern_port: u16) -> Option<Arc<String>> {
+pub fn overlay_script(profile: &OverlayProfile, modern_port: u16, body: Option<&str>) -> Option<Arc<String>> {
   if !profile.any_enabled() {
     return None;
   }
@@ -22,9 +22,8 @@ pub fn overlay_script(profile: &OverlayProfile, modern_port: u16) -> Option<Arc<
       "volume": profile.volume,
     },
   });
-  Some(Arc::new(format!(
-    "window.__bridgethingOverlay = {config};\n{OVERLAY_JS}"
-  )))
+  let body = body.unwrap_or(OVERLAY_JS);
+  Some(Arc::new(format!("window.__bridgethingOverlay = {config};\n{body}")))
 }
 
 #[cfg(test)]
@@ -40,12 +39,12 @@ mod tests {
       connection: false,
       volume: false,
     };
-    assert!(overlay_script(&off, 8891).is_none());
+    assert!(overlay_script(&off, 8891, None).is_none());
   }
 
   #[test]
   fn default_profile_injects_every_surface() {
-    let script = overlay_script(&OverlayProfile::default(), 8891).expect("script");
+    let script = overlay_script(&OverlayProfile::default(), 8891, None).expect("script");
     assert!(script.starts_with("window.__bridgethingOverlay = "));
     for surface in ["notifications", "call", "pairing", "connection", "volume"] {
       assert!(script.contains(&format!("\"{surface}\":true")), "{surface} on");
@@ -62,10 +61,32 @@ mod tests {
       connection: false,
       volume: false,
     };
-    let script = overlay_script(&profile, 8891).expect("script");
+    let script = overlay_script(&profile, 8891, None).expect("script");
     assert!(script.contains("\"notifications\":true"));
     assert!(script.contains("\"call\":false"));
     assert!(script.contains("\"pairing\":true"));
     assert!(script.contains("\"connection\":false"));
+  }
+
+  #[test]
+  fn custom_body_replaces_the_builtin_under_the_same_prelude() {
+    let profile = OverlayProfile::default();
+    let script = overlay_script(&profile, 8891, Some("/* mine */")).expect("script");
+    assert!(script.starts_with("window.__bridgethingOverlay = "));
+    assert!(script.contains(&kiosk_origin(8891)));
+    assert!(script.ends_with("/* mine */"));
+    assert!(!script.contains("__bridgethingOverlayMounted"));
+  }
+
+  #[test]
+  fn a_custom_body_still_honors_the_all_off_short_circuit() {
+    let off = OverlayProfile {
+      notifications: false,
+      call: false,
+      pairing: false,
+      connection: false,
+      volume: false,
+    };
+    assert!(overlay_script(&off, 8891, Some("/* mine */")).is_none());
   }
 }

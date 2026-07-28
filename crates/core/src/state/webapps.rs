@@ -17,6 +17,7 @@ use super::{StateResult, storage::WebappProvenanceStore};
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 pub const SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
+pub const OVERLAY_MAX_BYTES: u64 = 512 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
@@ -27,6 +28,10 @@ const DEV_SHADOW_NAMESPACE: Uuid = Uuid::from_u128(0x019759e0_dec0_5ade_8000_b71
 
 fn is_reserved(id: Uuid) -> bool {
   RESERVED_BUILTIN_IDS.contains(&id)
+}
+
+fn bundle_dir_name(id: Uuid) -> String {
+  id.simple().to_string()
 }
 
 fn dev_shadow_id(reserved: Uuid) -> Uuid {
@@ -41,6 +46,7 @@ pub struct WebappBundle {
   pub icon_mime: Option<String>,
   pub icon_hash: Option<String>,
   pub settings_hash: Option<String>,
+  pub overlay_hash: Option<String>,
   pub bundle_hash: Arc<OnceCell<String>>,
   pub provenance: Option<String>,
 }
@@ -93,6 +99,7 @@ impl WebappRegistry {
       tracing::warn!(?err, "webapp provenance read failed; treating all as unknown");
       HashMap::new()
     });
+    reconcile_installed_names(&self.installed_root).await;
     for path in scan_root(&self.installed_root).await {
       if let Some(bundle) = load_bundle(&path, WebappSource::Installed).await {
         let mut bundle = if is_reserved(bundle.manifest.id) {
@@ -154,14 +161,6 @@ impl WebappRegistry {
       (bundle.bundle_hash.clone(), bundle.path.clone())
     };
     Some(cell.get_or_init(|| compute_bundle_hash(path)).await.clone())
-  }
-
-  pub async fn launcher_id(&self) -> Option<Uuid> {
-    let bundles = self.bundles.read().await;
-    bundles
-      .values()
-      .find(|b| matches!(b.manifest.role, WebappRole::Launcher))
-      .map(|b| b.manifest.id)
   }
 
   pub async fn bundle(&self, id: Uuid) -> Option<WebappBundle> {
@@ -273,22 +272,15 @@ impl WebappRegistry {
       });
     }
 
-    let final_dir_name = bundle.manifest.id.simple().to_string();
-    let final_path = self.installed_root.join(&final_dir_name);
-
-    if final_path.exists() {
-      let trash = self.installed_root.join(format!(".old.{}", Uuid::now_v7().simple()));
-      fs::rename(&final_path, &trash)
-        .await
-        .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
-      tokio::spawn(async move {
-        if let Err(e) = fs::remove_dir_all(&trash).await {
-          tracing::warn!("failed to clean old webapp dir {}: {:?}", trash.display(), e);
-        }
+    if bundle.manifest.overlay.is_some() && bundle.overlay_hash.is_none() {
+      let _ = fs::remove_dir_all(&staging).await;
+      return Err(WebappError::InvalidManifest {
+        reason: format!("declared overlay is missing or exceeds {OVERLAY_MAX_BYTES} bytes"),
       });
     }
 
-    fs::rename(&staging, &final_path)
+    let final_path = self.installed_root.join(bundle_dir_name(bundle.manifest.id));
+    swap_into_place(&self.installed_root, &staging, &final_path)
       .await
       .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
 
@@ -321,6 +313,31 @@ impl WebappRegistry {
     let path = bundle.path.join(rel);
     let bytes = fs::read(&path).await.ok()?;
     (bytes.len() as u64 <= SETTINGS_MAX_BYTES).then_some(bytes)
+  }
+
+  pub async fn read_overlay(&self, id: Uuid) -> Option<Vec<u8>> {
+    let bundle = self.bundle(id).await?;
+    bundle.overlay_hash.as_ref()?;
+    let rel = bundle.manifest.overlay.as_deref()?;
+    let path = bundle.path.join(rel);
+    let bytes = fs::read(&path).await.ok()?;
+    (bytes.len() as u64 <= OVERLAY_MAX_BYTES).then_some(bytes)
+  }
+
+  pub async fn is_launcher(&self, id: Uuid) -> bool {
+    matches!(
+      self.bundles.read().await.get(&id).map(|b| b.manifest.role),
+      Some(WebappRole::Launcher)
+    )
+  }
+
+  pub async fn provides_overlay(&self, id: Uuid) -> bool {
+    self
+      .bundles
+      .read()
+      .await
+      .get(&id)
+      .is_some_and(|b| b.overlay_hash.is_some())
   }
 
   pub async fn uninstall(&self, id: Uuid) -> StateResult<bool> {
@@ -380,6 +397,63 @@ async fn scan_root(root: &Path) -> Vec<PathBuf> {
   out
 }
 
+async fn trash_dir(root: &Path, dir: &Path) -> std::io::Result<()> {
+  let trash = root.join(format!(".old.{}", Uuid::now_v7().simple()));
+  fs::rename(dir, &trash).await?;
+  tokio::spawn(async move {
+    if let Err(e) = fs::remove_dir_all(&trash).await {
+      tracing::warn!("failed to clean old webapp dir {}: {:?}", trash.display(), e);
+    }
+  });
+  Ok(())
+}
+
+async fn swap_into_place(root: &Path, staged: &Path, dest: &Path) -> std::io::Result<()> {
+  if fs::try_exists(dest).await.unwrap_or(false) {
+    trash_dir(root, dest).await?;
+  }
+  fs::rename(staged, dest).await
+}
+
+async fn reconcile_installed_names(root: &Path) {
+  let mut paths = scan_root(root).await;
+  paths.sort();
+  for path in paths {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+      continue;
+    };
+    let Some(id) = read_manifest_id(&path).await else {
+      continue;
+    };
+    let canonical = bundle_dir_name(id);
+    if name == canonical {
+      continue;
+    }
+    let dest = root.join(&canonical);
+    if is_valid_bundle(&dest) {
+      tracing::warn!("webapp dir '{name}' duplicates {id}, already installed as '{canonical}'; discarding it");
+      if let Err(e) = trash_dir(root, &path).await {
+        tracing::warn!("could not discard duplicate webapp dir '{name}': {e:?}");
+      }
+      continue;
+    }
+    tracing::warn!("webapp dir '{name}' is not the canonical name for {id}; renaming to '{canonical}'");
+    if let Err(e) = swap_into_place(root, &path, &dest).await {
+      tracing::warn!("could not canonicalize webapp dir '{name}': {e:?}");
+    }
+  }
+}
+
+async fn read_manifest_id(path: &Path) -> Option<Uuid> {
+  #[derive(serde::Deserialize)]
+  struct IdOnly {
+    id: Uuid,
+  }
+  let bytes = fs::read(path.join("manifest.json")).await.ok()?;
+  let parsed = serde_json::from_slice::<IdOnly>(&bytes).ok()?;
+  (!parsed.id.is_nil()).then_some(parsed.id)
+}
+
 async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> {
   if !is_valid_bundle(path) {
     return None;
@@ -422,6 +496,11 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     None => None,
   };
 
+  let overlay_hash = match manifest.overlay.as_deref() {
+    Some(rel) => hash_bundle_file(path, rel, OVERLAY_MAX_BYTES, &dir_name, "overlay").await,
+    None => None,
+  };
+
   Some(WebappBundle {
     path: path.to_path_buf(),
     source,
@@ -429,6 +508,7 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     icon_mime,
     icon_hash,
     settings_hash,
+    overlay_hash,
     bundle_hash: Arc::new(OnceCell::new()),
     provenance: None,
   })
@@ -602,6 +682,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     description: b.manifest.description.clone(),
     icon_hash: b.icon_hash.clone(),
     settings_hash: b.settings_hash.clone(),
+    overlay_hash: b.overlay_hash.clone(),
     config: b.manifest.config.clone(),
     permissions: b.manifest.permissions.clone(),
     renders_voice_display: b.manifest.renders_voice_display,

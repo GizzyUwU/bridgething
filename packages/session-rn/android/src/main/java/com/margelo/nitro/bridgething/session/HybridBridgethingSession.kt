@@ -21,10 +21,13 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
         private var pendingAncsAuthStatusChanged: ((String, BridgethingAncsAuthStatus) -> Unit)? = null
         private var pendingLog: ((String, String) -> Unit)? = null
-        private var pendingWebappsChanged: ((String) -> Unit)? = null
+        private var pendingWebappsChanged: ((BridgethingDeviceWebappsEntry) -> Unit)? = null
         private var pendingWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
-        private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
+        private var pendingOtaRunChanged: ((BridgethingOtaRun) -> Unit)? = null
+        private var pendingOtaAvailableChanged: ((BridgethingOtaAvailable) -> Unit)? = null
+        private var pendingOtaPollChanged: ((BridgethingOtaPollStatus) -> Unit)? = null
+        private var pendingResumed: ((BridgethingSessionSnapshot) -> Unit)? = null
 
         @JvmStatic
         public fun initializeNitro() {
@@ -46,7 +49,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     webapps = pendingWebappsChanged,
                     webappDoc = pendingWebappDocChanged,
                     deviceMeta = pendingDeviceMetaChanged,
-                    ota = pendingOtaEvent,
+                    otaRun = pendingOtaRunChanged,
+                    otaAvailable = pendingOtaAvailableChanged,
+                    otaPoll = pendingOtaPollChanged,
+                    resumed = pendingResumed,
                 )
                 pendingProvidersChanged = null
                 pendingPeerConnected = null
@@ -58,7 +64,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingWebappsChanged = null
                 pendingWebappDocChanged = null
                 pendingDeviceMetaChanged = null
-                pendingOtaEvent = null
+                pendingOtaRunChanged = null
+                pendingOtaAvailableChanged = null
+                pendingOtaPollChanged = null
+                pendingResumed = null
                 snapshot
             }
             replay.providers?.let(b::setOnProvidersChanged)
@@ -71,7 +80,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.webapps?.let(b::setOnWebappsChanged)
             replay.webappDoc?.let(b::setOnWebappDocChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
-            replay.ota?.let(b::setOnOtaEvent)
+            replay.otaRun?.let(b::setOnOtaRunChanged)
+            replay.otaAvailable?.let(b::setOnOtaAvailableChanged)
+            replay.otaPoll?.let(b::setOnOtaPollChanged)
+            replay.resumed?.let(b::setOnResumed)
         }
 
         private fun require(): BridgethingSessionBackend = backend
@@ -89,10 +101,13 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val nowPlaying: ((BridgethingNowPlaying?) -> Unit)?,
         val ancs: ((String, BridgethingAncsAuthStatus) -> Unit)?,
         val log: ((String, String) -> Unit)?,
-        val webapps: ((String) -> Unit)?,
+        val webapps: ((BridgethingDeviceWebappsEntry) -> Unit)?,
         val webappDoc: ((String, String, String, String?) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
-        val ota: ((BridgethingOtaEvent) -> Unit)?,
+        val otaRun: ((BridgethingOtaRun) -> Unit)?,
+        val otaAvailable: ((BridgethingOtaAvailable) -> Unit)?,
+        val otaPoll: ((BridgethingOtaPollStatus) -> Unit)?,
+        val resumed: ((BridgethingSessionSnapshot) -> Unit)?,
     )
 
     override fun start(): Promise<Unit> = Promise.async { require().start() }
@@ -175,6 +190,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().switchWebapp(deviceId, id)
     }
 
+    override fun getWebappSlots(deviceId: String): Promise<BridgethingWebappSlots> = Promise.async {
+        require().getWebappSlots(deviceId)
+    }
+
+    override fun setWebappSlot(deviceId: String, slot: BridgethingWebappSlot, id: String?): Promise<BridgethingWebappSlots> = Promise.async {
+        require().setWebappSlot(deviceId, slot, id)
+    }
+
     override fun webappIcon(deviceId: String, id: String): Promise<Variant_NullType_BridgethingWebappIcon> = Promise.async {
         val icon = require().webappIcon(deviceId, id)
         if (icon != null) Variant_NullType_BridgethingWebappIcon.Second(icon)
@@ -245,6 +268,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().fetchOtaManifest(unwrapString(rootUrl))
     }
 
+    override fun dismissOtaRun(deviceId: String): Promise<Unit> = Promise.async {
+        require().dismissOtaRun(deviceId)
+    }
+
     override fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
         backend?.applyOtaUpdate(deviceId, channel, version, unwrapString(rootUrl))
     }
@@ -255,8 +282,13 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         sha256: String,
         size: Double,
         provenance: Variant_NullType_String?,
+        webappId: Variant_NullType_String?,
+        webappName: Variant_NullType_String?,
     ): Promise<BridgethingWebappInfo> = Promise.async {
-        require().installWebappFromUrl(deviceId, url, sha256, size, unwrapString(provenance))
+        require().installWebappFromUrl(
+            deviceId, url, sha256, size,
+            unwrapString(provenance), unwrapString(webappId), unwrapString(webappName),
+        )
     }
 
     override fun reconnectPeer(deviceId: String): Promise<Unit> = Promise.async {
@@ -350,7 +382,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setLocalLogStreamingEnabled(enabled)
     }
 
-    override fun setOnWebappsChanged(callback: (deviceId: String) -> Unit) {
+    override fun setOnWebappsChanged(callback: (entry: BridgethingDeviceWebappsEntry) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnWebappsChanged) { pendingWebappsChanged = it }
     }
 
@@ -370,8 +402,20 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnDeviceMetaChanged) { pendingDeviceMetaChanged = it }
     }
 
-    override fun setOnOtaEvent(callback: (event: BridgethingOtaEvent) -> Unit) {
-        forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaEvent) { pendingOtaEvent = it }
+    override fun setOnOtaRunChanged(callback: (run: BridgethingOtaRun) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaRunChanged) { pendingOtaRunChanged = it }
+    }
+
+    override fun setOnOtaAvailableChanged(callback: (available: BridgethingOtaAvailable) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaAvailableChanged) { pendingOtaAvailableChanged = it }
+    }
+
+    override fun setOnOtaPollChanged(callback: (status: BridgethingOtaPollStatus) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaPollChanged) { pendingOtaPollChanged = it }
+    }
+
+    override fun setOnResumed(callback: (snapshot: BridgethingSessionSnapshot) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnResumed) { pendingResumed = it }
     }
 
     private fun unwrapString(variant: Variant_NullType_String?): String? = variant?.let {

@@ -4,9 +4,12 @@ import {
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  ArrowUpCircle,
   Bell,
   Cable,
+  ChevronRight,
   Globe,
+  LayoutGrid,
   type LucideIcon,
   MapPin,
   Mic,
@@ -33,11 +36,13 @@ import { Button } from '../components/Button';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
+import { Press } from '../components/Press';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { WebappIcon } from '../components/WebappIcon';
+import { useUpdates } from '../lib/catalog';
 import { getSession, peerDisplayName, useSession } from '../lib/session';
-import { refreshWebapps, useWebapps } from '../lib/webapps';
+import { useWebapps } from '../lib/webapps';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WebappDetail'>;
@@ -51,13 +56,13 @@ export function WebappDetailScreen({ navigation, route }: Props) {
 
   const { list } = useWebapps(deviceId);
   const info = list.find(w => w.id === id) ?? null;
+  const update =
+    useUpdates(deviceId).find(
+      u => u.appId.toLowerCase() === id.toLowerCase(),
+    ) ?? null;
   const [entries, setEntries] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<'switch' | 'uninstall' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (list.length === 0) void refreshWebapps(deviceId);
-  }, [deviceId, list.length]);
 
   const loadConfig = useCallback(async () => {
     setLoadError(null);
@@ -207,6 +212,41 @@ export function WebappDetailScreen({ navigation, route }: Props) {
         </Text>
       ) : null}
 
+      {update ? (
+        <Press
+          onPress={() =>
+            navigation.navigate('StoreApp', {
+              deviceId,
+              appId: update.appId,
+              sourceUrl: update.sourceUrl,
+            })
+          }
+          className="mb-6"
+          scaleTo={0.98}
+        >
+          <View className="flex-row items-center gap-3 rounded-2xl border border-primary/30 bg-primary-soft px-4 py-3">
+            <ArrowUpCircle
+              size={18}
+              color="hsl(199 100% 44%)"
+              strokeWidth={2.2}
+            />
+            <View className="flex-1">
+              <Text className="text-[13px] font-semibold text-foreground">
+                update available
+              </Text>
+              <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+                v{update.installedVersion} → v{update.target.version}
+              </Text>
+            </View>
+            <ChevronRight
+              size={16}
+              color="hsl(215 14% 50%)"
+              strokeWidth={2.4}
+            />
+          </View>
+        </Press>
+      ) : null}
+
       <View className="mb-8 flex-row gap-2">
         <View className="flex-1">
           <Button
@@ -231,6 +271,22 @@ export function WebappDetailScreen({ navigation, route }: Props) {
           </View>
         ) : null}
       </View>
+
+      {info.role === 'launcher' || info.overlayHash ? (
+        <View className="mb-8">
+          <Button
+            onPress={() => navigation.navigate('WebappSlots', { deviceId })}
+            variant="secondary"
+            icon={LayoutGrid}
+          >
+            {info.role === 'launcher' && info.overlayHash
+              ? 'use as home screen or overlay'
+              : info.role === 'launcher'
+                ? 'use as home screen'
+                : 'use as system overlay'}
+          </Button>
+        </View>
+      ) : null}
 
       {info.settingsHash ? (
         <View className="mb-8">

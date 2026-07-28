@@ -12,7 +12,7 @@ import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { Segmented } from '../components/Segmented';
-import { useOta } from '../lib/ota';
+import { isRunning, useOtaRun } from '../lib/ota';
 import { getSession, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
@@ -21,7 +21,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OtaVersions'>;
 export function OtaVersionsScreen({ route, navigation }: Props) {
   const { deviceId, channel: initialChannel } = route.params;
   const meta = useSession(s => s.deviceMeta[deviceId]);
-  const installing = useOta(s => s.byDevice[deviceId]?.installing ?? false);
+  const installing = isRunning(useOtaRun(deviceId));
 
   const [manifest, setManifest] = useState<BridgethingOtaManifest | null>(null);
   const [channel, setChannel] = useState(initialChannel);

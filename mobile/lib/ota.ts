@@ -1,375 +1,200 @@
 import type {
-  BridgethingOtaEvent,
-  BridgethingOtaKind,
-  BridgethingOtaPhase,
+  BridgethingOtaAvailable,
+  BridgethingOtaPollStatus,
+  BridgethingOtaRun,
   BridgethingOtaStep,
 } from '@bridgething/session-react-native';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
-import { getSession } from './session';
+import { getSession, registerDomain } from './bridge';
 
-const DOWNLOAD_BYTES_PER_SEC = 8_000_000; // wifi to R2, conservative
-const STREAM_BYTES_PER_SEC = 8_000; // background-priority BT fragment stream, measured on the EA link
-const APPLY_BYTES_PER_SEC = 750_000; // device apply, weighted by zck: BT delta-pull + eMMC write bound
-const BATCH_APPLY_SECS = 15; // activate + restart for a bandaid batch
-const REBOOT_SECS = 25;
-const MIN_STEP_SECS = 1; // floor so a zero-byte leg still occupies a sliver of the bar
-const IMAGE_APPLY_PULL_SLICE = 0.95;
+type OtaState = {
+  poll: BridgethingOtaPollStatus;
+  available: Record<string, BridgethingOtaAvailable>;
+  runs: Record<string, BridgethingOtaRun>;
+};
 
-function stepSeconds(step: BridgethingOtaStep): number {
+const empty: OtaState = { poll: {}, available: {}, runs: {} };
+
+export const useOtaStore = create<OtaState>(() => ({ ...empty }));
+
+export function registerOtaDomain(): void {
+  registerDomain({
+    name: 'ota',
+    apply: event => {
+      switch (event.type) {
+        case 'otaRunChanged':
+          useOtaStore.setState(s => ({
+            runs: { ...s.runs, [event.run.deviceId]: event.run },
+          }));
+          return;
+        case 'otaAvailableChanged':
+          useOtaStore.setState(s => ({
+            available: {
+              ...s.available,
+              [event.available.deviceId]: event.available,
+            },
+          }));
+          return;
+        case 'otaPollChanged':
+          useOtaStore.setState({ poll: event.status });
+          return;
+        default:
+          return;
+      }
+    },
+    reconcile: snapshot =>
+      useOtaStore.setState({
+        poll: snapshot.otaPoll,
+        available: Object.fromEntries(
+          snapshot.otaAvailable.map(a => [a.deviceId, a]),
+        ),
+        runs: Object.fromEntries(snapshot.otaRuns.map(r => [r.deviceId, r])),
+      }),
+  });
+}
+
+const REBOOT_SECS = 45;
+const BATCH_APPLY_SECS = 15;
+const MIN_STEP_SECS = 1;
+
+function stepSeconds(step: BridgethingOtaStep, run: BridgethingOtaRun): number {
   switch (step.kind) {
     case 'download':
-      return Math.max(MIN_STEP_SECS, step.bytes / DOWNLOAD_BYTES_PER_SEC);
-    case 'stream':
-      return Math.max(MIN_STEP_SECS, step.bytes / STREAM_BYTES_PER_SEC);
+    case 'stream': {
+      const rate = run.ratePerSec && run.ratePerSec > 0 ? run.ratePerSec : null;
+      if (!rate || step.bytes === 0) return MIN_STEP_SECS;
+      return Math.max(MIN_STEP_SECS, step.bytes / rate);
+    }
     case 'apply':
       return step.bytes > 0
-        ? step.bytes / APPLY_BYTES_PER_SEC
+        ? Math.max(MIN_STEP_SECS, step.bytes / 750_000)
         : BATCH_APPLY_SECS;
     case 'reboot':
       return REBOOT_SECS;
   }
 }
 
-export type OtaDeviceStatus = {
-  phase: BridgethingOtaPhase;
-  otaKind: BridgethingOtaKind | null;
-  installing: boolean;
-  error: string | null;
+function stepFraction(
+  step: BridgethingOtaStep,
+  run: BridgethingOtaRun,
+  now: number,
+): number {
+  if (step.kind === 'reboot') {
+    const elapsed = Math.max(0, now - run.phaseStartedAt) / 1000;
+    return 1 - Math.exp(-elapsed / REBOOT_SECS);
+  }
+  if (step.kind === 'apply') {
+    if (run.otaKind === 'image') {
+      if (run.phase === 'confirming' || run.phase === 'reboot') return 1;
+      return Math.min(1, (run.dwlPercent ?? 0) / 100);
+    }
+    return run.phase === 'writing' || run.phase === 'confirming' ? 1 : 0;
+  }
+  const total = run.stageTotal ?? 0;
+  if (total > 0) return Math.min(1, (run.stageReceived ?? 0) / total);
+  return 0;
+}
 
-  overallPercent: number;
+export type OtaProgress = {
+  percent: number;
   stepIndex: number;
   stepCount: number;
   stepLabel: string | null;
-
-  availableRelease: string | null;
-  availableDaemon: string | null;
-  availableImage: string | null;
-
-  stageReceived: number | null;
-  stageTotal: number | null;
-  stageRatePerSec: number | null;
-  stageEtaSeconds: number | null;
-  dwlPercent: number | null;
-
-  plan: BridgethingOtaStep[];
-  stepSecs: number[];
-  totalSecs: number;
-
-  sampleBytes: number | null;
-  sampleAt: number | null;
+  etaSeconds: number | null;
 };
 
-const idleStatus: OtaDeviceStatus = {
-  phase: 'idle',
-  otaKind: null,
-  installing: false,
-  error: null,
-  overallPercent: 0,
-  stepIndex: 0,
-  stepCount: 0,
-  stepLabel: null,
-  availableRelease: null,
-  availableDaemon: null,
-  availableImage: null,
-  stageReceived: null,
-  stageTotal: null,
-  stageRatePerSec: null,
-  stageEtaSeconds: null,
-  dwlPercent: null,
-  plan: [],
-  stepSecs: [],
-  totalSecs: 0,
-  sampleBytes: null,
-  sampleAt: null,
-};
-
-const clearedStage = {
-  stageReceived: null,
-  stageTotal: null,
-  stageRatePerSec: null,
-  stageEtaSeconds: null,
-  dwlPercent: null,
-  sampleBytes: null,
-  sampleAt: null,
-} as const;
-
-type OtaState = {
-  lastPolledAt: string | null;
-  pollError: string | null;
-  byDevice: Record<string, OtaDeviceStatus>;
-
-  ingest(event: BridgethingOtaEvent): void;
-  noteDeviceMeta(deviceId: string): void;
-  clearDevice(deviceId: string): void;
-};
-
-const COMPLETED_DISMISS_MS = 8_000;
-const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function cancelDismiss(deviceId: string): void {
-  const timer = dismissTimers.get(deviceId);
-  if (timer != null) {
-    clearTimeout(timer);
-    dismissTimers.delete(deviceId);
-  }
-}
-
-function scheduleDismiss(deviceId: string): void {
-  cancelDismiss(deviceId);
-  dismissTimers.set(
-    deviceId,
-    setTimeout(() => {
-      dismissTimers.delete(deviceId);
-      const status = useOtaStore.getState().byDevice[deviceId];
-      if (status?.phase === 'completed' && !status.installing)
-        useOtaStore.getState().clearDevice(deviceId);
-    }, COMPLETED_DISMISS_MS),
+export function otaProgress(run: BridgethingOtaRun, now: number): OtaProgress {
+  const secs = run.steps.map(step => stepSeconds(step, run));
+  const total = secs.reduce((a, b) => a + b, 0);
+  const index = Math.max(
+    0,
+    run.steps.findIndex(s => s.id === run.stepId),
   );
-}
 
-function patch(
-  s: OtaState,
-  deviceId: string,
-  next: Partial<OtaDeviceStatus>,
-): Record<string, OtaDeviceStatus> {
-  const prev = s.byDevice[deviceId] ?? idleStatus;
-  return { ...s.byDevice, [deviceId]: { ...prev, ...next } };
-}
+  if (run.outcome === 'succeeded') {
+    return {
+      percent: 100,
+      stepIndex: index,
+      stepCount: run.steps.length,
+      stepLabel: null,
+      etaSeconds: 0,
+    };
+  }
+  if (total <= 0) {
+    return {
+      percent: 0,
+      stepIndex: index,
+      stepCount: run.steps.length,
+      stepLabel: null,
+      etaSeconds: null,
+    };
+  }
 
-function stepFraction(
-  step: BridgethingOtaStep,
-  event: BridgethingOtaEvent,
-  otaKind: BridgethingOtaKind | null,
-): number {
-  if (step.kind === 'reboot') return 0; // device is gone; the bar lands on 100 at `updated`.
-  if (step.kind === 'apply') {
-    if (otaKind === 'image') {
-      const dwl = event.dwlPercent ?? 0;
-      if (event.phase === 'confirming' || event.phase === 'reboot') return 1;
-      return (Math.min(dwl, 100) / 100) * IMAGE_APPLY_PULL_SLICE;
-    }
-    return Math.min(1, (event.percent ?? 0) / 100);
-  }
-  const total = event.stageTotal ?? 0;
-  const received = event.stageReceived ?? 0;
-  if ((step.kind === 'download' || step.kind === 'stream') && total > 0) {
-    return Math.min(1, received / total);
-  }
-  return Math.min(1, (event.percent ?? 0) / 100);
-}
-
-function overallFromEvent(
-  prev: OtaDeviceStatus,
-  event: BridgethingOtaEvent,
-): number {
-  if (prev.plan.length === 0 || prev.totalSecs <= 0) {
-    return Math.max(prev.overallPercent, event.percent ?? 0);
-  }
-  const stepId = event.stepId ?? 0;
-  const step = prev.plan.find(s => s.id === stepId) ?? prev.plan[0];
-  const kind = event.otaKind ?? prev.otaKind;
   let elapsed = 0;
-  for (const s of prev.plan) {
-    if (s.id < stepId) elapsed += prev.stepSecs[s.id] ?? 0;
-    else if (s.id === stepId)
-      elapsed += (prev.stepSecs[s.id] ?? 0) * stepFraction(step, event, kind);
-  }
-  const computed = Math.min(100, (elapsed / prev.totalSecs) * 100);
-  return Math.max(prev.overallPercent, computed); // never walk backward across a leg reset.
+  let remaining = 0;
+  run.steps.forEach((step, at) => {
+    if (at < index) {
+      elapsed += secs[at];
+      return;
+    }
+    const fraction = at === index ? stepFraction(step, run, now) : 0;
+    elapsed += secs[at] * fraction;
+    remaining += secs[at] * (1 - fraction);
+  });
+
+  return {
+    percent: Math.min(100, Math.round((elapsed / total) * 100)),
+    stepIndex: index,
+    stepCount: run.steps.length,
+    stepLabel: run.steps[index]?.label ?? null,
+    etaSeconds: Math.round(remaining),
+  };
 }
 
-export const useOtaStore = create<OtaState>(set => ({
-  lastPolledAt: null,
-  pollError: null,
-  byDevice: {},
-
-  ingest: event => {
-    const id = event.deviceId;
-    switch (event.kind) {
-      case 'manifestPolled':
-        set({ lastPolledAt: event.updatedAt ?? null, pollError: null });
-        return;
-      case 'manifestPollFailed':
-        set({ pollError: event.reason ?? 'manifest poll failed' });
-        return;
-      case 'updateAvailable':
-        if (!id) return;
-        cancelDismiss(id);
-        set(s => ({
-          byDevice: patch(s, id, {
-            availableRelease: event.releaseVersion ?? event.toVersion ?? null,
-            availableDaemon: event.daemonVersion ?? null,
-            availableImage: event.imageVersion ?? null,
-            error: null,
-          }),
-        }));
-        return;
-      case 'planned': {
-        if (!id) return;
-        cancelDismiss(id);
-        const plan = event.steps ?? [];
-        const stepSecs = plan.map(stepSeconds);
-        const totalSecs = stepSecs.reduce((a, b) => a + b, 0);
-        set(s => ({
-          byDevice: patch(s, id, {
-            otaKind: event.otaKind ?? null,
-            installing: true,
-            error: null,
-            overallPercent: 0,
-            stepIndex: 0,
-            stepCount: plan.length,
-            stepLabel: plan[0]?.label ?? null,
-            availableRelease: event.releaseVersion ?? null,
-            availableDaemon: event.daemonVersion ?? null,
-            availableImage: event.imageVersion ?? null,
-            plan,
-            stepSecs,
-            totalSecs,
-            ...clearedStage,
-          }),
-        }));
-        return;
-      }
-      case 'progress':
-        if (!id) return;
-        set(s => {
-          const prev = s.byDevice[id] ?? idleStatus;
-          const stepId = event.stepId ?? 0;
-          const step = prev.plan.find(p => p.id === stepId);
-          const stepIndex = step ? prev.plan.indexOf(step) : prev.stepIndex;
-          const sameStep = stepIndex === prev.stepIndex;
-          const kind = event.otaKind ?? prev.otaKind;
-          const dwl = event.dwlPercent ?? (sameStep ? prev.dwlPercent : null);
-
-          let stageReceived =
-            event.stageReceived ?? (sameStep ? prev.stageReceived : null);
-          let stageTotal =
-            event.stageTotal ?? (sameStep ? prev.stageTotal : null);
-          let stageRatePerSec =
-            event.stageRatePerSec ?? (sameStep ? prev.stageRatePerSec : null);
-          let stageEtaSeconds =
-            event.stageEtaSeconds ?? (sameStep ? prev.stageEtaSeconds : null);
-          let sampleBytes = sameStep ? prev.sampleBytes : null;
-          let sampleAt = sameStep ? prev.sampleAt : null;
-
-          if (step?.kind === 'apply' && kind === 'image') {
-            if (dwl != null && dwl < 100 && event.stageReceived != null) {
-              const now = Date.now();
-              stageTotal =
-                dwl > 0 ? Math.round((event.stageReceived / dwl) * 100) : null;
-              if (
-                sampleBytes != null &&
-                sampleAt != null &&
-                now > sampleAt &&
-                event.stageReceived > sampleBytes
-              ) {
-                const inst =
-                  ((event.stageReceived - sampleBytes) / (now - sampleAt)) *
-                  1000;
-                stageRatePerSec =
-                  stageRatePerSec != null
-                    ? stageRatePerSec * 0.6 + inst * 0.4
-                    : inst;
-                stageEtaSeconds =
-                  stageTotal != null && stageRatePerSec > 0
-                    ? (stageTotal - event.stageReceived) / stageRatePerSec
-                    : null;
-              }
-              sampleBytes = event.stageReceived;
-              sampleAt = now;
-            } else if (dwl != null && dwl >= 100) {
-              stageReceived = null;
-              stageTotal = null;
-              stageRatePerSec = null;
-              stageEtaSeconds = null;
-              sampleBytes = null;
-              sampleAt = null;
-            }
-          }
-
-          return {
-            byDevice: patch(s, id, {
-              otaKind: kind,
-              phase: event.phase ?? 'streaming',
-              installing: true,
-              error: null,
-              overallPercent: overallFromEvent(prev, event),
-              stepIndex,
-              stepLabel: step?.label ?? prev.stepLabel,
-              stageReceived,
-              stageTotal,
-              stageRatePerSec,
-              stageEtaSeconds,
-              dwlPercent: dwl,
-              sampleBytes,
-              sampleAt,
-            }),
-          };
-        });
-        return;
-      case 'updated':
-        if (!id) return;
-        set(s => ({
-          byDevice: patch(s, id, {
-            phase: 'completed',
-            overallPercent: 100,
-            installing: false,
-            availableRelease: null,
-            availableDaemon: null,
-            availableImage: null,
-            ...clearedStage,
-          }),
-        }));
-        scheduleDismiss(id);
-        return;
-      case 'failed':
-        if (!id) return;
-        set(s => ({
-          byDevice: patch(s, id, {
-            phase: 'failed',
-            installing: false,
-            error: event.reason ?? 'update failed',
-            ...clearedStage,
-          }),
-        }));
-        return;
-    }
-  },
-
-  noteDeviceMeta: deviceId =>
-    set(s => {
-      const status = s.byDevice[deviceId];
-      if (status?.phase !== 'completed' || status.installing) return s;
-      cancelDismiss(deviceId);
-      const next = { ...s.byDevice };
-      delete next[deviceId];
-      return { byDevice: next };
-    }),
-
-  clearDevice: deviceId =>
-    set(s => {
-      const next = { ...s.byDevice };
-      delete next[deviceId];
-      return { byDevice: next };
-    }),
-}));
-
-let wired = false;
-
-export function startOta(): void {
-  if (wired) return;
-  getSession().subscribe(event => {
-    if (event.type === 'otaEvent') useOtaStore.getState().ingest(event.event);
-    if (event.type === 'deviceMetaChanged')
-      useOtaStore.getState().noteDeviceMeta(event.deviceId);
-  });
-  wired = true;
+export function isRunning(
+  run: BridgethingOtaRun | undefined,
+): run is BridgethingOtaRun {
+  return run !== undefined && run.outcome === undefined;
 }
 
 export function useOta<T>(selector: (state: OtaState) => T): T {
   return useOtaStore(useShallow(selector));
+}
+
+export function useOtaRun(
+  deviceId: string | null,
+): BridgethingOtaRun | undefined {
+  return useOtaStore(s => (deviceId ? s.runs[deviceId] : undefined));
+}
+
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [active]);
+  return active ? now : Date.now();
+}
+
+export function useOtaProgress(
+  deviceId: string | null,
+): (OtaProgress & { run: BridgethingOtaRun }) | null {
+  const run = useOtaRun(deviceId);
+  const timed =
+    run !== undefined && run.outcome === undefined && run.phase === 'reboot';
+  const now = useNow(timed);
+  if (!run) return null;
+  return { ...otaProgress(run, now), run };
+}
+
+export function dismissOtaRun(deviceId: string): void {
+  void getSession()
+    .dismissOtaRun(deviceId)
+    .catch(() => {});
 }
 
 export async function installLatestOta(
@@ -379,7 +204,5 @@ export async function installLatestOta(
   const session = getSession();
   const manifest = await session.fetchOtaManifest(null);
   const latest = manifest.channels.find(c => c.slug === channel)?.latest;
-  if (latest) {
-    await session.applyOtaUpdate(deviceId, channel, latest, null);
-  }
+  if (latest) await session.applyOtaUpdate(deviceId, channel, latest, null);
 }

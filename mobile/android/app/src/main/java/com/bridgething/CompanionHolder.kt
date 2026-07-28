@@ -38,7 +38,13 @@ public object CompanionHolder {
 
     @Volatile
     public var foreground: Boolean = false
-        private set
+        internal set
+
+    @Volatile
+    internal var onForeground: (() -> Unit)? = null
+
+    @Volatile
+    internal var onBackground: (() -> Unit)? = null
 
     private var lifecycleRegistered = false
     private var startedActivities = 0
@@ -130,17 +136,25 @@ public object CompanionHolder {
         lifecycleRegistered = true
         if (BridgethingActivityRegistry.currentActivity != null) {
             startedActivities = 1
-            foreground = true
+            onForeground?.invoke() ?: run { foreground = true }
         }
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 startedActivities++
-                foreground = true
+                resumeForeground()
             }
 
             override fun onActivityStopped(activity: Activity) {
                 startedActivities = (startedActivities - 1).coerceAtLeast(0)
-                if (startedActivities == 0) foreground = false
+                if (startedActivities == 0) {
+                    foreground = false
+                    onBackground?.invoke()
+                }
+            }
+
+            private fun resumeForeground() {
+                val resume = onForeground
+                if (resume != null) resume() else foreground = true
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}

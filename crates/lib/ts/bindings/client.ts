@@ -37,6 +37,7 @@ import type {
   Notification,
   NowPlayingUpdate,
   OtaError,
+  OtaFinished,
   OtaProgress,
   Peer,
   PhoneCall,
@@ -408,6 +409,7 @@ export type BridgeToClientSystemMsg =
   | { event: 'logEntry'; data: LogEntry }
   | { event: 'otaProgress'; data: OtaProgress }
   | { event: 'otaError'; data: OtaError }
+  | { event: 'otaFinished'; data: OtaFinished }
   | { event: 'deviceNickname'; data: DeviceNicknameReply }
   | { event: 'deviceNicknameChanged'; data: DeviceNicknameReply };
 

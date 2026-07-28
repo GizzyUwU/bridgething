@@ -103,6 +103,7 @@ public class WebappResourceService internal constructor(
             "image/webp" to "webp",
             "image/gif" to "gif",
             "text/html" to "html",
+            "text/javascript" to "js",
         )
         val MIME_BY_EXT = EXT_BY_MIME.entries.associate { (mime, ext) -> ext to mime }
     }

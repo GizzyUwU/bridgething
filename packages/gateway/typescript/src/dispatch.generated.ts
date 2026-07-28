@@ -8,6 +8,7 @@ import type {
   LogEntry,
   Notification,
   OtaError,
+  OtaFinished,
   OtaProgress,
   PhoneCall,
   PlayerState,
@@ -153,6 +154,8 @@ import type {
   WebappList,
   WebappResource,
   WebappResourceReply,
+  WebappSetSlot,
+  WebappSlots,
   WebappSwitchTo,
   WebappUninstall,
 } from '@bridgething/lib/gateway';
@@ -339,6 +342,7 @@ export type PlayerDeviceInboundHandlers = {
 export type SystemInboundHandlers = {
   otaProgress: (deviceId: string, msg: OtaProgress) => void;
   otaError: (deviceId: string, msg: OtaError) => void;
+  otaFinished: (deviceId: string, msg: OtaFinished) => void;
   otaBeginAck: (deviceId: string, msg: OtaBeginAck) => void;
   otaBeginRejected: (deviceId: string, msg: OtaBeginRejected) => void;
   otaAssetRangeAbandon: (deviceId: string, msg: OtaAssetRangeAbandon) => void;
@@ -355,6 +359,7 @@ export type SystemInboundHandlers = {
 export type SystemDeviceInboundHandlers = {
   otaProgress: (msg: OtaProgress) => void;
   otaError: (msg: OtaError) => void;
+  otaFinished: (msg: OtaFinished) => void;
   otaBeginAck: (msg: OtaBeginAck) => void;
   otaBeginRejected: (msg: OtaBeginRejected) => void;
   otaAssetRangeAbandon: (msg: OtaAssetRangeAbandon) => void;
@@ -415,6 +420,7 @@ export type WebappInboundHandlers = {
   uninstalled: (deviceId: string, msg: WebappActive) => void;
   webappError: (deviceId: string, msg: WebappError) => void;
   resource: (deviceId: string, msg: WebappResourceReply) => void;
+  slots: (deviceId: string, msg: WebappSlots) => void;
   configGet: (deviceId: string, msg: WebappConfigGetReply) => void;
   configList: (deviceId: string, msg: WebappConfigListReply) => void;
   configAck: (deviceId: string, msg: WebappConfigAck) => void;
@@ -433,6 +439,7 @@ export type WebappDeviceInboundHandlers = {
   uninstalled: (msg: WebappActive) => void;
   webappError: (msg: WebappError) => void;
   resource: (msg: WebappResourceReply) => void;
+  slots: (msg: WebappSlots) => void;
   configGet: (msg: WebappConfigGetReply) => void;
   configList: (msg: WebappConfigListReply) => void;
   configAck: (msg: WebappConfigAck) => void;
@@ -2166,6 +2173,18 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::OtaFinished` across all peers. */
+  onOtaFinished(handler: (deviceId: string, msg: OtaFinished) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaFinished') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Subscribe to `System::OtaBeginAck` across all peers. */
   onOtaBeginAck(handler: (deviceId: string, msg: OtaBeginAck) => void): () => void {
     return this._gateway.on(event => {
@@ -2337,6 +2356,10 @@ export class SystemSurface {
         }
         case 'otaError': {
           handlers.otaError?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'otaFinished': {
+          handlers.otaFinished?.(event.deviceId, inner.data);
           return;
         }
         case 'otaBeginAck': {
@@ -3034,6 +3057,18 @@ export class WebappSurface {
     });
   }
 
+  /** Subscribe to `Webapp::Slots` across all peers. */
+  onSlots(handler: (deviceId: string, msg: WebappSlots) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'slots') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Subscribe to `Webapp::ConfigGet` across all peers. */
   onConfigGet(handler: (deviceId: string, msg: WebappConfigGetReply) => void): () => void {
     return this._gateway.on(event => {
@@ -3183,6 +3218,10 @@ export class WebappSurface {
           handlers.resource?.(event.deviceId, inner.data);
           return;
         }
+        case 'slots': {
+          handlers.slots?.(event.deviceId, inner.data);
+          return;
+        }
         case 'configGet': {
           handlers.configGet?.(event.deviceId, inner.data);
           return;
@@ -3286,6 +3325,37 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async getSlots(deviceId: string, options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappSlots, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getSlots' } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'slots') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async setSlot(
+    deviceId: string,
+    req: WebappSetSlot,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappSlots, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'setSlot', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'slots') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -5364,6 +5434,19 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `System::OtaFinished` from this peer. */
+  onOtaFinished(handler: (msg: OtaFinished) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaFinished') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `System::OtaBeginAck` from this peer. */
   onOtaBeginAck(handler: (msg: OtaBeginAck) => void): () => void {
     return this._gateway.on(event => {
@@ -5547,6 +5630,10 @@ export class SystemSurfaceForDevice {
         }
         case 'otaError': {
           handlers.otaError?.(inner.data);
+          return;
+        }
+        case 'otaFinished': {
+          handlers.otaFinished?.(inner.data);
           return;
         }
         case 'otaBeginAck': {
@@ -6206,6 +6293,19 @@ export class WebappSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Webapp::Slots` from this peer. */
+  onSlots(handler: (msg: WebappSlots) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'slots') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Webapp::ConfigGet` from this peer. */
   onConfigGet(handler: (msg: WebappConfigGetReply) => void): () => void {
     return this._gateway.on(event => {
@@ -6365,6 +6465,10 @@ export class WebappSurfaceForDevice {
           handlers.resource?.(inner.data);
           return;
         }
+        case 'slots': {
+          handlers.slots?.(inner.data);
+          return;
+        }
         case 'configGet': {
           handlers.configGet?.(inner.data);
           return;
@@ -6463,6 +6567,36 @@ export class WebappSurfaceForDevice {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async getSlots(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappSlots, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getSlots' } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'slots') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async setSlot(
+    req: WebappSetSlot,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappSlots, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'setSlot', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'slots') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -8243,6 +8377,10 @@ function outerSubscribeGateway(
             innerHandlers.otaError?.(event.deviceId, inner.data);
             return;
           }
+          case 'otaFinished': {
+            innerHandlers.otaFinished?.(event.deviceId, inner.data);
+            return;
+          }
           case 'otaBeginAck': {
             innerHandlers.otaBeginAck?.(event.deviceId, inner.data);
             return;
@@ -8436,6 +8574,10 @@ function outerSubscribeGateway(
           }
           case 'resource': {
             innerHandlers.resource?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'slots': {
+            innerHandlers.slots?.(event.deviceId, inner.data);
             return;
           }
           case 'configGet': {
@@ -8983,6 +9125,10 @@ function outerSubscribeDevice(
             innerHandlers.otaError?.(inner.data);
             return;
           }
+          case 'otaFinished': {
+            innerHandlers.otaFinished?.(inner.data);
+            return;
+          }
           case 'otaBeginAck': {
             innerHandlers.otaBeginAck?.(inner.data);
             return;
@@ -9176,6 +9322,10 @@ function outerSubscribeDevice(
           }
           case 'resource': {
             innerHandlers.resource?.(inner.data);
+            return;
+          }
+          case 'slots': {
+            innerHandlers.slots?.(inner.data);
             return;
           }
           case 'configGet': {

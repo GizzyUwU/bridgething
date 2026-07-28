@@ -22,7 +22,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Press } from './components/Press';
 import { Wordmark } from './components/Wordmark';
-import { bootstrapSession, reconcileSnapshot } from './lib/session';
+import { refreshCatalog } from './lib/catalog';
+import { bootstrapSession } from './lib/session';
 import { getSetupCompleted } from './lib/storage';
 import { PALETTE } from './lib/theme';
 import type { RootStackParamList } from './navigation';
@@ -33,9 +34,12 @@ import { OtaVersionsScreen } from './screens/OtaVersions';
 import { SettingsScreen } from './screens/Settings';
 import { SetupScreen } from './screens/Setup';
 import { StoreScreen } from './screens/Store';
+import { StoreAppScreen } from './screens/StoreApp';
+import { StoreSourceScreen } from './screens/StoreSource';
 import { WebappBrowseScreen } from './screens/WebappBrowse';
 import { WebappDetailScreen } from './screens/WebappDetail';
 import { WebappSettingsScreen } from './screens/WebappSettings';
+import { WebappSlotsScreen } from './screens/WebappSlots';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -56,16 +60,13 @@ export default function App() {
       if (cancelled) return;
       console.warn('[bridgething] bootstrap failed', err);
     });
+    refreshCatalog().catch(err => {
+      if (cancelled) return;
+      console.warn('[bridgething] initial catalog fetch failed', err);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active') reconcileSnapshot();
-    });
-    return () => sub.remove();
   }, []);
 
   if (boot == null) {
@@ -155,6 +156,16 @@ export default function App() {
             options={{ title: 'app store', headerLargeTitle: false }}
           />
           <Stack.Screen
+            name="StoreSource"
+            component={StoreSourceScreen}
+            options={{ title: 'source', headerLargeTitle: false }}
+          />
+          <Stack.Screen
+            name="StoreApp"
+            component={StoreAppScreen}
+            options={{ title: 'app', headerLargeTitle: false }}
+          />
+          <Stack.Screen
             name="WebappDetail"
             component={WebappDetailScreen}
             options={{ title: 'app', headerLargeTitle: false }}
@@ -163,6 +174,11 @@ export default function App() {
             name="WebappSettings"
             component={WebappSettingsScreen}
             options={{ headerRight: undefined, headerLargeTitle: false }}
+          />
+          <Stack.Screen
+            name="WebappSlots"
+            component={WebappSlotsScreen}
+            options={{ title: 'home screen', headerLargeTitle: false }}
           />
           <Stack.Screen
             name="Settings"

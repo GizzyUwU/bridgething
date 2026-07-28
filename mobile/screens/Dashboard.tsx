@@ -11,7 +11,7 @@ import {
   Store as StoreIcon,
   TriangleAlert,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 
 import { HeroPulse } from '../components/HeroPulse';
@@ -35,8 +35,10 @@ import {
   updateNickname,
   useSession,
 } from '../lib/session';
+import { reconcileAll } from '../lib/bridge';
+import { useUpdates } from '../lib/catalog';
 import { installLatestOta, useOta } from '../lib/ota';
-import { refreshWebapps, useWebapps } from '../lib/webapps';
+import { useWebapps } from '../lib/webapps';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
@@ -244,15 +246,18 @@ function DeviceSection({
   const ledger = useSession(s => s.ledger);
   const meta = useSession(s => s.deviceMeta[peer.id]);
   const channel = meta?.channel || 'stable';
-  const ota = useOta(s => s.byDevice[peer.id]);
-  const {
-    list: webapps,
-    active,
-    loading: refreshing,
-    error: refreshError,
-  } = useWebapps(peer.id);
+  const reconciled = useSession(s => s.reconciled);
+  const otaRun = useOta(s => s.runs[peer.id]);
+  const otaAvailable = useOta(s => s.available[peer.id]);
+  const { list: webapps, active } = useWebapps(peer.id);
+  const updates = useUpdates(peer.id);
+  const updatable = useMemo(
+    () => new Set(updates.map(u => u.appId.toLowerCase())),
+    [updates],
+  );
 
   const [renameOpen, setRenameOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   return (
     <View className="mb-8">
@@ -315,11 +320,12 @@ function DeviceSection({
         </Press>
       </View>
 
-      {otaHasActivity(ota) ? (
+      {otaHasActivity(otaRun, otaAvailable) ? (
         <View className="mb-4 -mt-1">
           <OtaCard
+            deviceId={peer.id}
             name="software update"
-            status={ota}
+            available={otaAvailable}
             onInstall={() => {
               void installLatestOta(peer.id, channel).catch((err: unknown) => {
                 Alert.alert(
@@ -335,14 +341,20 @@ function DeviceSection({
 
       <SectionHeader
         title="installed apps"
-        action={refreshing ? '' : 'refresh'}
-        onActionPress={() => refreshWebapps(peer.id)}
+        action="refresh"
+        actionPending={refreshing}
+        onActionPress={() => {
+          setRefreshing(true);
+          void reconcileAll()
+            .catch((err: unknown) => {
+              Alert.alert(
+                'refresh failed',
+                err instanceof Error ? err.message : String(err),
+              );
+            })
+            .finally(() => setRefreshing(false));
+        }}
       />
-      {refreshError ? (
-        <View className="mb-3 rounded-2xl border border-destructive/30 bg-destructive-soft px-4 py-3">
-          <Text className="text-[12px] text-destructive">{refreshError}</Text>
-        </View>
-      ) : null}
 
       <View className="-mx-1 flex-row flex-wrap">
         {webapps.map(w => {
@@ -353,12 +365,13 @@ function DeviceSection({
               webapp={w}
               deviceId={peer.id}
               active={isActive}
+              hasUpdate={updatable.has(w.id.toLowerCase())}
               onTap={() => onTapApp(w.id)}
             />
           );
         })}
         <AddTile onPress={onAddApp} />
-        {refreshing && webapps.length === 0 ? (
+        {!reconciled && webapps.length === 0 ? (
           <View className="m-1 w-[31%] items-center justify-center rounded-2xl border border-border bg-surface px-3 py-6">
             <RefreshCw size={18} color="hsl(215 14% 50%)" strokeWidth={2.2} />
             <Text className="mt-2 text-[11px] text-muted-foreground">
@@ -375,11 +388,13 @@ function AppTile({
   webapp,
   deviceId,
   active,
+  hasUpdate,
   onTap,
 }: {
   webapp: BridgethingWebappInfo;
   deviceId: string;
   active: boolean;
+  hasUpdate: boolean;
   onTap: () => void;
 }) {
   return (
@@ -405,6 +420,9 @@ function AppTile({
               }
         }
       >
+        {hasUpdate ? (
+          <View className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-primary" />
+        ) : null}
         <WebappIcon
           deviceId={deviceId}
           id={webapp.id}

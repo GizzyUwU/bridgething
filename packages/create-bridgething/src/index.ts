@@ -11,6 +11,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -22,19 +23,50 @@ import { v7 as uuidv7 } from 'uuid';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = resolve(__dirname, '..', 'template');
 
+type Variant = 'app' | 'launcher' | 'overlay';
+
+const VARIANTS: Record<
+  Variant,
+  {
+    dir?: string;
+    manifest?: Record<string, unknown>;
+    scripts?: Record<string, string>;
+    summary: string;
+  }
+> = {
+  app: { summary: 'webapp' },
+  launcher: {
+    dir: 'template-launcher',
+    manifest: { role: 'launcher', description: 'A custom home screen.' },
+    summary: 'launcher (a replacement home screen)',
+  },
+  overlay: {
+    dir: 'template-overlay',
+    manifest: { overlay: 'overlay.js', description: 'A custom system overlay.' },
+    scripts: {
+      build: 'vite build && vite build -c vite.settings.config.ts && vite build -c vite.overlay.config.ts',
+    },
+    summary: 'overlay (system UI drawn over every webapp)',
+  },
+};
+
 type Args = {
   target: string;
   install: boolean;
   git: boolean;
+  variant: Variant;
 };
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
   let install = true;
   let git = true;
+  let variant: Variant = 'app';
   for (const arg of argv) {
     if (arg === '--no-install') install = false;
     else if (arg === '--no-git') git = false;
+    else if (arg === '--launcher') variant = 'launcher';
+    else if (arg === '--overlay') variant = 'overlay';
     else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -50,18 +82,49 @@ function parseArgs(argv: string[]): Args {
     printHelp();
     process.exit(1);
   }
-  return { target: positional[0], install, git };
+  return { target: positional[0], install, git, variant };
 }
 
 function printHelp(): void {
-  console.log(`Usage: create-bridgething <target-dir> [--no-install] [--no-git]
+  console.log(`Usage: create-bridgething <target-dir> [--launcher | --overlay] [--no-install] [--no-git]
 
 Scaffold a new bridgething webapp at <target-dir>.
+
+Variants:
+  (default)     A normal webapp.
+  --launcher    A home screen. Declares 'role: launcher' and can take the
+                device's launcher slot, replacing the built-in hub.
+  --overlay     A system overlay. Ships an 'overlay.js' the daemon injects
+                into every webapp, replacing the built-in one.
 
 Options:
   --no-install  Skip 'bun install' after copying.
   --no-git      Skip 'git init' after copying.
 `);
+}
+
+function patchJson(path: string, patch: Record<string, unknown>): void {
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  writeFileSync(path, `${JSON.stringify({ ...parsed, ...patch }, null, 2)}\n`);
+}
+
+function applyVariant(target: string, variant: Variant, subs: Substitutions): void {
+  const spec = VARIANTS[variant];
+  if (spec.dir) copyTemplate(resolve(__dirname, '..', spec.dir), target, subs);
+
+  const appendPath = join(target, '_claude_append.md');
+  if (existsSync(appendPath)) {
+    const claudePath = join(target, 'CLAUDE.md');
+    writeFileSync(claudePath, readFileSync(claudePath, 'utf8') + readFileSync(appendPath, 'utf8'));
+    rmSync(appendPath);
+  }
+
+  if (spec.manifest) patchJson(join(target, 'public', 'manifest.json'), spec.manifest);
+  if (spec.scripts) {
+    const pkgPath = join(target, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { scripts: Record<string, string> };
+    patchJson(pkgPath, { scripts: { ...pkg.scripts, ...spec.scripts } });
+  }
 }
 
 type Substitutions = {
@@ -150,9 +213,11 @@ function main(): void {
   }
 
   const webappUuid = uuidv7();
+  const subs = { projectName, webappUuid };
   console.log(`scaffolding ${projectName} (${webappUuid}) in ${target}`);
-  copyTemplate(TEMPLATE_DIR, target, { projectName, webappUuid });
-  console.log('  ✓ template copied');
+  copyTemplate(TEMPLATE_DIR, target, subs);
+  applyVariant(target, args.variant, subs);
+  console.log(`  ✓ template copied (${VARIANTS[args.variant].summary})`);
 
   linkAgentAliases(target);
   console.log('  ✓ agent guides linked (CLAUDE.md, AGENTS.md, /bridgething skill)');
@@ -189,7 +254,16 @@ driving the app, and installing and sharing it.
   bun run push <addr>  # build + install onto a connected Car Thing (default bridgething.local)
   bun run share        # build first, then zip dist/ to hand to friends
   bun run update       # bring the connected Car Thing to the latest bridgething release
-
+${
+  args.variant === 'app'
+    ? ''
+    : `
+'bun run push' also claims the device's ${args.variant} slot, so this is live the
+moment it lands. 'bun run push --release' hands the slot back to the built-in
+${args.variant === 'launcher' ? 'hub' : 'overlay'}, which is how you recover if a build of this wedges the screen.
+The companion phone app can do the same thing.
+`
+}
 The starter App connects to ws://127.0.0.1:8891/ on the device, and to
 ws://<device-ip>:8891/ in dev when you set VITE_BRIDGETHING_URL.
 `);

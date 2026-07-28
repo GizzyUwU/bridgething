@@ -33,6 +33,7 @@ import type {
   NluResolvedIntent,
   Notification,
   OtaError,
+  OtaFinished,
   OtaKind,
   OtaProgress,
   PhoneCall,
@@ -181,6 +182,7 @@ export type BridgeToGatewayPlayerMsg =
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
   | { event: 'otaError'; data: OtaError }
+  | { event: 'otaFinished'; data: OtaFinished }
   | { event: 'otaBeginAck'; data: OtaBeginAck }
   | { event: 'otaBeginRejected'; data: OtaBeginRejected }
   | { event: 'otaAssetRange'; data: OtaAssetRange }
@@ -217,6 +219,7 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'uninstalled'; data: WebappActive }
   | { event: 'webappError'; data: WebappError }
   | { event: 'resource'; data: WebappResourceReply }
+  | { event: 'slots'; data: WebappSlots }
   | { event: 'configGet'; data: WebappConfigGetReply }
   | { event: 'configList'; data: WebappConfigListReply }
   | { event: 'configAck'; data: WebappConfigAck }
@@ -389,6 +392,8 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'switchTo'; data: WebappSwitchTo }
   | { event: 'uninstall'; data: WebappUninstall }
   | { event: 'resource'; data: WebappResource }
+  | { event: 'getSlots' }
+  | { event: 'setSlot'; data: WebappSetSlot }
   | { event: 'configGet'; data: WebappConfigGet }
   | { event: 'configList'; data: WebappConfigList }
   | { event: 'configSet'; data: WebappConfigSet }
@@ -670,7 +675,7 @@ export type WebappList = { webapps: Array<WebappInfo> };
 
 export type WebappResource = { id: string; kind: WebappResourceKind; have: string | null };
 
-export type WebappResourceKind = 'icon' | 'settings';
+export type WebappResourceKind = 'icon' | 'settings' | 'overlay';
 
 export type WebappResourceReply = {
   id: string;
@@ -679,6 +684,12 @@ export type WebappResourceReply = {
   mime: string | null;
   body: TransferBody | null;
 };
+
+export type WebappSetSlot = { slot: WebappSlot; id: string | null };
+
+export type WebappSlot = 'launcher' | 'overlay';
+
+export type WebappSlots = { launcher: string | null; overlay: string | null };
 
 export type WebappSwitchTo = { id: string };
 

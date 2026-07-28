@@ -13,7 +13,10 @@ import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
 import com.margelo.nitro.bridgething.session.BridgethingLogArchive
 import com.margelo.nitro.bridgething.session.BridgethingDocEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
-import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
+import com.margelo.nitro.bridgething.session.BridgethingDeviceWebappsEntry
+import com.margelo.nitro.bridgething.session.BridgethingOtaAvailable
+import com.margelo.nitro.bridgething.session.BridgethingOtaPollStatus
+import com.margelo.nitro.bridgething.session.BridgethingOtaRun
 import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
@@ -22,6 +25,8 @@ import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
+import com.margelo.nitro.bridgething.session.BridgethingWebappSlot
+import com.margelo.nitro.bridgething.session.BridgethingWebappSlots
 
 public interface BridgethingSessionBackend {
     public suspend fun start()
@@ -52,6 +57,8 @@ public interface BridgethingSessionBackend {
     public suspend fun installWebapp(deviceId: String, sourceUri: String): BridgethingWebappInfo
     public suspend fun uninstallWebapp(deviceId: String, id: String)
     public suspend fun switchWebapp(deviceId: String, id: String)
+    public suspend fun getWebappSlots(deviceId: String): BridgethingWebappSlots
+    public suspend fun setWebappSlot(deviceId: String, slot: BridgethingWebappSlot, id: String?): BridgethingWebappSlots
     public suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon?
     public suspend fun webappSettingsPage(deviceId: String, id: String): String
     public suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry>
@@ -72,12 +79,16 @@ public interface BridgethingSessionBackend {
     public suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest
     public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?)
 
+    public suspend fun dismissOtaRun(deviceId: String)
+
     public suspend fun installWebappFromUrl(
         deviceId: String,
         url: String,
         sha256: String,
         size: Double,
         provenance: String?,
+        webappId: String?,
+        webappName: String?,
     ): BridgethingWebappInfo
 
     public suspend fun reconnectPeer(deviceId: String)
@@ -109,8 +120,14 @@ public interface BridgethingSessionBackend {
     public fun setOnLog(callback: (String, String) -> Unit)
     public fun setLogStreamingEnabled(enabled: Boolean)
     public fun setLocalLogStreamingEnabled(enabled: Boolean)
-    public fun setOnWebappsChanged(callback: (String) -> Unit)
+    public fun setOnWebappsChanged(callback: (BridgethingDeviceWebappsEntry) -> Unit)
     public fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
-    public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
+    public fun setOnOtaRunChanged(callback: (BridgethingOtaRun) -> Unit)
+
+    public fun setOnOtaAvailableChanged(callback: (BridgethingOtaAvailable) -> Unit)
+
+    public fun setOnOtaPollChanged(callback: (BridgethingOtaPollStatus) -> Unit)
+
+    public fun setOnResumed(callback: (BridgethingSessionSnapshot) -> Unit)
 }

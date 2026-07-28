@@ -2,7 +2,7 @@ use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{BridgeThingMeta, Diagnostics, LogEntry, OtaError, OtaProgress};
+use crate::{BridgeThingMeta, Diagnostics, LogEntry, OtaError, OtaFinished, OtaProgress};
 
 /// Current device nickname. `nickname: None` when the user hasn't set
 /// one. Reply to `DeviceGetNickname`; daemon also broadcasts this as a
@@ -69,9 +69,10 @@ pub enum BridgeToClientSystemMsg {
   OtaProgress(OtaProgress),
   #[bridge_event]
   OtaError(OtaError),
+  #[bridge_event]
+  OtaFinished(OtaFinished),
   #[bridge_response]
   DeviceNickname(DeviceNicknameReply),
-  /// event broadcast when the nickname changes, including changes made from another surface
   #[bridge_event]
   DeviceNicknameChanged(DeviceNicknameReply),
 }

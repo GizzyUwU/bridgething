@@ -82,6 +82,7 @@ export type BridgethingWebappInfo = {
   description?: string;
   iconHash?: string;
   settingsHash?: string;
+  overlayHash?: string;
   config: BridgethingConfigField[];
   permissions: string[];
 };
@@ -89,6 +90,13 @@ export type BridgethingWebappInfo = {
 export type BridgethingActiveWebapp = {
   id: string;
   name?: string;
+};
+
+export type BridgethingWebappSlot = 'launcher' | 'overlay';
+
+export type BridgethingWebappSlots = {
+  launcher?: string;
+  overlay?: string;
 };
 
 export type BridgethingConfigKind = 'string' | 'number' | 'boolean' | 'enum' | 'secret';
@@ -137,7 +145,7 @@ export type BridgethingOtaPollConfig = {
   rootUrl?: string;
 };
 
-export type BridgethingOtaKind = 'image' | 'daemon' | 'builtinWebapp';
+export type BridgethingOtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp';
 
 export type BridgethingOtaPhase =
   | 'idle'
@@ -150,15 +158,6 @@ export type BridgethingOtaPhase =
   | 'completed'
   | 'failed';
 
-export type BridgethingOtaEventKind =
-  | 'manifestPolled'
-  | 'manifestPollFailed'
-  | 'updateAvailable'
-  | 'planned'
-  | 'progress'
-  | 'updated'
-  | 'failed';
-
 export type BridgethingOtaStepKind = 'download' | 'stream' | 'apply' | 'reboot';
 
 export type BridgethingOtaStep = {
@@ -168,27 +167,40 @@ export type BridgethingOtaStep = {
   bytes: number;
 };
 
-export type BridgethingOtaEvent = {
-  kind: BridgethingOtaEventKind;
-  updatedAt?: string;
-  reason?: string;
-  deviceId?: string;
-  otaKind?: BridgethingOtaKind;
-  fromVersion?: string;
-  toVersion?: string;
+export type BridgethingOtaOutcome = 'succeeded' | 'failed' | 'cancelled';
+
+export type BridgethingOtaRun = {
+  runId: string;
+  deviceId: string;
+  otaKind: BridgethingOtaKind;
+  phase: BridgethingOtaPhase;
+  steps: BridgethingOtaStep[];
+  stepId: number;
+  startedAt: number;
+  phaseStartedAt: number;
+  stageReceived?: number;
+  stageTotal?: number;
+  ratePerSec?: number;
+  dwlPercent?: number;
+  outcome?: BridgethingOtaOutcome;
+  error?: string;
   releaseVersion?: string;
   daemonVersion?: string;
   imageVersion?: string;
-  steps?: BridgethingOtaStep[];
-  stepId?: number;
-  phase?: BridgethingOtaPhase;
-  percent?: number;
-  dwlPercent?: number;
-  stageAsset?: string;
-  stageReceived?: number;
-  stageTotal?: number;
-  stageRatePerSec?: number;
-  stageEtaSeconds?: number;
+  webappId?: string;
+  webappName?: string;
+};
+
+export type BridgethingOtaAvailable = {
+  deviceId: string;
+  releaseVersion?: string;
+  daemonVersion?: string;
+  imageVersion?: string;
+};
+
+export type BridgethingOtaPollStatus = {
+  lastPolledAt?: string;
+  error?: string;
 };
 
 export type BridgethingOtaRelease = {
@@ -256,6 +268,12 @@ export type BridgethingAncsAuthStatusEntry = {
   status: BridgethingAncsAuthStatus;
 };
 
+export type BridgethingDeviceWebappsEntry = {
+  deviceId: string;
+  webapps: BridgethingWebappInfo[];
+  active?: BridgethingActiveWebapp;
+};
+
 export type BridgethingSessionSnapshot = {
   hostInfo: BridgethingHostInfo;
   providers: BridgethingProviderInfo[];
@@ -267,6 +285,10 @@ export type BridgethingSessionSnapshot = {
   deviceMeta: BridgethingDeviceMetaEntry[];
   capabilityFlags: BridgethingCapabilityFlags;
   otaPollConfig?: BridgethingOtaPollConfig;
+  webapps: BridgethingDeviceWebappsEntry[];
+  otaRuns: BridgethingOtaRun[];
+  otaAvailable: BridgethingOtaAvailable[];
+  otaPoll: BridgethingOtaPollStatus;
 };
 
 export type BridgethingDeviceLogLine = {
@@ -319,6 +341,8 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   installWebapp(deviceId: string, sourceUri: string): Promise<BridgethingWebappInfo>;
   uninstallWebapp(deviceId: string, id: string): Promise<void>;
   switchWebapp(deviceId: string, id: string): Promise<void>;
+  getWebappSlots(deviceId: string): Promise<BridgethingWebappSlots>;
+  setWebappSlot(deviceId: string, slot: BridgethingWebappSlot, id?: string): Promise<BridgethingWebappSlots>;
   webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null>;
   webappSettingsPage(deviceId: string, id: string): Promise<string>;
   listWebappConfig(deviceId: string, id: string): Promise<BridgethingConfigEntry[]>;
@@ -345,6 +369,8 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
     sha256: string,
     size: number,
     provenance: string | null,
+    webappId: string | null,
+    webappName: string | null,
   ): Promise<BridgethingWebappInfo>;
 
   reconnectPeer(deviceId: string): Promise<void>;
@@ -377,10 +403,17 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setLogStreamingEnabled(enabled: boolean): void;
   setLocalLogStreamingEnabled(enabled: boolean): void;
 
-  setOnWebappsChanged(callback: (deviceId: string) => void): void;
+  setOnWebappsChanged(callback: (entry: BridgethingDeviceWebappsEntry) => void): void;
   setOnWebappDocChanged(
     callback: (deviceId: string, webappId: string, key: string, value: string | null) => void,
   ): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
-  setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
+
+  dismissOtaRun(deviceId: string): Promise<void>;
+
+  setOnOtaRunChanged(callback: (run: BridgethingOtaRun) => void): void;
+  setOnOtaAvailableChanged(callback: (available: BridgethingOtaAvailable) => void): void;
+  setOnOtaPollChanged(callback: (status: BridgethingOtaPollStatus) => void): void;
+
+  setOnResumed(callback: (snapshot: BridgethingSessionSnapshot) => void): void;
 }

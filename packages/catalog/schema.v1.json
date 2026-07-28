@@ -170,6 +170,14 @@
           "uniqueItems": true,
           "description": "Permission catalog keys this version requests (net.fetch, geo, ...). Shown at install, informational, never a gate."
         },
+        "role": {
+          "enum": ["standard", "launcher"],
+          "description": "Mirrors the bundle manifest's role. A launcher can take the device's launcher slot and replace the built-in hub. Absent means standard."
+        },
+        "provides_overlay": {
+          "type": "boolean",
+          "description": "Whether this version ships an overlay the device can inject over every webapp. Absent means it does not."
+        },
         "min_libbridgething_version": {
           "$ref": "#/$defs/Semver"
         },

@@ -2,11 +2,11 @@ use libbridgething::{
   ConfigEntry, ConfigField, DocEntry, WebappError,
   client::{BridgeToClientConfigMsgEvent, BridgeToClientDocMsgEvent, ConfigChanged, DocChanged},
   gateway::{
-    BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, TransferBody,
-    TransferRef, WebappActive, WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply,
-    WebappConfigList, WebappConfigListReply, WebappConfigSet, WebappDocAck, WebappDocDelete, WebappDocGet,
-    WebappDocGetReply, WebappDocList, WebappDocListReply, WebappDocSet, WebappList, WebappResource, WebappResourceKind,
-    WebappResourceReply, WebappSwitchTo, WebappUninstall,
+    BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, GetWebappSlots,
+    ListWebapps, TransferBody, TransferRef, WebappActive, WebappConfigAck, WebappConfigDelete, WebappConfigGet,
+    WebappConfigGetReply, WebappConfigList, WebappConfigListReply, WebappConfigSet, WebappDocAck, WebappDocDelete,
+    WebappDocGet, WebappDocGetReply, WebappDocList, WebappDocListReply, WebappDocSet, WebappList, WebappResource,
+    WebappResourceKind, WebappResourceReply, WebappSetSlot, WebappSlot, WebappSwitchTo, WebappUninstall,
   },
 };
 use uuid::Uuid;
@@ -93,16 +93,30 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
       );
     }
 
+    let released = self.handle.state.release_slots_for(id).await?;
+    if released.overlay {
+      tracing::info!("uninstalled webapp {id} held the overlay slot; reverting to the builtin overlay");
+      self.handle.state.sync_overlay(false).await;
+    }
+    if released.launcher {
+      tracing::info!("uninstalled webapp {id} held the launcher slot; reverting to the builtin hub");
+    }
+
     let active = self.handle.state.active_webapp().await?;
+    let mut needs_reload = released.overlay;
     if active == Some(id) {
-      if let Some(fallback) = self.handle.state.webapps.default_id().await {
-        tracing::info!("active webapp {id} was uninstalled; falling back to {fallback}");
-        self.handle.state.set_active_webapp(fallback).await?;
-        self.reload_kiosk().await;
-        self.broadcast_active_changed().await;
-      } else {
-        tracing::warn!("active webapp {id} was uninstalled and no fallback is available");
+      match self.handle.state.launcher_webapp().await? {
+        Some(fallback) => {
+          tracing::info!("active webapp {id} was uninstalled; falling back to {fallback}");
+          self.handle.state.set_active_webapp(fallback).await?;
+          self.broadcast_active_changed().await;
+          needs_reload = true;
+        }
+        None => tracing::warn!("active webapp {id} was uninstalled and no fallback is available"),
       }
+    }
+    if needs_reload {
+      self.reload_kiosk().await;
     }
 
     let active = active_payload(&self.handle).await?;
@@ -125,6 +139,16 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
       },
       WebappResourceKind::Settings => match self.handle.state.webapps.read_settings(id).await {
         Some(bytes) => (bytes, Some("text/html".to_string())),
+        None => {
+          self
+            .handle
+            .respond_err::<WebappResource>(WebappError::ResourceNotAvailable { id: id.to_string() })
+            .await;
+          return Ok(());
+        }
+      },
+      WebappResourceKind::Overlay => match self.handle.state.webapps.read_overlay(id).await {
+        Some(bytes) => (bytes, Some("text/javascript".to_string())),
         None => {
           self
             .handle
@@ -199,6 +223,69 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
         .send_stream(&bluetooth, address, transfer_id, bytes.into())
         .await;
     });
+    Ok(())
+  }
+
+  async fn get_slots(&self) -> HandlerResult {
+    let slots = self.handle.state.webapp_slots().await?;
+    self.handle.respond_to::<GetWebappSlots>(slots).await;
+    Ok(())
+  }
+
+  async fn set_slot(&self, params: WebappSetSlot) -> HandlerResult {
+    let WebappSetSlot { slot, id } = params;
+
+    if let Some(id) = id {
+      if self.handle.state.webapps.resolve(id).await.is_none() {
+        self.handle.state.webapps.rescan().await;
+      }
+      if self.handle.state.webapps.resolve(id).await.is_none() {
+        self
+          .handle
+          .respond_err::<WebappSetSlot>(WebappError::WebappNotFound { id: id.to_string() })
+          .await;
+        return Ok(());
+      }
+      let eligible = match slot {
+        WebappSlot::Launcher => self.handle.state.webapps.is_launcher(id).await,
+        WebappSlot::Overlay => self.handle.state.webapps.provides_overlay(id).await,
+      };
+      if !eligible {
+        let err = match slot {
+          WebappSlot::Launcher => WebappError::NotALauncher { id: id.to_string() },
+          WebappSlot::Overlay => WebappError::NoOverlay { id: id.to_string() },
+        };
+        tracing::warn!(
+          "({:?}) refusing {slot:?} slot for {id}: ineligible",
+          &self.handle.address
+        );
+        self.handle.respond_err::<WebappSetSlot>(err).await;
+        return Ok(());
+      }
+    }
+
+    match slot {
+      WebappSlot::Launcher => {
+        let previous = self.handle.state.launcher_webapp().await?;
+        self.handle.state.set_launcher_slot(id).await?;
+        let active = self.handle.state.active_webapp().await?;
+        if active.is_some() && active == previous {
+          if let Some(next) = self.handle.state.launcher_webapp().await? {
+            self.handle.state.set_active_webapp(next).await?;
+            self.broadcast_active_changed().await;
+          }
+        }
+        self.reload_kiosk().await;
+      }
+      WebappSlot::Overlay => {
+        self.handle.state.set_overlay_slot(id).await?;
+        self.handle.state.sync_overlay(false).await;
+        self.reload_kiosk().await;
+      }
+    }
+
+    let slots = self.handle.state.webapp_slots().await?;
+    self.handle.respond_to::<WebappSetSlot>(slots).await;
     Ok(())
   }
 
@@ -477,10 +564,10 @@ pub async fn navigate_url_for_active(state: &crate::state::State) -> String {
   let Ok(Some(active)) = state.active_webapp().await else {
     return KIOSK_HOME_URL.to_string();
   };
-  if active != crate::state::HUB_WEBAPP_ID {
+  if state.launcher_webapp().await.ok().flatten() != Some(active) {
     return KIOSK_HOME_URL.to_string();
   }
-  match state.webapps.bundle_hash(crate::state::HUB_WEBAPP_ID).await {
+  match state.webapps.bundle_hash(active).await {
     Some(hash) => format!("{KIOSK_HUB_URL_BASE}{hash}/"),
     None => KIOSK_HOME_URL.to_string(),
   }

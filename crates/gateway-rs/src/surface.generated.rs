@@ -377,6 +377,12 @@ impl<'a> WebappSurface<'a> {
   pub async fn uninstall(&self, request: WebappUninstall) -> Result<WebappActive, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
+  pub async fn get_slots(&self) -> Result<WebappSlots, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(GetWebappSlots).await
+  }
+  pub async fn set_slot(&self, request: WebappSetSlot) -> Result<WebappSlots, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
   pub async fn resource(&self, request: WebappResource) -> Result<WebappResourceReply, RequestFailure<WebappError>> {
     self.0.request(request).await
   }

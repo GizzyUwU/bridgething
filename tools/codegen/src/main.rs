@@ -499,16 +499,18 @@ fn patch_kotlin(
   // msgpack bin. Field names come from the codegen-emitted set; only
   // those with `Uuid` Rust type are rewritten.
   out = patch_kotlin_uuid_imports(&out);
-  let uuid_field = regex::Regex::new(r"(?m)^(\t)val (\w+): ByteArray(,?)$")?;
+  let uuid_field = regex::Regex::new(r"(?m)^(\t)val (\w+): ByteArray(\? = null)?(,?)$")?;
   out = uuid_field
     .replace_all(&out, |caps: &regex::Captures| {
       let indent = &caps[1];
       let name = &caps[2];
-      let comma = &caps[3];
+      let optional = caps.get(3).map_or("", |m| m.as_str());
+      let comma = &caps[4];
       if uuid_field_names.contains(name) {
-        format!("{indent}@Serializable(with = MsgpackUuidSerializer::class) val {name}: UUID{comma}")
+        let ty = if optional.is_empty() { "UUID" } else { "UUID? = null" };
+        format!("{indent}@Serializable(with = MsgpackUuidSerializer::class) val {name}: {ty}{comma}")
       } else {
-        format!("{indent}val {name}: ByteArray{comma}")
+        format!("{indent}val {name}: ByteArray{optional}{comma}")
       }
     })
     .into_owned();

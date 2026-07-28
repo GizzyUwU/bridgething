@@ -119,7 +119,7 @@ class WireSurfaceCoverageTest {
         // transfer
         "transfer.ack", "transfer.fragment", "transfer.abandon",
         // system ota
-        "system.otaProgress", "system.otaError", "system.otaBeginAck",
+        "system.otaProgress", "system.otaError", "system.otaFinished", "system.otaBeginAck",
         "system.otaBeginRejected", "system.otaAssetRangeAbandon",
         // system nicknames
         "system.deviceNickname", "system.deviceNicknameChanged", "system.deviceNicknameRejected",
@@ -131,7 +131,7 @@ class WireSurfaceCoverageTest {
         "webapp.webapps", "webapp.active", "webapp.switched", "webapp.uninstalled",
         "webapp.webappError", "webapp.resource", "webapp.configGet",
         "webapp.configList", "webapp.configAck", "webapp.webappInstalled", "webapp.activeChanged",
-        "webapp.docGet", "webapp.docList", "webapp.docAck", "webapp.docChanged",
+        "webapp.docGet", "webapp.docList", "webapp.docAck", "webapp.docChanged", "webapp.slots",
         // forward
         "forward.text", "forward.binary", "forward.json",
     )

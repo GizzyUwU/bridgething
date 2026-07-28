@@ -17,7 +17,7 @@ use std::{
 
 use bluer::Address;
 use libbridgething::{
-  OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
+  OtaError, OtaErrorCode, OtaFinished, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
   gateway::{
     BridgeToGatewaySystemMsgEvent, BridgeToGatewayTransferMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaPatch,
     TransferAck,
@@ -628,6 +628,7 @@ impl OtaActor {
           match outcome {
             Ok(()) => {
               tracing::info!(%update_id, "image write complete; rebooting");
+              emit_finished(&events_tx, OtaKind::Image, update_id.clone()).await;
               (terminator)();
             }
             Err(err) => {
@@ -654,7 +655,10 @@ impl OtaActor {
           let _ = transfers.abandon(update_id.clone()).await;
           let _ = tokio::fs::remove_file(&payload).await;
           match result {
-            Ok(info) => tracing::info!(%update_id, id = %info.id, name = %info.name, "installed webapp applied"),
+            Ok(info) => {
+              tracing::info!(%update_id, id = %info.id, name = %info.name, "installed webapp applied");
+              emit_finished(&events_tx, OtaKind::InstalledWebapp, update_id.clone()).await;
+            }
             Err(err) => {
               tracing::warn!(%update_id, ?err, "installed webapp apply failed");
               emit_error(
@@ -749,8 +753,34 @@ impl OtaActor {
 
     tracing::info!(pieces = batch.len(), "bandaid batch committed; restarting service");
     emit_progress(&self.events_tx, OtaPhase::Reboot, 0, None).await;
+    for piece in &batch {
+      emit_finished(&self.events_tx, piece.kind, piece.update_id.clone()).await;
+    }
+    drain_events(&self.events_tx).await;
     (self.terminators.restart_self)();
   }
+}
+
+const DRAIN_POLLS: u32 = 50;
+const DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+async fn drain_events(events_tx: &OtaEventTx) {
+  for _ in 0..DRAIN_POLLS {
+    if events_tx.capacity() == events_tx.max_capacity() {
+      return;
+    }
+    tokio::time::sleep(DRAIN_POLL_INTERVAL).await;
+  }
+  tracing::warn!("ota events still queued at restart; the terminal frame may not reach a listener");
+}
+
+async fn emit_finished(events_tx: &OtaEventTx, kind: OtaKind, update_id: String) {
+  let _ = events_tx
+    .send(BridgeToGatewaySystemMsgEvent::OtaFinished(OtaFinished {
+      kind,
+      update_id,
+    }))
+    .await;
 }
 
 async fn emit_error(events_tx: &OtaEventTx, code: OtaErrorCode, msg: String) {
@@ -953,6 +983,7 @@ mod tests {
       description: None,
       icon_hash: None,
       settings_hash: None,
+      overlay_hash: None,
       config: vec![],
       permissions: vec![],
       renders_voice_display: false,
@@ -1102,6 +1133,38 @@ mod tests {
     })
     .await
     .expect("timed out waiting for matching event")
+  }
+
+  async fn drain_until_restart(
+    events: &mut mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
+    calls: &AtomicUsize,
+    deadline: Duration,
+  ) -> Vec<BridgeToGatewaySystemMsgEvent> {
+    let mut seen = Vec::new();
+    let started = std::time::Instant::now();
+    while started.elapsed() < deadline {
+      while let Ok(ev) = events.try_recv() {
+        seen.push(ev);
+      }
+      if calls.load(Ordering::SeqCst) > 0 {
+        break;
+      }
+      tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    seen
+  }
+
+  fn count_finished(events: &[BridgeToGatewaySystemMsgEvent]) -> usize {
+    events
+      .iter()
+      .filter(|ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaFinished(_)))
+      .count()
+  }
+
+  fn announced_reboot(events: &[BridgeToGatewaySystemMsgEvent]) -> bool {
+    events
+      .iter()
+      .any(|ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)))
   }
 
   #[tokio::test]
@@ -1617,13 +1680,16 @@ mod tests {
     );
 
     h.ota.activate(vec![sha]).await;
-    let _ = wait_for(
-      &mut h.events,
-      Duration::from_secs(5),
-      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)),
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let seen = drain_until_restart(&mut h.events, &h.restart_self_calls, Duration::from_secs(5)).await;
+    assert!(
+      announced_reboot(&seen),
+      "the reboot phase is announced before the restart"
+    );
+    assert_eq!(
+      count_finished(&seen),
+      1,
+      "the terminal frame leaves the daemon before it restarts"
+    );
     assert_eq!(
       h.restart_self_calls.load(Ordering::SeqCst),
       1,
@@ -1738,13 +1804,16 @@ mod tests {
     );
 
     h.ota.activate(vec![dsha, hsha, ssha]).await;
-    let _ = wait_for(
-      &mut h.events,
-      Duration::from_secs(5),
-      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)),
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let seen = drain_until_restart(&mut h.events, &h.restart_self_calls, Duration::from_secs(5)).await;
+    assert!(
+      announced_reboot(&seen),
+      "the reboot phase is announced before the restart"
+    );
+    assert_eq!(
+      count_finished(&seen),
+      3,
+      "every piece in the batch reports finished before the daemon restarts"
+    );
     assert_eq!(
       h.restart_self_calls.load(Ordering::SeqCst),
       1,
