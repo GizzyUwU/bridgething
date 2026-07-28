@@ -380,15 +380,28 @@ jobs:
           echo "number=$((highest + 1))" >>"$GITHUB_OUTPUT"
           echo "highest on app store connect: $highest"
 
+      # content-addressed, so a restore onto a different runner is a hash lookup rather than the
+      # path-aliasing gamble that makes deriveddata untravellable.
+      - name: restore the xcode compilation cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/CompilationCache.noindex
+          key: xcode-compile-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            xcode-compile-cache-${{ runner.os }}-
+
       - name: build the signed app-store ipa
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
+          XCODE_COMPILATION_CACHE: "1"
         run: |
           set -euo pipefail
           export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
           bash mobile/scripts/build-testflight.sh
+          du -sh ~/Library/Developer/Xcode/DerivedData/CompilationCache.noindex 2>/dev/null \
+            || echo "no compilation cache produced; the setting did not take"
 
       - name: describe the artifact
         id: ipa

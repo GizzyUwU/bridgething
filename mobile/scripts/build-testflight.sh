@@ -66,6 +66,13 @@ if [ -z "${ASC_PRIVATE_KEY_PATH:-}" ] && [ -n "${ASC_OP_ITEM:-}" ] && command -v
   export ASC_PRIVATE_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID
 fi
 
+# xcode 26 keys compile artifacts by content hash instead of path, so unlike deriveddata the cache
+# survives the trip between ephemeral runners. off locally: it suppresses the index datastore.
+CACHE_FLAGS=()
+if [ "${XCODE_COMPILATION_CACHE:-0}" = "1" ]; then
+  CACHE_FLAGS=(--xcodebuild-flag=COMPILATION_CACHE_ENABLE_CACHING=YES)
+fi
+
 AUTH_FLAGS=()
 if [ -n "${ASC_PRIVATE_KEY_PATH:-}" ]; then
   AUTH_FLAGS=(
@@ -86,6 +93,7 @@ asc xcode archive \
   --xcodebuild-flag=-allowProvisioningUpdates \
   --xcodebuild-flag=CODE_SIGN_STYLE=Automatic \
   --xcodebuild-flag=DEVELOPMENT_TEAM="$TEAM_ID" \
+  ${CACHE_FLAGS[@]+"${CACHE_FLAGS[@]}"} \
   ${VERSION_FLAGS[@]+"${VERSION_FLAGS[@]}"} \
   ${AUTH_FLAGS[@]+"${AUTH_FLAGS[@]}"}
 
