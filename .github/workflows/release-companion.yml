@@ -348,12 +348,11 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      # five apple targets built from one crate graph, so the cache earns its keep here more than
-      # anywhere else in the pipeline.
       - name: build the spotify client for ios
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
+          XCFRAMEWORK_DEVICE_ONLY: "1"
         run: |
           set -euo pipefail
           bash crates/spotify/scripts/build-xcframework.sh
