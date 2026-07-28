@@ -86,6 +86,50 @@ data class AudioCapabilities (
 	val voices: List<VoiceDescriptor>
 )
 
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `AudioError` Rust enum
+@Serializable
+data class AudioErrorActionRejectedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `TtsFailed` of the `AudioError` Rust enum
+@Serializable
+data class AudioErrorTtsFailedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `Unavailable` of the `AudioError` Rust enum
+@Serializable
+data class AudioErrorUnavailableInner (
+	val verb: String
+)
+
+@Serializable(with = AudioErrorSerializer::class)
+sealed class AudioError {
+	/// The companion accepted the verb but the platform refused it (no output
+	/// route, audio session denied, another app holds the channel).
+	@Serializable
+	@SerialName("actionRejected")
+	data class ActionRejected(val data: AudioErrorActionRejectedInner): AudioError()
+	/// Speech synthesis could not start, or the platform cut it short.
+	@Serializable
+	@SerialName("ttsFailed")
+	data class TtsFailed(val data: AudioErrorTtsFailedInner): AudioError()
+	/// The verb needs a capability the connected companion does not advertise.
+	@Serializable
+	@SerialName("unavailable")
+	data class Unavailable(val data: AudioErrorUnavailableInner): AudioError()
+	/// No companion is connected, so there is nowhere to send the verb.
+	@Serializable
+	@SerialName("noTarget")
+	object NoTarget: AudioError()
+}
+
+@Serializable
+data class AudioErrorReply (
+	val error: AudioError
+)
+
 /// One axis the companion can declare authority over. Each scope has a
 /// fallback source the daemon merges with when no claim is active or
 /// the claim has gone stale. Unknown scopes arriving at an older daemon
@@ -1514,6 +1558,41 @@ data class NotificationRemoved (
 	val reason: DismissReason
 )
 
+/// Generated type representing the anonymous struct variant `NotFound` of the `NotificationsError` Rust enum
+@Serializable
+data class NotificationsErrorNotFoundInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `NotificationsError` Rust enum
+@Serializable
+data class NotificationsErrorActionRejectedInner (
+	val reason: String
+)
+
+/// Why a notification action slot could not be invoked. Both invoke verbs are
+/// fire-and-forget commands, so a refusal has no reply to ride on.
+@Serializable(with = NotificationsErrorSerializer::class)
+sealed class NotificationsError {
+	/// The id is no longer in the companion's active notification set.
+	@Serializable
+	@SerialName("notFound")
+	data class NotFound(val data: NotificationsErrorNotFoundInner): NotificationsError()
+	/// The slot is absent on this notification, or the platform refused it.
+	@Serializable
+	@SerialName("actionRejected")
+	data class ActionRejected(val data: NotificationsErrorActionRejectedInner): NotificationsError()
+	/// No companion is connected, so there is nowhere to send the action.
+	@Serializable
+	@SerialName("noTarget")
+	object NoTarget: NotificationsError()
+}
+
+@Serializable
+data class NotificationsErrorReply (
+	val error: NotificationsError
+)
+
 /// Three-state shuffle. iAP2 and Apple Music distinguish track-level
 /// from album-level shuffle; companion gateways without that distinction
 /// project to `Songs` when on. Webapps that just need an on/off signal
@@ -2030,6 +2109,51 @@ data class PhoneEndAction (
 	val action: EndCallAction
 )
 
+/// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
+@Serializable
+data class PhoneErrorCallNotFoundInner (
+	val call_id: String
+)
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `PhoneError` Rust enum
+@Serializable
+data class PhoneErrorActionRejectedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
+@Serializable
+data class PhoneErrorUnavailableInner (
+	val verb: String
+)
+
+@Serializable(with = PhoneErrorSerializer::class)
+sealed class PhoneError {
+	/// The supplied `call_id` is not in the daemon's active set.
+	@Serializable
+	@SerialName("callNotFound")
+	data class CallNotFound(val data: PhoneErrorCallNotFoundInner): PhoneError()
+	/// The companion or platform refused the action (e.g. answer while no
+	/// ringing call exists, end on a remote-controlled conference leg).
+	@Serializable
+	@SerialName("actionRejected")
+	data class ActionRejected(val data: PhoneErrorActionRejectedInner): PhoneError()
+	/// No iAP2 link or companion attached, so there's nowhere to send the
+	/// outbound action.
+	@Serializable
+	@SerialName("noTarget")
+	object NoTarget: PhoneError()
+	/// `*Available` flag for this verb was false at action time.
+	@Serializable
+	@SerialName("unavailable")
+	data class Unavailable(val data: PhoneErrorUnavailableInner): PhoneError()
+}
+
+@Serializable
+data class PhoneErrorReply (
+	val error: PhoneError
+)
+
 /// What kind of outbound call the accessory wants placed.
 @Serializable
 enum class InitiateCallType(val string: String) {
@@ -2177,10 +2301,63 @@ data class PlaybackTarget (
 	val volumePercent: UInt? = null
 )
 
-/// Complete replacement list of the provider's remote endpoints.
 @Serializable
 data class PlaybackTargets (
 	val targets: List<PlaybackTarget>
+)
+
+/// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorSchemeUnclaimedInner (
+	val scheme: String
+)
+
+/// Generated type representing the anonymous struct variant `PlayFailed` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorPlayFailedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `NotInQueue` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorNotInQueueInner (
+	val index: UInt
+)
+
+/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorUnknownTargetInner (
+	val target_id: String
+)
+
+@Serializable(with = PlayerErrorSerializer::class)
+sealed class PlayerError {
+	/// `play({uri})` was called with a scheme no connected gateway claims.
+	/// Returned synchronously by the daemon without round-tripping.
+	@Serializable
+	@SerialName("schemeUnclaimed")
+	data class SchemeUnclaimed(val data: PlayerErrorSchemeUnclaimedInner): PlayerError()
+	/// Gateway acknowledged the verb but couldn't fulfill it.
+	@Serializable
+	@SerialName("playFailed")
+	data class PlayFailed(val data: PlayerErrorPlayFailedInner): PlayerError()
+	/// No companion is connected.
+	@Serializable
+	@SerialName("noGateway")
+	object NoGateway: PlayerError()
+	/// `skipToIndex` referenced a queue index that doesn't exist.
+	@Serializable
+	@SerialName("notInQueue")
+	data class NotInQueue(val data: PlayerErrorNotInQueueInner): PlayerError()
+	/// `transferTo` named an endpoint that is not in the current target list.
+	@Serializable
+	@SerialName("unknownTarget")
+	data class UnknownTarget(val data: PlayerErrorUnknownTargetInner): PlayerError()
+}
+
+@Serializable
+data class PlayerErrorReply (
+	val error: PlayerError
 )
 
 /// User-tunable knobs that are not "currently playing" state.
@@ -3351,6 +3528,9 @@ sealed class GatewayToBridgeAudioMsg {
 	@Serializable
 	@SerialName("volumeChanged")
 	data class VolumeChanged(val data: com.bridgething.schema.VolumeChanged): GatewayToBridgeAudioMsg()
+	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: AudioErrorReply): GatewayToBridgeAudioMsg()
 }
 
 @Serializable(with = GatewayToBridgeAuthorityMsgSerializer::class)
@@ -3383,6 +3563,9 @@ sealed class GatewayToBridgeGeoMsg {
 	@SerialName("position")
 	data class Position(val data: com.bridgething.schema.Position): GatewayToBridgeGeoMsg()
 	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: GeoErrorReply): GatewayToBridgeGeoMsg()
+	@Serializable
 	@SerialName("getOnceReply")
 	data class GetOnceReply(val data: GeoGetOnceReply): GatewayToBridgeGeoMsg()
 	@Serializable
@@ -3411,14 +3594,17 @@ sealed class GatewayToBridgeLibraryMsg {
 	@SerialName("favoritesContainsReply")
 	data class FavoritesContainsReply(val data: com.bridgething.schema.FavoritesContainsReply): GatewayToBridgeLibraryMsg()
 	@Serializable
-	@SerialName("libraryErrorReply")
-	data class LibraryErrorReply(val data: com.bridgething.schema.LibraryErrorReply): GatewayToBridgeLibraryMsg()
+	@SerialName("errorReply")
+	data class ErrorReply(val data: LibraryErrorReply): GatewayToBridgeLibraryMsg()
 	@Serializable
 	@SerialName("favoriteChanged")
 	data class FavoriteChanged(val data: com.bridgething.schema.FavoriteChanged): GatewayToBridgeLibraryMsg()
 	@Serializable
 	@SerialName("libraryChanged")
 	data class LibraryChanged(val data: com.bridgething.schema.LibraryChanged): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: LibraryErrorReply): GatewayToBridgeLibraryMsg()
 }
 
 @Serializable(with = GatewayToBridgeLyricsMsgSerializer::class)
@@ -3479,6 +3665,9 @@ sealed class GatewayToBridgeNotificationsMsg {
 	@Serializable
 	@SerialName("removed")
 	data class Removed(val data: NotificationRemoved): GatewayToBridgeNotificationsMsg()
+	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: NotificationsErrorReply): GatewayToBridgeNotificationsMsg()
 }
 
 @Serializable(with = GatewayToBridgePhoneMsgSerializer::class)
@@ -3499,6 +3688,9 @@ sealed class GatewayToBridgePhoneMsg {
 	@SerialName("callEnded")
 	data class CallEnded(val data: PhoneCallEnded): GatewayToBridgePhoneMsg()
 	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: PhoneErrorReply): GatewayToBridgePhoneMsg()
+	@Serializable
 	@SerialName("stateReply")
 	data class StateReply(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
 }
@@ -3514,6 +3706,9 @@ sealed class GatewayToBridgePlayerMsg {
 	@Serializable
 	@SerialName("targetsChanged")
 	data class TargetsChanged(val data: PlaybackTargets): GatewayToBridgePlayerMsg()
+	@Serializable
+	@SerialName("errorEvent")
+	data class ErrorEvent(val data: PlayerErrorReply): GatewayToBridgePlayerMsg()
 	@Serializable
 	@SerialName("requestSpotifyWake")
 	object RequestSpotifyWake: GatewayToBridgePlayerMsg()
@@ -3678,95 +3873,6 @@ sealed class Image {
 	@Serializable
 	@SerialName("bytes")
 	data class Bytes(val data: ByteArray): Image()
-}
-
-/// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
-@Serializable
-data class PhoneErrorCallNotFoundInner (
-	val call_id: String
-)
-
-/// Generated type representing the anonymous struct variant `ActionRejected` of the `PhoneError` Rust enum
-@Serializable
-data class PhoneErrorActionRejectedInner (
-	val reason: String
-)
-
-/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
-@Serializable
-data class PhoneErrorUnavailableInner (
-	val verb: String
-)
-
-@Serializable(with = PhoneErrorSerializer::class)
-sealed class PhoneError {
-	/// The supplied `call_id` is not in the daemon's active set.
-	@Serializable
-	@SerialName("callNotFound")
-	data class CallNotFound(val data: PhoneErrorCallNotFoundInner): PhoneError()
-	/// The companion or platform refused the action (e.g. answer while no
-	/// ringing call exists, end on a remote-controlled conference leg).
-	@Serializable
-	@SerialName("actionRejected")
-	data class ActionRejected(val data: PhoneErrorActionRejectedInner): PhoneError()
-	/// No iAP2 link or companion attached, so there's nowhere to send the
-	/// outbound action.
-	@Serializable
-	@SerialName("noTarget")
-	object NoTarget: PhoneError()
-	/// `*Available` flag for this verb was false at action time.
-	@Serializable
-	@SerialName("unavailable")
-	data class Unavailable(val data: PhoneErrorUnavailableInner): PhoneError()
-}
-
-/// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
-@Serializable
-data class PlayerErrorSchemeUnclaimedInner (
-	val scheme: String
-)
-
-/// Generated type representing the anonymous struct variant `PlayFailed` of the `PlayerError` Rust enum
-@Serializable
-data class PlayerErrorPlayFailedInner (
-	val reason: String
-)
-
-/// Generated type representing the anonymous struct variant `NotInQueue` of the `PlayerError` Rust enum
-@Serializable
-data class PlayerErrorNotInQueueInner (
-	val index: UInt
-)
-
-/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
-@Serializable
-data class PlayerErrorUnknownTargetInner (
-	val target_id: String
-)
-
-@Serializable(with = PlayerErrorSerializer::class)
-sealed class PlayerError {
-	/// `play({uri})` was called with a scheme no connected gateway claims.
-	/// Returned synchronously by the daemon without round-tripping.
-	@Serializable
-	@SerialName("schemeUnclaimed")
-	data class SchemeUnclaimed(val data: PlayerErrorSchemeUnclaimedInner): PlayerError()
-	/// Gateway acknowledged the verb but couldn't fulfill it.
-	@Serializable
-	@SerialName("playFailed")
-	data class PlayFailed(val data: PlayerErrorPlayFailedInner): PlayerError()
-	/// No companion is connected.
-	@Serializable
-	@SerialName("noGateway")
-	object NoGateway: PlayerError()
-	/// `skipToIndex` referenced a queue index that doesn't exist.
-	@Serializable
-	@SerialName("notInQueue")
-	data class NotInQueue(val data: PlayerErrorNotInQueueInner): PlayerError()
-	/// `transferTo` named an endpoint that is not in the current target list.
-	@Serializable
-	@SerialName("unknownTarget")
-	data class UnknownTarget(val data: PlayerErrorUnknownTargetInner): PlayerError()
 }
 
 @Serializable

@@ -77,7 +77,6 @@ import {
   presentPairWithGuidance,
   setDeviceName,
   updateCapabilityFlags,
-  updateNickname,
   updateOtaPollConfig,
   useSession,
 } from '../lib/session';
@@ -384,7 +383,7 @@ export function SettingsScreen({ navigation }: Props) {
         {livePeers.map(peer => (
           <OtaCard
             key={peer.id}
-            name={peerDisplayName(peer, ledger, metaByDevice[peer.id])}
+            name={peerDisplayName(peer, ledger)}
             deviceId={peer.id}
             available={otaAvailable[peer.id]}
             onInstall={() => installLatest(peer.id)}
@@ -559,7 +558,7 @@ function DeviceRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = device.peer?.status === 'connected';
   const linkFailed = device.peer?.status === 'linkFailed';
-  const title = device.nickname ?? meta?.nickname ?? device.displayName;
+  const title = device.displayName;
 
   const menuActions: MenuAction[] = [];
   if (!connected) {
@@ -577,7 +576,6 @@ function DeviceRow({
         err instanceof Error ? err.message : String(err),
       );
     });
-    updateNickname(device.id, null);
   };
 
   const serial = meta?.serialNumber ?? device.serialNumber ?? null;
@@ -604,8 +602,8 @@ function DeviceRow({
         visible={renameOpen}
         title="rename your Car Thing"
         message="this renames the device and shows on its screen."
-        initialValue={meta?.nickname ?? ''}
-        placeholder={meta?.nickname ?? device.peer?.name ?? device.displayName}
+        initialValue={device.nickname ?? ''}
+        placeholder={device.peer?.name ?? device.displayName}
         onSubmit={submitRename}
         onClose={() => setRenameOpen(false)}
       />
@@ -923,7 +921,6 @@ function AncsPairingRow({ peer }: { peer: BridgethingSessionPeer }) {
   const peerId = peer.id;
   const status = useSession(s => s.ancsAuthStatus[peerId] ?? 'unknown');
   const ledger = useSession(s => s.ledger);
-  const meta = useSession(s => s.deviceMeta[peerId]);
   const [busy, setBusy] = useState(false);
 
   const subtitle =
@@ -958,7 +955,7 @@ function AncsPairingRow({ peer }: { peer: BridgethingSessionPeer }) {
     <ListRow
       icon={Bluetooth}
       iconTint={status === 'authorized' ? 'primary' : 'default'}
-      title={`notification pairing - ${peerDisplayName(peer, ledger, meta)}`}
+      title={`notification pairing - ${peerDisplayName(peer, ledger)}`}
       subtitle={subtitle}
       onPress={status !== 'authorized' && !busy ? run : undefined}
     />

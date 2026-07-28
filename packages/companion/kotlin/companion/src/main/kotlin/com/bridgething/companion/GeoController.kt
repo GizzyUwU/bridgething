@@ -30,17 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Geo surface implementation. Tries Google Play Services'
- * FusedLocationProvider first (best accuracy + battery); falls back to
- * AOSP [LocationManager] when Play Services is missing (degoogled phones,
- * GrapheneOS, etc).
- *
- * The fused provider is loaded reflectively so the companion module
- * doesn't have a hard compile-time dependency on play-services-location:
- * the host app adds the dep if it wants Fused, and we degrade gracefully
- * when the dep isn't on the classpath at runtime.
- */
 public class GeoController(
     private val context: Context,
 ) : GeoSource {
@@ -96,8 +85,11 @@ public class GeoController(
     }
 
     private suspend fun handleWatch(watch: GeoWatch) {
-        if (!hasLocationPermission()) return
         val gateway = gatewayRef ?: return
+        if (!hasLocationPermission()) {
+            reportWatchFailure(gateway, GeoError.PermissionDenied)
+            return
+        }
         val onLocation: (Location) -> Unit = { loc ->
             scope.launch {
                 runCatching { gateway.geo.position(makePosition(loc)) }
@@ -105,7 +97,11 @@ public class GeoController(
         }
         val started = ensureFused()?.startWatch(watch.accuracy, callbackExecutor, onLocation)
             ?: ensureLegacy().startWatch(watch.accuracy, onLocation)
-        if (started) watching = true
+        if (started) watching = true else reportWatchFailure(gateway, GeoError.Unavailable)
+    }
+
+    private suspend fun reportWatchFailure(gateway: BridgethingGateway, error: GeoError) {
+        runCatching { gateway.geo.errorEvent(GeoErrorReply(error = error)) }
     }
 
     private fun handleUnwatch() {
@@ -170,12 +166,6 @@ public class GeoController(
     }
 }
 
-/**
- * Reflective wrapper over `com.google.android.gms.location.FusedLocationProviderClient`.
- * Only present when `play-services-location` is on the classpath; we
- * detect that at `tryCreate` time and return null otherwise, so the
- * companion still works on degoogled devices.
- */
 private class FusedBackend private constructor(
     private val client: Any,
     private val priorityHighAccuracy: Int,
@@ -318,7 +308,6 @@ private class FusedBackend private constructor(
             null
         }
 
-        // reflective proxies must return primitive defaults for pass-through equals/hashCode/toString.
         fun defaultProxyReturn(method: java.lang.reflect.Method): Any? = when (method.returnType) {
             Boolean::class.javaPrimitiveType -> false
             Int::class.javaPrimitiveType -> 0
@@ -327,11 +316,6 @@ private class FusedBackend private constructor(
     }
 }
 
-/**
- * AOSP fallback used when Play Services isn't on the device. Worse battery
- * + accuracy than Fused but works on any android. Subscribes to GPS or
- * Network providers depending on accuracy.
- */
 private class LegacyBackend(
     private val context: Context,
 ) {
@@ -361,7 +345,6 @@ private class LegacyBackend(
     suspend fun getOnce(accuracy: GeoAccuracy): Location? {
         if (!hasPermission()) return null
         val provider = pickProvider(accuracy) ?: return null
-        // last-known first; if missing, single-shot subscribe with a short timeout.
         try {
             val last = manager.getLastKnownLocation(provider)
             if (last != null) return last

@@ -122,3 +122,19 @@ pub enum AncsAuthState {
   Authorized,
   Unauthorized,
 }
+
+/// Why a notification action slot could not be invoked. Both invoke verbs are
+/// fire-and-forget commands, so a refusal has no reply to ride on.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NotificationsError {
+  /// The id is no longer in the companion's active notification set.
+  NotFound { id: String },
+  /// The slot is absent on this notification, or the platform refused it.
+  ActionRejected { reason: String },
+  /// No companion is connected, so there is nowhere to send the action.
+  NoTarget,
+}

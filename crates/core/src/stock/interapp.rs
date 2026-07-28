@@ -373,6 +373,7 @@ impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
         player_queue_to_stock(reply)
       }
       BridgeToClientPlayerMsg::Delta(_)
+      | BridgeToClientPlayerMsg::ErrorEvent(_)
       | BridgeToClientPlayerMsg::ErrorReply(_)
       | BridgeToClientPlayerMsg::TargetsChanged(_)
       | BridgeToClientPlayerMsg::TargetsReply(_) => Self::Ack {},

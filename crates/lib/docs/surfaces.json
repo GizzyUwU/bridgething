@@ -1,5 +1,5 @@
 {
-  "version": "0.5.2",
+  "version": "0.7.0",
   "surfaces": [
     {
       "name": "asset",
@@ -56,6 +56,11 @@
           "method": "onVolumeChanged",
           "payload": "VolumeChanged",
           "payload_ref": "VolumeChanged"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "AudioErrorReply",
+          "payload_ref": "AudioErrorReply"
         }
       ],
       "requests": [],
@@ -272,6 +277,11 @@
           "method": "onPosition",
           "payload": "Position",
           "payload_ref": "Position"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "GeoErrorReply",
+          "payload_ref": "GeoErrorReply"
         }
       ],
       "requests": [
@@ -348,6 +358,11 @@
           "method": "onFavoriteChanged",
           "payload": "FavoriteChanged",
           "payload_ref": "FavoriteChanged"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "LibraryErrorReply",
+          "payload_ref": "LibraryErrorReply"
         }
       ],
       "requests": [
@@ -528,6 +543,11 @@
           "method": "onRemoved",
           "payload": "NotificationRemoved",
           "payload_ref": "NotificationRemoved"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "NotificationsErrorReply",
+          "payload_ref": "NotificationsErrorReply"
         }
       ],
       "requests": [],
@@ -584,6 +604,11 @@
           "method": "onCommunicationsChanged",
           "payload": "PhoneCommunicationsReply",
           "payload_ref": "PhoneCommunicationsReply"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "PhoneErrorReply",
+          "payload_ref": "PhoneErrorReply"
         }
       ],
       "requests": [
@@ -677,6 +702,11 @@
           "method": "onTargetsChanged",
           "payload": "PlayerTargetsReply",
           "payload_ref": "PlayerTargetsReply"
+        },
+        {
+          "method": "onErrorEvent",
+          "payload": "PlayerErrorReply",
+          "payload_ref": "PlayerErrorReply"
         }
       ],
       "requests": [
@@ -1231,6 +1261,37 @@
           "name": "voices",
           "type": "VoiceDescriptor[]",
           "type_ref": "VoiceDescriptor"
+        }
+      ]
+    },
+    "AudioError": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "ActionRejected",
+          "description": "The companion accepted the verb but the platform refused it (no output\nroute, audio session denied, another app holds the channel)."
+        },
+        {
+          "name": "TtsFailed",
+          "description": "Speech synthesis could not start, or the platform cut it short."
+        },
+        {
+          "name": "Unavailable",
+          "description": "The verb needs a capability the connected companion does not advertise."
+        },
+        {
+          "name": "NoTarget",
+          "description": "No companion is connected, so there is nowhere to send the verb."
+        }
+      ]
+    },
+    "AudioErrorReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "error",
+          "type": "AudioError",
+          "type_ref": "AudioError"
         }
       ]
     },
@@ -2332,7 +2393,7 @@
     },
     "GeoWatchReply": {
       "kind": "struct",
-      "description": "Watch handle. Webapps pass the token back as\n`ClientToBridgeGeoMsg::Unwatch { token }` to release the watch.\nTokens are scoped to the webapp's WS connection - the daemon\nauto-releases on disconnect.",
+      "description": "Watch handle. Webapps pass the token back as\n`ClientToBridgeGeoMsg::Unwatch { token }` to release the watch.",
       "fields": [
         {
           "name": "token",
@@ -3907,6 +3968,34 @@
         }
       ]
     },
+    "NotificationsError": {
+      "kind": "enum",
+      "description": "Why a notification action slot could not be invoked. Both invoke verbs are\nfire-and-forget commands, so a refusal has no reply to ride on.",
+      "variants": [
+        {
+          "name": "NotFound",
+          "description": "The id is no longer in the companion's active notification set."
+        },
+        {
+          "name": "ActionRejected",
+          "description": "The slot is absent on this notification, or the platform refused it."
+        },
+        {
+          "name": "NoTarget",
+          "description": "No companion is connected, so there is nowhere to send the action."
+        }
+      ]
+    },
+    "NotificationsErrorReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "error",
+          "type": "NotificationsError",
+          "type_ref": "NotificationsError"
+        }
+      ]
+    },
     "NowPlayingUpdate": {
       "kind": "struct",
       "description": "Delta event the companion or iAP2 stream emits whenever a player\nattribute changes. Every field is optional: producers send partial\nupdates populating only what changed, and fields left unset keep\ntheir prior value.",
@@ -4301,6 +4390,37 @@
         }
       ]
     },
+    "PhoneError": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "CallNotFound",
+          "description": "The supplied `call_id` is not in the daemon's active set."
+        },
+        {
+          "name": "ActionRejected",
+          "description": "The companion or platform refused the action (e.g. answer while no\nringing call exists, end on a remote-controlled conference leg)."
+        },
+        {
+          "name": "NoTarget",
+          "description": "No iAP2 link or companion attached, so there's nowhere to send the\noutbound action."
+        },
+        {
+          "name": "Unavailable",
+          "description": "`*Available` flag for this verb was false at action time."
+        }
+      ]
+    },
+    "PhoneErrorReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "error",
+          "type": "PhoneError",
+          "type_ref": "PhoneError"
+        }
+      ]
+    },
     "PhoneInitiateAction": {
       "kind": "struct",
       "fields": [
@@ -4620,6 +4740,41 @@
           "name": "appleMusicRadioStationName",
           "type": "string",
           "optional": true
+        }
+      ]
+    },
+    "PlayerError": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "SchemeUnclaimed",
+          "description": "`play({uri})` was called with a scheme no connected gateway claims.\nReturned synchronously by the daemon without round-tripping."
+        },
+        {
+          "name": "PlayFailed",
+          "description": "Gateway acknowledged the verb but couldn't fulfill it."
+        },
+        {
+          "name": "NoGateway",
+          "description": "No companion is connected."
+        },
+        {
+          "name": "NotInQueue",
+          "description": "`skipToIndex` referenced a queue index that doesn't exist."
+        },
+        {
+          "name": "UnknownTarget",
+          "description": "`transferTo` named an endpoint that is not in the current target list."
+        }
+      ]
+    },
+    "PlayerErrorReply": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "error",
+          "type": "PlayerError",
+          "type_ref": "PlayerError"
         }
       ]
     },

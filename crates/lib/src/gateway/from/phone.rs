@@ -4,7 +4,16 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{CallEndReason, CommunicationsState, PhoneCall, PhoneState};
+use crate::{CallEndReason, CommunicationsState, PhoneCall, PhoneError, PhoneState};
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneErrorReply {
+  pub error: PhoneError,
+}
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -50,6 +59,8 @@ pub enum GatewayToBridgePhoneMsg {
   CallUpdated(PhoneCall),
   #[bridge_event]
   CallEnded(PhoneCallEnded),
+  #[bridge_event]
+  ErrorEvent(PhoneErrorReply),
   #[bridge_response]
   StateReply(PhoneStateReply),
 }

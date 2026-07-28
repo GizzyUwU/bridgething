@@ -32,7 +32,6 @@ import {
   peerDisplayName,
   runPairFlow,
   setDeviceName,
-  updateNickname,
   useSession,
 } from '../lib/session';
 import { reconcileAll } from '../lib/bridge';
@@ -265,7 +264,7 @@ function DeviceSection({
         visible={renameOpen}
         title="rename your Car Thing"
         message="this renames the device and shows on its screen."
-        initialValue={meta?.nickname ?? nickname ?? ''}
+        initialValue={nickname ?? ''}
         placeholder={peer.name}
         onSubmit={value => {
           void setDeviceName(peer.id, value).catch((err: unknown) => {
@@ -274,7 +273,6 @@ function DeviceSection({
               err instanceof Error ? err.message : String(err),
             );
           });
-          updateNickname(peer.id, null);
         }}
         onClose={() => setRenameOpen(false)}
       />
@@ -296,7 +294,7 @@ function DeviceSection({
             numberOfLines={1}
             style={{ letterSpacing: -0.3 }}
           >
-            {peerDisplayName(peer, ledger, meta)}
+            {peerDisplayName(peer, ledger)}
           </Text>
           <View className="mt-1 flex-row items-center gap-1.5">
             <View className="h-1.5 w-1.5 rounded-full bg-success" />
@@ -305,7 +303,7 @@ function DeviceSection({
               numberOfLines={1}
             >
               connected
-              {peerDisplayName(peer, ledger, meta) !== peer.name
+              {peerDisplayName(peer, ledger) !== peer.name
                 ? ` · ${peer.name}`
                 : ''}
             </Text>

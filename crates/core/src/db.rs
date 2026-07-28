@@ -30,7 +30,7 @@ pub async fn open(path: Option<&Path>) -> Result<DatabaseConnection, DbErr> {
     .await?;
     db.execute(Statement::from_string(
       db.get_database_backend(),
-      "PRAGMA synchronous=NORMAL;",
+      "PRAGMA synchronous=FULL;",
     ))
     .await?;
   }

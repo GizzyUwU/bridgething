@@ -71,6 +71,19 @@ internal class OtaRunStore {
         run.copy(phase = OtaRunPhase.IDLE)
     }
 
+    fun interrupt(deviceId: String): OtaRun? = synchronized(lock) {
+        val run = runsByDevice[deviceId] ?: return null
+        if (run.outcome != null) return null
+        if (run.phase == OtaRunPhase.REBOOT || run.phase == OtaRunPhase.CONFIRMING) return null
+        val next = run.copy(
+            phase = OtaRunPhase.FAILED,
+            outcome = OtaRunOutcome.FAILED,
+            error = "the device disconnected mid-update",
+        )
+        runsByDevice[deviceId] = next
+        next
+    }
+
     fun noteMeta(deviceId: String, daemonVersion: String, imageVersion: String): OtaRun? = synchronized(lock) {
         val run = runsByDevice[deviceId] ?: return null
         val daemonOk = run.daemonVersion == null || run.daemonVersion == daemonVersion
@@ -136,7 +149,12 @@ internal class OtaRunStore {
 
             is OtaPollEvent.Progress -> {
                 val prev = runsByDevice[event.deviceId] ?: return emptyList()
-                val applied = apply(event.snapshot, prev.copy(kind = event.kind, stepId = event.stepId))
+                val stepId = if (prev.steps.isEmpty() || prev.steps.any { it.id == event.stepId }) {
+                    event.stepId
+                } else {
+                    prev.stepId
+                }
+                val applied = apply(event.snapshot, prev.copy(kind = event.kind, stepId = stepId))
                 val next = if (applied.phase != prev.phase) applied.copy(phaseStartedAt = now) else applied
                 runsByDevice[event.deviceId] = next
                 listOf(OtaStoreChange.Run(next))

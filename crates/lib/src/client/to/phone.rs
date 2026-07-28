@@ -58,6 +58,8 @@ pub enum BridgeToClientPhoneMsg {
   CallEnded(PhoneCallEnded),
   #[bridge_event]
   CommunicationsChanged(PhoneCommunicationsReply),
+  #[bridge_event]
+  ErrorEvent(PhoneErrorReply),
   #[bridge_response]
   StateReply(PhoneStateReply),
   #[bridge_response]

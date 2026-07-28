@@ -87,7 +87,7 @@ let package = Package(
     ),
     .testTarget(
       name: "BridgethingAppleMusicGlueTests",
-      dependencies: ["BridgethingAppleMusicGlue", "BridgethingTestKit"],
+      dependencies: ["BridgethingAppleMusicGlue", "BridgethingCompanion", "BridgethingTestKit"],
       path: "packages/apple-music/swift/Tests/BridgethingAppleMusicGlueTests"
     ),
   ]

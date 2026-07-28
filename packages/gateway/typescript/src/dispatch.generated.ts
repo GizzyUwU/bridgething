@@ -30,6 +30,7 @@ import type {
   AssetGotReply,
   AssetNotFoundReply,
   AssetRequest,
+  AudioErrorReply,
   AuthorityClaim,
   AuthorityRelease,
   BrowseReply,
@@ -84,6 +85,7 @@ import type {
   NetWsSend,
   NotificationInvoke,
   NotificationRemoved,
+  NotificationsErrorReply,
   OtaAbandon,
   OtaActivate,
   OtaAssetRange,
@@ -98,11 +100,13 @@ import type {
   PhoneCallEnded,
   PhoneDtmfAction,
   PhoneEndAction,
+  PhoneErrorReply,
   PhoneInitiateAction,
   PhoneMuteAction,
   PhoneStateReply,
   PlayUri,
   PlaybackTargets,
+  PlayerErrorReply,
   QueueSnapshot,
   QueueUri,
   RecommendationsReply,
@@ -693,6 +697,21 @@ export class AudioSurface {
       }),
     );
   }
+
+  /** Send `Audio::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: AudioErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'audio', data: { event: 'errorEvent', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
 }
 
 export class GeoSurface {
@@ -798,6 +817,21 @@ export class GeoSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'geo', data: { event: 'position', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Geo::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: GeoErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'geo', data: { event: 'errorEvent', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -1124,6 +1158,21 @@ export class LibrarySurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'library', data: { event: 'libraryChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Library::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: LibraryErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'library', data: { event: 'errorEvent', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -1517,6 +1566,21 @@ export class NotificationsSurface {
       }),
     );
   }
+
+  /** Send `Notifications::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: NotificationsErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'notifications', data: { event: 'errorEvent', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
 }
 
 export class PhoneSurface {
@@ -1847,6 +1911,21 @@ export class PhoneSurface {
       }),
     );
   }
+
+  /** Send `Phone::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: PhoneErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'errorEvent', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
 }
 
 export class PlayerSurface {
@@ -2124,6 +2203,21 @@ export class PlayerSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'targetsChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Player::ErrorEvent` to every connected peer (broadcast). */
+  async errorEvent(payload: PlayerErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'errorEvent', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -3988,6 +4082,16 @@ export class AudioSurfaceForDevice {
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
+
+  /** Send `Audio::ErrorEvent` to this peer. */
+  async errorEvent(payload: AudioErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'audio', data: { event: 'errorEvent', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
 }
 
 export class GeoSurfaceForDevice {
@@ -4097,6 +4201,16 @@ export class GeoSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'geo', data: { event: 'position', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Geo::ErrorEvent` to this peer. */
+  async errorEvent(payload: GeoErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'geo', data: { event: 'errorEvent', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -4426,6 +4540,16 @@ export class LibrarySurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'library', data: { event: 'libraryChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Library::ErrorEvent` to this peer. */
+  async errorEvent(payload: LibraryErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'library', data: { event: 'errorEvent', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -4784,6 +4908,16 @@ export class NotificationsSurfaceForDevice {
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
+
+  /** Send `Notifications::ErrorEvent` to this peer. */
+  async errorEvent(payload: NotificationsErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'notifications', data: { event: 'errorEvent', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
 }
 
 export class PhoneSurfaceForDevice {
@@ -5106,6 +5240,16 @@ export class PhoneSurfaceForDevice {
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
+
+  /** Send `Phone::ErrorEvent` to this peer. */
+  async errorEvent(payload: PhoneErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'errorEvent', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
 }
 
 export class PlayerSurfaceForDevice {
@@ -5387,6 +5531,16 @@ export class PlayerSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'targetsChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Player::ErrorEvent` to this peer. */
+  async errorEvent(payload: PlayerErrorReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'errorEvent', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -7166,7 +7320,7 @@ export class LibraryBrowseRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7201,7 +7355,7 @@ export class LibraryResolveContextRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7236,7 +7390,7 @@ export class LibrarySearchRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7271,7 +7425,7 @@ export class LibraryRecommendationsRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7306,7 +7460,7 @@ export class LibraryFavoritesListRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7341,7 +7495,7 @@ export class LibraryFavoritesContainsRequestHandle {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
-      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+      data: { type: 'library', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }

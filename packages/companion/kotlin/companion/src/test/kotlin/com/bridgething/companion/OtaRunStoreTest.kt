@@ -225,6 +225,74 @@ class OtaRunStoreTest {
         assertTrue(run?.steps?.isEmpty() ?: false)
     }
 
+    @Test
+    fun `progress for a step outside the plan keeps the last understood position`() {
+        val store = OtaRunStore()
+        store.ingest(plannedImage(), at(0))
+        store.ingest(
+            OtaPollEvent.Progress(
+                DEVICE, OtaKind.Image, 1, OtaPhaseSnapshot.Applying(OtaPhase.Writing, 50, 50, 0L),
+            ),
+            at(1),
+        )
+
+        val run = onlyRun(
+            store.ingest(
+                OtaPollEvent.Progress(
+                    DEVICE, OtaKind.Image, 99, OtaPhaseSnapshot.Applying(OtaPhase.Writing, 60, 60, 0L),
+                ),
+                at(2),
+            ),
+        )
+
+        assertEquals(1, run?.stepId, "a step id that does not index this plan must not rewind the run to its start")
+    }
+
+    // interrupt
+
+    @Test
+    fun `a link that dies mid download ends the run`() {
+        val store = OtaRunStore()
+        store.ingest(plannedImage(), at(0))
+        store.ingest(
+            OtaPollEvent.Progress(
+                DEVICE, OtaKind.Image, 0, OtaPhaseSnapshot.Downloading("update.swu", 40L, 100L, 20.0),
+            ),
+            at(1),
+        )
+
+        assertEquals(OtaRunOutcome.FAILED, store.interrupt(DEVICE)?.outcome)
+        assertTrue(store.dismiss(DEVICE) != null, "so the card can be cleared")
+    }
+
+    @Test
+    fun `a link that dies while the device reboots leaves the run alone`() {
+        val store = OtaRunStore()
+        store.ingest(plannedImage(), at(0))
+        store.ingest(
+            OtaPollEvent.Progress(
+                DEVICE, OtaKind.Image, 2, OtaPhaseSnapshot.Applying(OtaPhase.Reboot, 100, 100, 0L),
+            ),
+            at(1),
+        )
+
+        assertNull(
+            store.interrupt(DEVICE),
+            "the run is what asked the device to go away, so its disconnect is not a failure",
+        )
+        assertNull(store.runs().first().outcome)
+    }
+
+    @Test
+    fun `interrupt leaves a finished run alone`() {
+        val store = OtaRunStore()
+        store.ingest(plannedImage(), at(0))
+        store.ingest(OtaPollEvent.Updated(DEVICE, OtaKind.Image, "2026.06.0"), at(1))
+
+        assertNull(store.interrupt(DEVICE))
+        assertEquals(OtaRunOutcome.SUCCEEDED, store.runs().first().outcome)
+    }
+
     // dismiss
 
     @Test

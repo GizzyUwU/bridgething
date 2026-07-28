@@ -33,7 +33,8 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "gv": "genversion --esm --semi src/version.ts"
+    "gv": "genversion --esm --semi src/version.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@bridgething/lib": "workspace:*"

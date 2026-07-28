@@ -10,6 +10,8 @@ import com.bridgething.schema.Notification as WireNotification
 import com.bridgething.schema.NotificationApp
 import com.bridgething.schema.NotificationCategory
 import com.bridgething.schema.NotificationFlags
+import com.bridgething.schema.NotificationsError
+import com.bridgething.schema.NotificationsErrorNotFoundInner
 import com.bridgething.schema.NotificationInvoke
 import com.bridgething.schema.NotificationRemoved
 import io.mockk.mockk
@@ -28,13 +30,13 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 
 class NotificationDispatchTest {
-    private class RecordingBackend : NotificationBackend {
+    private class RecordingBackend(private val failWith: NotificationsError? = null) : NotificationBackend {
         val positive = CopyOnWriteArrayList<String>()
         val negative = CopyOnWriteArrayList<String>()
         private val _events = MutableSharedFlow<NotificationOutEvent>(extraBufferCapacity = 64)
         override val events: Flow<NotificationOutEvent> = _events.asSharedFlow()
-        override suspend fun invokePositive(id: String) { positive.add(id) }
-        override suspend fun invokeNegative(id: String) { negative.add(id) }
+        override suspend fun invokePositive(id: String): NotificationsError? { positive.add(id); return failWith }
+        override suspend fun invokeNegative(id: String): NotificationsError? { negative.add(id); return failWith }
         fun emit(event: NotificationOutEvent) { _events.tryEmit(event) }
     }
 
@@ -85,6 +87,20 @@ class NotificationDispatchTest {
         driver.send(BridgeToGatewayMsgData.Notifications(BridgeToGatewayNotificationsMsg.InvokePositive(NotificationInvoke(id = "n-1"))))
         driver.send(BridgeToGatewayMsgData.Notifications(BridgeToGatewayNotificationsMsg.InvokeNegative(NotificationInvoke(id = "n-2"))))
         eventually { backend.positive == listOf("n-1") && backend.negative == listOf("n-2") }
+        companion.stop()
+    }
+
+    @Test
+    fun `a refused invoke reports an error event`() = runBlocking {
+        val refusal = NotificationsError.NotFound(NotificationsErrorNotFoundInner("n-gone"))
+        val backend = RecordingBackend(failWith = refusal)
+        val (companion, driver) = boot(this, backend)
+        driver.send(BridgeToGatewayMsgData.Notifications(BridgeToGatewayNotificationsMsg.InvokePositive(NotificationInvoke(id = "n-gone"))))
+        val msg = driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Notifications)?.data is GatewayToBridgeNotificationsMsg.ErrorEvent
+        }
+        val event = (msg.data as GatewayToBridgeMsgData.Notifications).data as GatewayToBridgeNotificationsMsg.ErrorEvent
+        assertEquals(refusal, event.data.error)
         companion.stop()
     }
 

@@ -5,6 +5,17 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
+use crate::AudioError;
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct AudioErrorReply {
+  pub error: AudioError,
+}
+
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -48,4 +59,6 @@ pub enum GatewayToBridgeAudioMsg {
   TtsEnded(TtsEnded),
   #[bridge_event]
   VolumeChanged(VolumeChanged),
+  #[bridge_event]
+  ErrorEvent(AudioErrorReply),
 }

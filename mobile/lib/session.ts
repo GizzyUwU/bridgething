@@ -30,14 +30,13 @@ import {
   type DeviceLedgerEntry,
   forgetDevice as persistForget,
   getLedger,
+  recordDeviceMeta,
   recordDeviceSeen,
-  recordDeviceSerial,
-  setDeviceNickname,
 } from './storage';
 
 export { getSession } from './bridge';
 
-type SessionState = {
+export type SessionState = {
   started: boolean;
   reconciled: boolean;
 
@@ -101,6 +100,7 @@ export function registerSessionDomain(): void {
           set(s => ({
             peers: s.peers.filter(p => p.id !== event.peerId),
             deviceMeta: omit(s.deviceMeta, event.peerId),
+            ledger: recordDeviceSeen(event.peerId, null, Date.now()),
           }));
           return;
         case 'ancsAuthStatusChanged':
@@ -117,9 +117,11 @@ export function registerSessionDomain(): void {
         case 'deviceMetaChanged':
           set(s => ({
             deviceMeta: { ...s.deviceMeta, [event.deviceId]: event.meta },
-            ledger: event.meta.serialNumber
-              ? recordDeviceSerial(event.deviceId, event.meta.serialNumber)
-              : s.ledger,
+            ledger: recordDeviceMeta(event.deviceId, {
+              serialNumber: event.meta.serialNumber ?? null,
+              nickname: event.meta.nickname ?? null,
+              libVersion: event.meta.libbridgethingVersion ?? null,
+            }),
           }));
           return;
         case 'webappsChanged':
@@ -140,8 +142,11 @@ export function registerSessionDomain(): void {
           ledger = recordDeviceSeen(peer.id, peer.name, now);
       }
       for (const entry of snapshot.deviceMeta) {
-        if (entry.meta.serialNumber)
-          ledger = recordDeviceSerial(entry.deviceId, entry.meta.serialNumber);
+        ledger = recordDeviceMeta(entry.deviceId, {
+          serialNumber: entry.meta.serialNumber ?? null,
+          nickname: entry.meta.nickname ?? null,
+          libVersion: entry.meta.libbridgethingVersion ?? null,
+        });
       }
       set({
         providers: snapshot.providers,
@@ -193,13 +198,6 @@ export async function updateOtaPollConfig(
 ): Promise<void> {
   useSessionStore.setState({ otaPollConfig: config });
   await getSession().setOtaPollConfig(config);
-}
-
-export function updateNickname(
-  deviceId: string,
-  nickname: string | null,
-): void {
-  useSessionStore.setState({ ledger: setDeviceNickname(deviceId, nickname) });
 }
 
 export async function setDeviceName(
@@ -336,9 +334,8 @@ export function connectedPeers(
 export function peerDisplayName(
   peer: BridgethingSessionPeer,
   ledger: Record<string, DeviceLedgerEntry>,
-  meta?: BridgethingDeviceMeta,
 ): string {
-  return ledger[peer.id]?.nickname ?? meta?.nickname ?? peer.name;
+  return ledger[peer.id]?.nickname ?? peer.name;
 }
 
 export type KnownDevice = {

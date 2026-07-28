@@ -101,7 +101,9 @@ pub enum BridgeToClientLibraryMsg {
   #[bridge_response]
   FavoritesContainsReply(LibraryFavoritesContainsReply),
   #[bridge_response]
-  LibraryErrorReply(LibraryErrorReply),
+  ErrorReply(LibraryErrorReply),
   #[bridge_event]
   FavoriteChanged(FavoriteChanged),
+  #[bridge_event]
+  ErrorEvent(LibraryErrorReply),
 }

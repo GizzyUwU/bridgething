@@ -64,6 +64,12 @@ export type AssetRetention =
  */
 export type AudioCapabilities = { earcons: Array<string>; voices: Array<VoiceDescriptor> };
 
+export type AudioError =
+  | { type: 'actionRejected'; data: { reason: string } }
+  | { type: 'ttsFailed'; data: { reason: string } }
+  | { type: 'unavailable'; data: { verb: string } }
+  | { type: 'noTarget' };
+
 export type BoolField = { key: string; label: string; default: boolean | null };
 
 /**
@@ -633,6 +639,15 @@ export type NotificationCategory =
  * there is no pre-existing/backfill marker.
  */
 export type NotificationFlags = { silent: boolean; important: boolean };
+
+/**
+ * Why a notification action slot could not be invoked. Both invoke verbs are
+ * fire-and-forget commands, so a refusal has no reply to ride on.
+ */
+export type NotificationsError =
+  | { type: 'notFound'; data: { id: string } }
+  | { type: 'actionRejected'; data: { reason: string } }
+  | { type: 'noTarget' };
 
 /**
  * Delta event the companion or iAP2 stream emits whenever a player

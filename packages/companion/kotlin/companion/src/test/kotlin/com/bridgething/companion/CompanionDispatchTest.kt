@@ -76,7 +76,7 @@ class CompanionDispatchTest {
 
         val resp = driver.request(browseReq())
         val lib = resp.data as GatewayToBridgeMsgData.Library
-        assertTrue(lib.data is GatewayToBridgeLibraryMsg.LibraryErrorReply)
+        assertTrue(lib.data is GatewayToBridgeLibraryMsg.ErrorReply)
 
         companion.stop()
     }

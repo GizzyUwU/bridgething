@@ -3,6 +3,7 @@ import type {
   AcceptCallAction,
   AncsAuthState,
   ArtProfile,
+  AudioError,
   BridgeThingMeta,
   BrowseResult,
   CallEndReason,
@@ -32,15 +33,18 @@ import type {
   NetFetchResponse,
   NluResolvedIntent,
   Notification,
+  NotificationsError,
   OtaError,
   OtaFinished,
   OtaKind,
   OtaProgress,
   PhoneCall,
   PhoneCallService,
+  PhoneError,
   PhoneState,
   PlayContext,
   PlaybackTarget,
+  PlayerError,
   PlayerState,
   Position,
   QueueItem,
@@ -74,6 +78,8 @@ export type AssetGotReply = { id: string; mime: string | null; body: TransferBod
 export type AssetNotFoundReply = { id: string };
 
 export type AssetRequest = { id: string; requestId: string };
+
+export type AudioErrorReply = { error: AudioError };
 
 export type AuthorityClaim = { scope: CompanionAuthorityScope; appBundle: string | null };
 
@@ -266,7 +272,8 @@ export type GatewayToBridgeAssetMsg =
 export type GatewayToBridgeAudioMsg =
   | { event: 'ttsStarted'; data: TtsStarted }
   | { event: 'ttsEnded'; data: TtsEnded }
-  | { event: 'volumeChanged'; data: VolumeChanged };
+  | { event: 'volumeChanged'; data: VolumeChanged }
+  | { event: 'errorEvent'; data: AudioErrorReply };
 
 export type GatewayToBridgeAuthorityMsg =
   | { event: 'claim'; data: AuthorityClaim }
@@ -278,6 +285,7 @@ export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: ChromeNavigate
 
 export type GatewayToBridgeGeoMsg =
   | { event: 'position'; data: Position }
+  | { event: 'errorEvent'; data: GeoErrorReply }
   | { event: 'getOnceReply'; data: GeoGetOnceReply }
   | { event: 'errorReply'; data: GeoErrorReply };
 
@@ -288,9 +296,10 @@ export type GatewayToBridgeLibraryMsg =
   | { event: 'recommendationsReply'; data: RecommendationsReply }
   | { event: 'favoritesListReply'; data: FavoritesListReply }
   | { event: 'favoritesContainsReply'; data: FavoritesContainsReply }
-  | { event: 'libraryErrorReply'; data: LibraryErrorReply }
+  | { event: 'errorReply'; data: LibraryErrorReply }
   | { event: 'favoriteChanged'; data: FavoriteChanged }
-  | { event: 'libraryChanged'; data: LibraryChanged };
+  | { event: 'libraryChanged'; data: LibraryChanged }
+  | { event: 'errorEvent'; data: LibraryErrorReply };
 
 export type GatewayToBridgeLyricsMsg =
   | { event: 'lyricsReply'; data: LyricsReply }
@@ -338,7 +347,8 @@ export type GatewayToBridgeNetMsg =
 export type GatewayToBridgeNotificationsMsg =
   | { event: 'posted'; data: Notification }
   | { event: 'updated'; data: Notification }
-  | { event: 'removed'; data: NotificationRemoved };
+  | { event: 'removed'; data: NotificationRemoved }
+  | { event: 'errorEvent'; data: NotificationsErrorReply };
 
 export type GatewayToBridgePhoneMsg =
   | { event: 'snapshot'; data: PhoneStateReply }
@@ -346,12 +356,14 @@ export type GatewayToBridgePhoneMsg =
   | { event: 'callStarted'; data: PhoneCall }
   | { event: 'callUpdated'; data: PhoneCall }
   | { event: 'callEnded'; data: PhoneCallEnded }
+  | { event: 'errorEvent'; data: PhoneErrorReply }
   | { event: 'stateReply'; data: PhoneStateReply };
 
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
   | { event: 'queueChanged'; data: QueueSnapshot }
   | { event: 'targetsChanged'; data: PlaybackTargets }
+  | { event: 'errorEvent'; data: PlayerErrorReply }
   | { event: 'requestSpotifyWake' };
 
 export type GatewayToBridgeSystemMsg =
@@ -495,6 +507,8 @@ export type NotificationInvoke = { id: string };
 
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
+export type NotificationsErrorReply = { error: NotificationsError };
+
 export type OtaAbandon = { updateId: string };
 
 export type OtaActivate = { expected: Array<string> };
@@ -539,6 +553,8 @@ export type PhoneDtmfAction = { callId: string | null; tone: DtmfTone };
 
 export type PhoneEndAction = { callId: string; action: EndCallAction };
 
+export type PhoneErrorReply = { error: PhoneError };
+
 export type PhoneInitiateAction = {
   kind: InitiateCallType;
   destinationId: string | null;
@@ -552,10 +568,9 @@ export type PhoneStateReply = { state: PhoneState };
 
 export type PlayUri = { uri: string; context: PlayContext | null };
 
-/**
- * Complete replacement list of the provider's remote endpoints.
- */
 export type PlaybackTargets = { targets: Array<PlaybackTarget> };
+
+export type PlayerErrorReply = { error: PlayerError };
 
 export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 

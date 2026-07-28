@@ -2,6 +2,10 @@ package com.bridgething.companion
 
 import com.bridgething.gateway.BridgethingGateway
 import com.bridgething.gateway.audio
+import com.bridgething.schema.AudioError
+import com.bridgething.schema.AudioErrorActionRejectedInner
+import com.bridgething.schema.AudioErrorReply
+import com.bridgething.schema.AudioErrorUnavailableInner
 import com.bridgething.glue.BridgethingGlue
 import com.bridgething.schema.Tts
 import com.bridgething.schema.TtsEnded
@@ -45,6 +49,7 @@ public class AudioDispatcher(
                         if (glue != null) {
                             runCatching { glue.volumeUp() }
                                 .onSuccess { level -> broadcastVolume(gateway, level) }
+                                .onFailure { reportRejected(gateway, "volumeUp", it) }
                         } else {
                             backend.volumeUp()
                         }
@@ -58,6 +63,7 @@ public class AudioDispatcher(
                         if (glue != null) {
                             runCatching { glue.volumeDown() }
                                 .onSuccess { level -> broadcastVolume(gateway, level) }
+                                .onFailure { reportRejected(gateway, "volumeDown", it) }
                         } else {
                             backend.volumeDown()
                         }
@@ -71,6 +77,7 @@ public class AudioDispatcher(
                         if (glue != null) {
                             runCatching { glue.setVolume(msg.level) }
                                 .onSuccess { level -> broadcastVolume(gateway, level) }
+                                .onFailure { reportRejected(gateway, "setVolume", it) }
                         } else {
                             backend.setVolume(msg.level)
                         }
@@ -80,7 +87,6 @@ public class AudioDispatcher(
             jobs.add(
                 scope.launch {
                     gateway.audio.muteToggle.collect {
-                        // connect has no mute surface; swallow rather than mute the phone
                         if (volumeGlue() == null) backend.muteToggle()
                     }
                 },
@@ -94,9 +100,28 @@ public class AudioDispatcher(
             )
             jobs.add(scope.launch { gateway.audio.ttsCancel.collect { (_, msg) -> backend.cancel(msg.id) } })
             jobs.add(scope.launch { gateway.audio.ttsCancelAll.collect { backend.cancelAll() } })
-            jobs.add(scope.launch { gateway.audio.earcon.collect { (_, msg) -> backend.playEarcon(msg.name) } })
+            jobs.add(
+                scope.launch {
+                    gateway.audio.earcon.collect { (_, msg) ->
+                        if (!backend.playEarcon(msg.name)) {
+                            reportAudioError(gateway, AudioError.Unavailable(AudioErrorUnavailableInner("earcon")))
+                        }
+                    }
+                },
+            )
             jobs.add(scope.launch { gateway.audio.tts.collect { (_, msg) -> handleTts(msg, gateway) } })
         }
+    }
+
+    private suspend fun reportRejected(gateway: BridgethingGateway, verb: String, error: Throwable) {
+        reportAudioError(
+            gateway,
+            AudioError.ActionRejected(AudioErrorActionRejectedInner("$verb: ${error.message ?: error.toString()}")),
+        )
+    }
+
+    private suspend fun reportAudioError(gateway: BridgethingGateway, error: AudioError) {
+        runCatching { gateway.audio.errorEvent(AudioErrorReply(error)) }
     }
 
     public suspend fun stop() {

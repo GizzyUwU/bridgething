@@ -2,6 +2,8 @@ package com.bridgething.companion
 
 import com.bridgething.gateway.BridgethingGateway
 import com.bridgething.gateway.notifications
+import com.bridgething.schema.NotificationsError
+import com.bridgething.schema.NotificationsErrorReply
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,8 +25,20 @@ public class NotificationDispatcher(
         mutex.withLock {
             stopJobs()
             jobs.add(scope.launch { relayEvents(gateway) })
-            jobs.add(scope.launch { gateway.notifications.invokePositive.collect { (_, msg) -> backend.invokePositive(msg.id) } })
-            jobs.add(scope.launch { gateway.notifications.invokeNegative.collect { (_, msg) -> backend.invokeNegative(msg.id) } })
+            jobs.add(
+                scope.launch {
+                    gateway.notifications.invokePositive.collect { (_, msg) ->
+                        backend.invokePositive(msg.id)?.let { report(gateway, it) }
+                    }
+                },
+            )
+            jobs.add(
+                scope.launch {
+                    gateway.notifications.invokeNegative.collect { (_, msg) ->
+                        backend.invokeNegative(msg.id)?.let { report(gateway, it) }
+                    }
+                },
+            )
         }
     }
 
@@ -34,6 +48,10 @@ public class NotificationDispatcher(
 
     public fun close() {
         scope.cancel()
+    }
+
+    private suspend fun report(gateway: BridgethingGateway, error: NotificationsError) {
+        runCatching { gateway.notifications.errorEvent(NotificationsErrorReply(error)) }
     }
 
     private fun stopJobs() {

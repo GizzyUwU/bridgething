@@ -285,6 +285,77 @@ final class OtaRunStoreTests: XCTestCase {
     )
   }
 
+  func testProgressForAStepOutsideThePlanKeepsTheLastUnderstoodPosition() {
+    let store = OtaRunStore()
+    _ = store.ingest(plannedImage(), now: at(0))
+    _ = store.ingest(
+      .progress(
+        deviceId: device, kind: .image, stepId: 1,
+        snapshot: .applying(phase: .writing, writePercent: 50, dwlPercent: 50, dwlBytes: 0)
+      ),
+      now: at(1)
+    )
+
+    let run = onlyRun(store.ingest(
+      .progress(
+        deviceId: device, kind: .image, stepId: 99,
+        snapshot: .applying(phase: .writing, writePercent: 60, dwlPercent: 60, dwlBytes: 0)
+      ),
+      now: at(2)
+    ))
+
+    XCTAssertEqual(
+      run?.stepId, 1,
+      "a step id that does not index this plan must not rewind the run to its start"
+    )
+  }
+
+  // MARK: - interrupt
+
+  func testALinkThatDiesMidDownloadEndsTheRun() {
+    let store = OtaRunStore()
+    _ = store.ingest(plannedImage(), now: at(0))
+    _ = store.ingest(
+      .progress(
+        deviceId: device, kind: .image, stepId: 0,
+        snapshot: .downloading(asset: "update.swu", received: 40, total: 100, ratePerSec: 20)
+      ),
+      now: at(1)
+    )
+
+    let interrupted = store.interrupt(deviceId: device)
+
+    XCTAssertEqual(interrupted?.outcome, .failed)
+    XCTAssertNotNil(store.dismiss(deviceId: device), "so the card can be cleared")
+  }
+
+  func testALinkThatDiesWhileTheDeviceRebootsLeavesTheRunAlone() {
+    let store = OtaRunStore()
+    _ = store.ingest(plannedImage(), now: at(0))
+    _ = store.ingest(
+      .progress(
+        deviceId: device, kind: .image, stepId: 2,
+        snapshot: .applying(phase: .reboot, writePercent: 100, dwlPercent: 100, dwlBytes: 0)
+      ),
+      now: at(1)
+    )
+
+    XCTAssertNil(
+      store.interrupt(deviceId: device),
+      "the run is what asked the device to go away, so its disconnect is not a failure"
+    )
+    XCTAssertNil(store.runs().first?.outcome)
+  }
+
+  func testInterruptLeavesAFinishedRunAlone() {
+    let store = OtaRunStore()
+    _ = store.ingest(plannedImage(), now: at(0))
+    _ = store.ingest(.updated(deviceId: device, kind: .image, version: "2026.06.0"), now: at(1))
+
+    XCTAssertNil(store.interrupt(deviceId: device))
+    XCTAssertEqual(store.runs().first?.outcome, .succeeded)
+  }
+
   // MARK: - noteMeta
 
   func testMetaOnTheTargetVersionClearsTheRun() {

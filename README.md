@@ -81,6 +81,9 @@ The image, OTA pipeline, and BSP live in
 Webapps push with `bun run push` from each webapp package.
 `bun create bridgething` comes with scripts for pushing to the device.
 
-For host-side dev, the daemon expects `chromium --remote-debugging-port=9223`
+For host-side dev, the daemon expects `chromium --remote-debugging-port=9222`
 running and a Bluetooth adapter with class `0x7c0000`
-(`sudo hciconfig hci0 class 0x7c0000`).
+(`sudo hciconfig hci0 class 0x7c0000`). Override the port with
+`BRIDGETHING_CHROME_PORT`.
+
+On a device, chromium's DevTools endpoint is served at `bridgething.local:9222`.

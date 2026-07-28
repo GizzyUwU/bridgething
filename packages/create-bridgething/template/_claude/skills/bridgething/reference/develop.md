@@ -68,25 +68,26 @@ CDP input goes straight into the page (never through the physical buttons), so t
 launcher gesture and on-device browser-nav side effects never interfere.
 
 Install the app onto the device first so the kiosk is showing it (build + push).
-Then tunnel the device's CDP port to your machine (it is bound to `127.0.0.1` and
-chromium refuses to bind it to anything routable, so a tunnel is mandatory):
+CDP is served at `bridgething.local:9222`, reachable directly over USB:
 
 ```bash
 # device answers at bridgething.local over USB; root has no password
-ssh -o StrictHostKeyChecking=no -fN -L 9223:127.0.0.1:9223 root@bridgething.local
-curl -s http://localhost:9223/json/version >/dev/null && echo tunnel-up
+curl -s http://bridgething.local:9222/json/version >/dev/null && echo cdp-up
 ```
+
+Use the `webSocketDebuggerUrl` exactly as returned. It comes back as an IP rather
+than the hostname you asked for, and it is already correct - do not rewrite it.
 
 **Playwright's `connectOverCDP` hangs against the device's embedded chromium** -
 it never finishes the websocket upgrade (a quirk of the device's `cast_shell`
-build, not the tunnel: a plain websocket connects fine over the same tunnel).
-Drive it with a raw CDP websocket instead. Connect to the `page` target from
-`/json` (the page-level endpoint, not the browser-level one). This script
-screenshots the live device and presses a button; it is the whole loop:
+build; a plain websocket connects fine). Drive it with a raw CDP websocket
+instead. Connect to the `page` target from `/json` (the page-level endpoint, not
+the browser-level one). This script screenshots the live device and presses a
+button; it is the whole loop:
 
 ```ts
 // drive.ts  ->  run with: bun drive.ts
-const targets = (await fetch('http://localhost:9223/json').then(r => r.json())) as any[];
+const targets = (await fetch('http://bridgething.local:9222/json').then(r => r.json())) as any[];
 const page = targets.find(t => t.type === 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise<void>((res, rej) => {

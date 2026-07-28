@@ -119,9 +119,11 @@ pub enum GatewayToBridgeLibraryMsg {
   #[bridge_response]
   FavoritesContainsReply(FavoritesContainsReply),
   #[bridge_response]
-  LibraryErrorReply(LibraryErrorReply),
+  ErrorReply(LibraryErrorReply),
   #[bridge_event]
   FavoriteChanged(FavoriteChanged),
   #[bridge_event]
   LibraryChanged(LibraryChanged),
+  #[bridge_event]
+  ErrorEvent(LibraryErrorReply),
 }

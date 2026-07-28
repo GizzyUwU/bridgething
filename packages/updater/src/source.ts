@@ -4,6 +4,25 @@ export type ArtifactSource = {
   close?(): Promise<void> | void;
 };
 
+export async function readExact(source: ArtifactSource, offset: number, length: number): Promise<Uint8Array> {
+  const first = await source.read(offset, length);
+  if (first.byteLength === length) return first;
+  if (first.byteLength === 0) throw new Error(`unexpected EOF at offset ${offset}, wanted ${length} bytes`);
+
+  const out = new Uint8Array(length);
+  out.set(first, 0);
+  let got = first.byteLength;
+  while (got < length) {
+    const chunk = await source.read(offset + got, length - got);
+    if (chunk.byteLength === 0) {
+      throw new Error(`unexpected EOF at offset ${offset + got}, wanted ${length} bytes from ${offset}`);
+    }
+    out.set(chunk, got);
+    got += chunk.byteLength;
+  }
+  return out;
+}
+
 export function bytesArtifactSource(bytes: Uint8Array): ArtifactSource {
   return {
     size: bytes.byteLength,
@@ -24,7 +43,7 @@ export function blobArtifactSource(blob: Blob): ArtifactSource {
 }
 
 export async function sha256Hex(source: ArtifactSource): Promise<string> {
-  const bytes = await source.read(0, source.size);
+  const bytes = await readExact(source, 0, source.size);
   const digest = await crypto.subtle.digest('SHA-256', toArrayBuffer(bytes));
   return Array.from(new Uint8Array(digest))
     .map(b => b.toString(16).padStart(2, '0'))

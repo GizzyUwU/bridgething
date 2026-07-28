@@ -63,6 +63,23 @@ final class MultiProviderRoutingTests: XCTestCase {
         XCTAssertFalse(first.calls.contains { if case .play = $0 { return true } else { return false } })
     }
 
+    func testPlayForAnUnclaimedSchemeReportsTheDrop() async throws {
+        let (_, driver, _, _) = try await boot()
+        try await driver.send(
+            .player(.play(PlayUri(uri: "tidal:track:xyz", context: nil)))
+        )
+        let frame = try await driver.waitOutbound { msg in
+            if case .player(.errorEvent) = msg.data { return true }
+            return false
+        }
+        guard case let .player(.errorEvent(reply)) = frame.data,
+              case let .schemeUnclaimed(inner) = reply.error
+        else {
+            return XCTFail("expected a schemeUnclaimed player error, got \(frame.data)")
+        }
+        XCTAssertEqual(inner.scheme, "tidal")
+    }
+
     func testAssetResolvesFromTheGlueThatMintedTheId() async throws {
         let (_, driver, _, _) = try await boot()
         let reply = try await driver.request(

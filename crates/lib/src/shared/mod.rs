@@ -1,4 +1,5 @@
 mod asset;
+mod audio;
 mod authority;
 mod bluetooth;
 mod capabilities;
@@ -22,6 +23,7 @@ mod voice;
 mod webapp;
 
 pub use asset::*;
+pub use audio::*;
 pub use authority::*;
 pub use bluetooth::*;
 pub use capabilities::*;

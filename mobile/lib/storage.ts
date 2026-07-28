@@ -39,6 +39,7 @@ export type DeviceLedgerEntry = {
   nickname: string | null;
   lastConnectedAt: number;
   serialNumber: string | null;
+  libVersion: string | null;
 };
 
 type Ledger = Record<string, DeviceLedgerEntry>;
@@ -63,46 +64,50 @@ export function getLedger(): Ledger {
 
 export function recordDeviceSeen(
   id: string,
-  name: string,
+  name: string | null,
   atMs: number,
 ): Ledger {
   const ledger = readLedger();
-  ledger[id] = {
-    id,
-    lastName: name,
-    nickname: ledger[id]?.nickname ?? null,
-    lastConnectedAt: atMs,
-    serialNumber: ledger[id]?.serialNumber ?? null,
-  };
-  writeLedger(ledger);
-  return ledger;
-}
-
-export function setDeviceNickname(id: string, nickname: string | null): Ledger {
-  const ledger = readLedger();
   const prior = ledger[id];
-  const trimmed = nickname?.trim();
   ledger[id] = {
     id,
-    lastName: prior?.lastName ?? '',
-    nickname: trimmed && trimmed.length > 0 ? trimmed : null,
-    lastConnectedAt: prior?.lastConnectedAt ?? 0,
-    serialNumber: prior?.serialNumber ?? null,
-  };
-  writeLedger(ledger);
-  return ledger;
-}
-
-export function recordDeviceSerial(id: string, serialNumber: string): Ledger {
-  const ledger = readLedger();
-  const prior = ledger[id];
-  if (prior?.serialNumber === serialNumber) return ledger;
-  ledger[id] = {
-    id,
-    lastName: prior?.lastName ?? '',
+    lastName: name ?? prior?.lastName ?? '',
     nickname: prior?.nickname ?? null,
+    lastConnectedAt: atMs,
+    serialNumber: prior?.serialNumber ?? null,
+    libVersion: prior?.libVersion ?? null,
+  };
+  writeLedger(ledger);
+  return ledger;
+}
+
+export type DeviceFacts = {
+  serialNumber: string | null;
+  nickname: string | null;
+  libVersion: string | null;
+};
+
+export function recordDeviceMeta(id: string, facts: DeviceFacts): Ledger {
+  const ledger = readLedger();
+  const prior = ledger[id];
+  const trimmed = facts.nickname?.trim();
+  const next: DeviceFacts = {
+    nickname: trimmed && trimmed.length > 0 ? trimmed : null,
+    serialNumber: facts.serialNumber ?? prior?.serialNumber ?? null,
+    libVersion: facts.libVersion ?? prior?.libVersion ?? null,
+  };
+  if (
+    prior &&
+    prior.serialNumber === next.serialNumber &&
+    prior.nickname === next.nickname &&
+    prior.libVersion === next.libVersion
+  )
+    return ledger;
+  ledger[id] = {
+    id,
+    lastName: prior?.lastName ?? '',
     lastConnectedAt: prior?.lastConnectedAt ?? 0,
-    serialNumber,
+    ...next,
   };
   writeLedger(ledger);
   return ledger;

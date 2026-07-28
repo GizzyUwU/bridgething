@@ -15,7 +15,7 @@ use crate::{ItemKind, ItemRef};
   response = crate::client::LibraryBrowseReply,
   response_variant = BrowseReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 /// Payload for the `browse` request: page through a folder in the library tree, or the root
 /// menu when `node_id` is `None`. Root-level results are cached by the daemon for up to 5
@@ -47,7 +47,7 @@ pub struct LibraryBrowse {
   response = crate::client::LibrarySearchReply,
   response_variant = SearchReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 /// Payload for the `search` request: free-text search across the connected gateway's library.
 pub struct LibrarySearch {
@@ -72,7 +72,7 @@ pub struct LibrarySearch {
   response = crate::client::LibraryRecommendationsReply,
   response_variant = RecommendationsReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryRecommendations {
   /// Seed items; the daemon truncates this to the first 5 regardless of the count sent.
@@ -95,7 +95,7 @@ pub struct LibraryRecommendations {
   response = crate::client::LibraryResolveContextReply,
   response_variant = ResolveContextReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 /// Payload for the `resolveContext` request: turn a context uri into something renderable.
 /// The uri a webapp holds is usually `PlayerState::context`, so this is what backs a
@@ -115,7 +115,7 @@ pub struct LibraryResolveContext {
   response = crate::client::LibraryFavoritesListReply,
   response_variant = FavoritesListReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 /// Payload for the `favoritesList` request: page through the user's saved/liked library items,
 /// mixed across kinds.
@@ -138,7 +138,7 @@ pub struct LibraryFavoritesList {
   response = crate::client::LibraryFavoritesContainsReply,
   response_variant = FavoritesContainsReply,
   error = crate::client::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryFavoritesContains {
   /// Uris to check; the daemon truncates this to the first 50 regardless of the count sent.

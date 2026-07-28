@@ -1,8 +1,10 @@
 import BridgethingGateway
 import BridgethingSchema
 import Foundation
+import Logging
 
-/// Abstraction over the device location source (default: `CoreLocationProvider`).
+private let geoLog = Logger(label: "com.bridgething.companion.geo")
+
 @MainActor
 public protocol GeoLocationProviding: AnyObject {
     var onPosition: ((Position) -> Void)? { get set }
@@ -13,13 +15,12 @@ public protocol GeoLocationProviding: AnyObject {
     func startUpdating()
     func stopUpdating()
     func requestOnce()
+    func cancelOnce()
 }
 
-/// @MainActor: CoreLocation delegate callbacks fire on the main thread.
 @MainActor
 public final class GeoController {
     private var provider: (any GeoLocationProviding)?
-    // Set once in init, read only on the main actor.
     private nonisolated(unsafe) let injectedProvider: (any GeoLocationProviding)?
 
     private var watchTask: Task<Void, Never>?
@@ -28,9 +29,15 @@ public final class GeoController {
 
     private var gatewayRef: BridgethingGateway?
     private var watching: Bool = false
-    private var oneShotConts: [CheckedContinuation<Position, Error>] = []
+    private var oneShots: [OneShot] = []
 
-    // nil -> CoreLocation default when available.
+    static var oneShotTimeout: Duration = .seconds(30)
+
+    private struct OneShot {
+        let id: UUID
+        let cont: CheckedContinuation<Position, Error>
+    }
+
     public nonisolated init(provider: (any GeoLocationProviding)? = nil) {
         injectedProvider = provider
     }
@@ -82,10 +89,13 @@ public final class GeoController {
             provider?.stopUpdating()
             watching = false
         }
-        for cont in oneShotConts {
-            cont.resume(throwing: GeoControllerError.cancelled)
+        if !oneShots.isEmpty {
+            provider?.cancelOnce()
         }
-        oneShotConts.removeAll()
+        for shot in oneShots {
+            shot.cont.resume(throwing: GeoControllerError.cancelled)
+        }
+        oneShots.removeAll()
         gatewayRef = nil
     }
 
@@ -118,10 +128,7 @@ public final class GeoController {
         provider.requestAuthorization()
         provider.configure(accuracy: req.accuracy)
         do {
-            let position = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Position, Error>) in
-                oneShotConts.append(cont)
-                provider.requestOnce()
-            }
+            let position = try await awaitOneShot(provider: provider)
             try? await handle.respond(GeoGetOnceReply(position: position))
         } catch {
             let geoErr: GeoError = (error as? GeoFailure)?.error ?? .unavailable
@@ -129,11 +136,36 @@ public final class GeoController {
         }
     }
 
+    private func awaitOneShot(provider: any GeoLocationProviding) async throws -> Position {
+        let id = UUID()
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(for: Self.oneShotTimeout)
+            guard !Task.isCancelled else { return }
+            self?.expireOneShot(id: id)
+        }
+        defer { deadline.cancel() }
+
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Position, Error>) in
+            oneShots.append(OneShot(id: id, cont: cont))
+            provider.requestOnce()
+        }
+    }
+
+    private func expireOneShot(id: UUID) {
+        guard let idx = oneShots.firstIndex(where: { $0.id == id }) else { return }
+        let shot = oneShots.remove(at: idx)
+        geoLog.warning("geo.getOnce timed out with no fix and no error")
+        if oneShots.isEmpty {
+            provider?.cancelOnce()
+        }
+        shot.cont.resume(throwing: GeoFailure(error: .unavailable))
+    }
+
     // MARK: - provider callbacks
 
     private func didUpdate(_ position: Position) {
-        if !oneShotConts.isEmpty {
-            oneShotConts.removeFirst().resume(returning: position)
+        if !oneShots.isEmpty {
+            oneShots.removeFirst().cont.resume(returning: position)
         }
         if watching, let gw = gatewayRef {
             Task { try? await gw.geo.position(position) }
@@ -141,10 +173,14 @@ public final class GeoController {
     }
 
     private func didFail(_ error: GeoError) {
-        for cont in oneShotConts {
-            cont.resume(throwing: GeoFailure(error: error))
+        if watching, let gw = gatewayRef {
+            geoLog.warning("geo watch failed while subscribed: \(String(describing: error))")
+            Task { try? await gw.geo.errorEvent(GeoErrorReply(error: error)) }
         }
-        oneShotConts.removeAll()
+        for shot in oneShots {
+            shot.cont.resume(throwing: GeoFailure(error: error))
+        }
+        oneShots.removeAll()
     }
 }
 
@@ -152,7 +188,6 @@ private enum GeoControllerError: Error {
     case cancelled
 }
 
-// Wraps a wire `GeoError`  so it can be thrown.
 private struct GeoFailure: Error {
     let error: GeoError
 }
@@ -160,7 +195,6 @@ private struct GeoFailure: Error {
 #if canImport(CoreLocation)
     import CoreLocation
 
-    /// Default `GeoLocationProviding` backed by `CLLocationManager`.
     @MainActor
     public final class CoreLocationProvider: NSObject, GeoLocationProviding, CLLocationManagerDelegate {
         public var onPosition: ((Position) -> Void)?
@@ -169,10 +203,44 @@ private struct GeoFailure: Error {
         private lazy var manager: CLLocationManager = {
             let m = CLLocationManager()
             m.delegate = self
+            #if os(iOS)
+                if Self.hasLocationBackgroundMode {
+                    m.allowsBackgroundLocationUpdates = true
+                } else {
+                    geoLog.error("UIBackgroundModes lacks `location`; background fixes will stop when the app backgrounds")
+                }
+                m.pausesLocationUpdatesAutomatically = false
+            #endif
             return m
         }()
 
+        #if os(iOS)
+            private static let hasLocationBackgroundMode: Bool = {
+                let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
+                return modes?.contains("location") ?? false
+            }()
+
+            private var session: CLBackgroundActivitySession?
+        #endif
+
+        private var watchActive = false
+        private var oneShotActive = false
+
         override public init() { super.init() }
+
+        private func syncBackgroundSession() {
+            #if os(iOS)
+                let needed = watchActive || oneShotActive
+                if needed, session == nil {
+                    session = CLBackgroundActivitySession()
+                    geoLog.info("background activity session started")
+                } else if !needed, session != nil {
+                    session?.invalidate()
+                    session = nil
+                    geoLog.info("background activity session ended")
+                }
+            #endif
+        }
 
         public func configure(accuracy: GeoAccuracy) {
             manager.desiredAccuracy = switch accuracy {
@@ -187,17 +255,54 @@ private struct GeoFailure: Error {
             }
         }
 
-        public func startUpdating() { manager.startUpdatingLocation() }
-        public func stopUpdating() { manager.stopUpdatingLocation() }
-        public func requestOnce() { manager.requestLocation() }
+        public func startUpdating() {
+            watchActive = true
+            syncBackgroundSession()
+            manager.startUpdatingLocation()
+        }
+
+        public func stopUpdating() {
+            watchActive = false
+            manager.stopUpdatingLocation()
+            syncBackgroundSession()
+        }
+
+        public func requestOnce() {
+            oneShotActive = true
+            syncBackgroundSession()
+            manager.requestLocation()
+        }
+
+        public func cancelOnce() {
+            guard oneShotActive else { return }
+            oneShotActive = false
+            if !watchActive {
+                manager.stopUpdatingLocation()
+            }
+            syncBackgroundSession()
+        }
 
         public nonisolated func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
             guard let last = locations.last else { return }
-            MainActor.assumeIsolated { self.onPosition?(Self.makePosition(from: last)) }
+            MainActor.assumeIsolated {
+                self.oneShotActive = false
+                self.syncBackgroundSession()
+                self.onPosition?(Self.makePosition(from: last))
+            }
         }
 
-        public nonisolated func locationManager(_: CLLocationManager, didFailWithError _: Error) {
-            MainActor.assumeIsolated { self.onError?(.unavailable) }
+        public nonisolated func locationManager(_: CLLocationManager, didFailWithError error: Error) {
+            MainActor.assumeIsolated {
+                geoLog.warning("core location failed: \(error.localizedDescription)")
+                self.oneShotActive = false
+                self.syncBackgroundSession()
+                self.onError?(Self.mapError(error))
+            }
+        }
+
+        private static func mapError(_ error: Error) -> GeoError {
+            guard let clError = error as? CLError else { return .unavailable }
+            return clError.code == .denied ? .permissionDenied : .unavailable
         }
 
         private static func makePosition(from location: CLLocation) -> Position {

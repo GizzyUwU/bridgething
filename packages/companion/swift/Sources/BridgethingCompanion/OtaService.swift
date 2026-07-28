@@ -742,6 +742,9 @@ public actor OtaService {
 
     private func noteLinkClosed(deviceId: String) {
         linkOpenAt[deviceId] = nil
+        if let interrupted = runStore.interrupt(deviceId: deviceId) {
+            storeContinuation.yield(.run(interrupted))
+        }
     }
 
     private func linkStable(_ deviceId: String) -> Bool {

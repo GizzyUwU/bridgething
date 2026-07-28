@@ -59,21 +59,35 @@ export function registerOtaDomain(): void {
 const REBOOT_SECS = 45;
 const BATCH_APPLY_SECS = 15;
 const MIN_STEP_SECS = 1;
+const NOMINAL_TRANSFER_BYTES_PER_SEC = 750_000;
+const APPLY_BYTES_PER_SEC = 750_000;
+
+function stepWeight(step: BridgethingOtaStep): number {
+  switch (step.kind) {
+    case 'download':
+    case 'stream':
+      return step.bytes > 0
+        ? Math.max(MIN_STEP_SECS, step.bytes / NOMINAL_TRANSFER_BYTES_PER_SEC)
+        : MIN_STEP_SECS;
+    case 'apply':
+      return step.bytes > 0
+        ? Math.max(MIN_STEP_SECS, step.bytes / APPLY_BYTES_PER_SEC)
+        : BATCH_APPLY_SECS;
+    case 'reboot':
+      return REBOOT_SECS;
+  }
+}
 
 function stepSeconds(step: BridgethingOtaStep, run: BridgethingOtaRun): number {
   switch (step.kind) {
     case 'download':
     case 'stream': {
       const rate = run.ratePerSec && run.ratePerSec > 0 ? run.ratePerSec : null;
-      if (!rate || step.bytes === 0) return MIN_STEP_SECS;
+      if (!rate || step.bytes === 0) return stepWeight(step);
       return Math.max(MIN_STEP_SECS, step.bytes / rate);
     }
-    case 'apply':
-      return step.bytes > 0
-        ? Math.max(MIN_STEP_SECS, step.bytes / 750_000)
-        : BATCH_APPLY_SECS;
-    case 'reboot':
-      return REBOOT_SECS;
+    default:
+      return stepWeight(step);
   }
 }
 
@@ -107,8 +121,8 @@ export type OtaProgress = {
 };
 
 export function otaProgress(run: BridgethingOtaRun, now: number): OtaProgress {
-  const secs = run.steps.map(step => stepSeconds(step, run));
-  const total = secs.reduce((a, b) => a + b, 0);
+  const weights = run.steps.map(stepWeight);
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
   const index = Math.max(
     0,
     run.steps.findIndex(s => s.id === run.stepId),
@@ -123,7 +137,7 @@ export function otaProgress(run: BridgethingOtaRun, now: number): OtaProgress {
       etaSeconds: 0,
     };
   }
-  if (total <= 0) {
+  if (totalWeight <= 0) {
     return {
       percent: 0,
       stepIndex: index,
@@ -133,20 +147,20 @@ export function otaProgress(run: BridgethingOtaRun, now: number): OtaProgress {
     };
   }
 
-  let elapsed = 0;
+  let done = 0;
   let remaining = 0;
   run.steps.forEach((step, at) => {
     if (at < index) {
-      elapsed += secs[at];
+      done += weights[at];
       return;
     }
     const fraction = at === index ? stepFraction(step, run, now) : 0;
-    elapsed += secs[at] * fraction;
-    remaining += secs[at] * (1 - fraction);
+    done += weights[at] * fraction;
+    remaining += stepSeconds(step, run) * (1 - fraction);
   });
 
   return {
-    percent: Math.min(100, Math.round((elapsed / total) * 100)),
+    percent: Math.min(100, Math.round((done / totalWeight) * 100)),
     stepIndex: index,
     stepCount: run.steps.length,
     stepLabel: run.steps[index]?.label ?? null,
@@ -203,6 +217,9 @@ export async function installLatestOta(
 ): Promise<void> {
   const session = getSession();
   const manifest = await session.fetchOtaManifest(null);
-  const latest = manifest.channels.find(c => c.slug === channel)?.latest;
-  if (latest) await session.applyOtaUpdate(deviceId, channel, latest, null);
+  const found = manifest.channels.find(c => c.slug === channel);
+  if (!found) throw new Error(`no ${channel} channel in the update manifest`);
+  if (!found.latest)
+    throw new Error(`the ${channel} channel has no release yet`);
+  await session.applyOtaUpdate(deviceId, channel, found.latest, null);
 }

@@ -1,7 +1,10 @@
 use libbridgething::{
   Notification,
-  client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved as ClientNotificationRemoved},
-  gateway::{GatewayToBridgeNotificationsMsgEventDispatch, NotificationRemoved},
+  client::{
+    BridgeToClientNotificationsMsgEvent, NotificationRemoved as ClientNotificationRemoved,
+    NotificationsErrorReply as ClientNotificationsErrorReply,
+  },
+  gateway::{GatewayToBridgeNotificationsMsgEventDispatch, NotificationRemoved, NotificationsErrorReply},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -49,6 +52,19 @@ impl GatewayToBridgeNotificationsMsgEventDispatch for NotificationsHandler {
           id: params.id,
           reason: params.reason,
         },
+      ))
+      .await?;
+    Ok(())
+  }
+
+  async fn error_event(&self, params: NotificationsErrorReply) -> HandlerResult {
+    tracing::warn!(error = ?params.error, "companion refused a notification action");
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientNotificationsMsgEvent::ErrorEvent(
+        ClientNotificationsErrorReply { error: params.error },
       ))
       .await?;
     Ok(())

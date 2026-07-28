@@ -4,7 +4,16 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{PlaybackTarget, PlayerState, QueueItem};
+use crate::{PlaybackTarget, PlayerError, PlayerState, QueueItem};
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PlayerErrorReply {
+  pub error: PlayerError,
+}
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -16,7 +25,6 @@ pub struct QueueSnapshot {
   pub items: Vec<QueueItem>,
 }
 
-/// Complete replacement list of the provider's remote endpoints.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -40,6 +48,8 @@ pub enum GatewayToBridgePlayerMsg {
   QueueChanged(QueueSnapshot),
   #[bridge_event]
   TargetsChanged(PlaybackTargets),
+  #[bridge_event]
+  ErrorEvent(PlayerErrorReply),
   #[bridge_command]
   RequestSpotifyWake,
 }

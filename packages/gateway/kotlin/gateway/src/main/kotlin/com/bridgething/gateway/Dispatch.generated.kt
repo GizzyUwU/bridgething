@@ -168,6 +168,23 @@ public class AudioSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Audio::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: AudioErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.ErrorEvent(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
 }
 
 /** Cross-peer methods for the `Geo` wire surface. */
@@ -200,6 +217,23 @@ public class GeoSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Geo::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: GeoErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.ErrorEvent(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -276,6 +310,23 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Library::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: LibraryErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorEvent(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -612,6 +663,23 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Notifications::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: NotificationsErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ErrorEvent(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
 }
 
 /** Cross-peer methods for the `Phone` wire surface. */
@@ -809,6 +877,23 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Phone::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: PhoneErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.ErrorEvent(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
   /** Stream of typed inbound `PhoneStateGet` requests. */
   public val stateGetRequests: Flow<PhoneStateGetHandle> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -985,6 +1070,23 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.TargetsChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Player::ErrorEvent` to every connected peer (broadcast). */
+  public suspend fun errorEvent(payload: PlayerErrorReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.ErrorEvent(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -2224,6 +2326,16 @@ public class AudioSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
+  /** Send `Audio::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: AudioErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.ErrorEvent(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
 }
 
 /** Per-peer methods for the `Geo` wire surface (deviceId is baked in). */
@@ -2257,6 +2369,16 @@ public class GeoSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Geo::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: GeoErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.ErrorEvent(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2326,6 +2448,16 @@ public class LibrarySurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Library::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: LibraryErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorEvent(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2610,6 +2742,16 @@ public class NotificationsSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
+  /** Send `Notifications::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: NotificationsErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ErrorEvent(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
 }
 
 /** Per-peer methods for the `Phone` wire surface (deviceId is baked in). */
@@ -2783,6 +2925,16 @@ public class PhoneSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallEnded(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Phone::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: PhoneErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.ErrorEvent(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2962,6 +3114,16 @@ public class PlayerSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.TargetsChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Player::ErrorEvent` to this peer. */
+  public suspend fun errorEvent(payload: PlayerErrorReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.ErrorEvent(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -4187,7 +4349,7 @@ public class LibraryBrowseRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }
@@ -4220,7 +4382,7 @@ public class LibraryResolveContextRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }
@@ -4253,7 +4415,7 @@ public class LibrarySearchRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }
@@ -4286,7 +4448,7 @@ public class LibraryRecommendationsRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }
@@ -4319,7 +4481,7 @@ public class LibraryFavoritesListRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }
@@ -4352,7 +4514,7 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }

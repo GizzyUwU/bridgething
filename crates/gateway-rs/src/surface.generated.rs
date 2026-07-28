@@ -92,6 +92,9 @@ impl<'a> AudioSurface<'a> {
   pub async fn volume_changed(&self, payload: VolumeChanged) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeAudioMsgEvent::VolumeChanged(payload)).await
   }
+  pub async fn error_event(&self, payload: AudioErrorReply) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeAudioMsgEvent::ErrorEvent(payload)).await
+  }
 }
 
 /// Methods scoped to the `Geo` wire surface.
@@ -100,6 +103,9 @@ pub struct GeoSurface<'a>(&'a Gateway);
 impl<'a> GeoSurface<'a> {
   pub async fn position(&self, payload: Position) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeGeoMsgEvent::Position(payload)).await
+  }
+  pub async fn error_event(&self, payload: GeoErrorReply) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeGeoMsgEvent::ErrorEvent(payload)).await
   }
 }
 
@@ -118,6 +124,9 @@ impl<'a> LibrarySurface<'a> {
       .0
       .event(GatewayToBridgeLibraryMsgEvent::LibraryChanged(payload))
       .await
+  }
+  pub async fn error_event(&self, payload: LibraryErrorReply) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeLibraryMsgEvent::ErrorEvent(payload)).await
   }
 }
 
@@ -170,6 +179,12 @@ impl<'a> NotificationsSurface<'a> {
       .event(GatewayToBridgeNotificationsMsgEvent::Removed(payload))
       .await
   }
+  pub async fn error_event(&self, payload: NotificationsErrorReply) -> Result<(), SdkError> {
+    self
+      .0
+      .event(GatewayToBridgeNotificationsMsgEvent::ErrorEvent(payload))
+      .await
+  }
   /// Stream of `Notifications` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayNotificationsMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
@@ -206,6 +221,9 @@ impl<'a> PhoneSurface<'a> {
   pub async fn call_ended(&self, payload: PhoneCallEnded) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePhoneMsgEvent::CallEnded(payload)).await
   }
+  pub async fn error_event(&self, payload: PhoneErrorReply) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgePhoneMsgEvent::ErrorEvent(payload)).await
+  }
 }
 
 /// Methods scoped to the `Player` wire surface.
@@ -223,6 +241,9 @@ impl<'a> PlayerSurface<'a> {
       .0
       .event(GatewayToBridgePlayerMsgEvent::TargetsChanged(payload))
       .await
+  }
+  pub async fn error_event(&self, payload: PlayerErrorReply) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgePlayerMsgEvent::ErrorEvent(payload)).await
   }
   pub async fn request_spotify_wake(&self) -> Result<(), SdkError> {
     self

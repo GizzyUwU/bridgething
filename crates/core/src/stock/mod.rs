@@ -197,7 +197,9 @@ fn audio_event_to_stock(event: BridgeToClientAudioMsg, stock_msg_id: Option<usiz
         },
       ))
     }
-    BridgeToClientAudioMsg::TtsStarted(_) | BridgeToClientAudioMsg::TtsEnded(_) => StockSendMsg::Unsupported,
+    BridgeToClientAudioMsg::TtsStarted(_)
+    | BridgeToClientAudioMsg::TtsEnded(_)
+    | BridgeToClientAudioMsg::ErrorEvent(_) => StockSendMsg::Unsupported,
   }
 }
 
@@ -223,6 +225,7 @@ fn phone_event_to_stock(
     },
     BridgeToClientPhoneMsg::CommunicationsChanged(_)
     | BridgeToClientPhoneMsg::StateReply(_)
+    | BridgeToClientPhoneMsg::ErrorEvent(_)
     | BridgeToClientPhoneMsg::ErrorReply(_) => return StockSendMsg::Unsupported,
   };
 

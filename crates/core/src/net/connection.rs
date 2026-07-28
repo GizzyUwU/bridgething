@@ -78,12 +78,18 @@ impl Connection {
   }
 
   pub async fn listen(&mut self) {
+    let (code, reason) = self.run().await;
+    tracing::info!("({}) connection torn down: {:?} {}", &self.address, code, &reason);
+    self.forward((code, reason)).await;
+  }
+
+  async fn run(&mut self) -> (ws::CloseCode, String) {
     loop {
       tokio::select! {
         ws_msg = self.reader.next() => {
           let Some(ws_msg) = ws_msg else {
             tracing::warn!("({}) connection closed unexpectedly!", &self.address);
-            break;
+            return (ws::close_code::ABNORMAL, "stream ended".to_string());
           };
 
           let ws_msg = match ws_msg {
@@ -91,7 +97,7 @@ impl Connection {
             Err(err) => {
               tracing::warn!("({}) error decoding websocket message: {:?}!", &self.address, &err);
               self.forward(err).await;
-              break;
+              return (ws::close_code::ABNORMAL, "decode error".to_string());
             }
           };
 
@@ -101,8 +107,11 @@ impl Connection {
             ws::Message::Ping(payload) => self.handle_ping(payload).await,
             ws::Message::Pong(payload) => self.handle_pong(payload).await,
             ws::Message::Close(frame) => {
-              self.handle_closed(frame).await;
-              break;
+              tracing::info!("connection from {} closed with frame {:?}", &self.address, &frame);
+              return match frame {
+                Some(frame) => (frame.code, frame.reason.as_str().to_string()),
+                None => (ws::close_code::ABNORMAL, "no close frame".to_string()),
+              };
             }
           };
         }
@@ -115,7 +124,7 @@ impl Connection {
         _ = self.cancel_token.cancelled() => {
           tracing::debug!("({}) connection was cancelled, shutting down", &self.address);
           self.close().await;
-          break;
+          return (ws::close_code::NORMAL, "cancelled".to_string());
         }
       }
     }
@@ -274,17 +283,6 @@ impl Connection {
     {
       tracing::error!("({}) error sending message to websocket!!: {:?}", &self.address, err);
     };
-  }
-
-  async fn handle_closed(&self, frame: Option<ws::CloseFrame>) {
-    tracing::info!("connection from {} closed with frame {:?}", &self.address, frame);
-    if let Some(frame) = frame {
-      self.forward((frame.code, frame.reason.as_str().to_string())).await;
-    } else {
-      self
-        .forward((ws::close_code::ABNORMAL, "no close frame".to_string()))
-        .await;
-    }
   }
 
   async fn handle_ping(&mut self, payload: Bytes) {

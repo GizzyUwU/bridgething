@@ -25,19 +25,29 @@ export function registerDomain(domain: SessionDomain): void {
   domains.push(domain);
 }
 
+function fanOut(what: string, run: (domain: SessionDomain) => void): void {
+  for (const domain of domains) {
+    try {
+      run(domain);
+    } catch (err) {
+      console.warn(`[bridgething] ${domain.name} failed to ${what}`, err);
+    }
+  }
+}
+
 export function startBridge(): void {
   if (wired) return;
   wired = true;
   getSession().subscribe(event => {
     if (event.type === 'resumed') {
-      for (const domain of domains) domain.reconcile(event.snapshot);
+      fanOut('reconcile', domain => domain.reconcile(event.snapshot));
       return;
     }
-    for (const domain of domains) domain.apply(event);
+    fanOut(`apply ${event.type}`, domain => domain.apply(event));
   });
 }
 
 export async function reconcileAll(): Promise<void> {
   const snapshot = await getSession().snapshot();
-  for (const domain of domains) domain.reconcile(snapshot);
+  fanOut('reconcile', domain => domain.reconcile(snapshot));
 }

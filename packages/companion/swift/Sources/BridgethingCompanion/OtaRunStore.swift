@@ -94,6 +94,17 @@ final class OtaRunStore: @unchecked Sendable {
         return cleared
     }
 
+    func interrupt(deviceId: String) -> OtaRun? {
+        lock.lock(); defer { lock.unlock() }
+        guard var run = runsByDevice[deviceId], run.outcome == nil else { return nil }
+        guard run.phase != .reboot, run.phase != .confirming else { return nil }
+        run.phase = .failed
+        run.outcome = .failed
+        run.error = "the device disconnected mid-update"
+        runsByDevice[deviceId] = run
+        return run
+    }
+
     func noteMeta(deviceId: String, daemonVersion: String, imageVersion: String) -> OtaRun? {
         lock.lock(); defer { lock.unlock() }
         guard let run = runsByDevice[deviceId] else { return nil }
@@ -169,7 +180,9 @@ final class OtaRunStore: @unchecked Sendable {
             guard var run = runsByDevice[deviceId] else { return [] }
             let before = run.phase
             run.kind = kind
-            run.stepId = stepId
+            if run.steps.isEmpty || run.steps.contains(where: { $0.id == stepId }) {
+                run.stepId = stepId
+            }
             apply(snapshot: snapshot, to: &run)
             if run.phase != before { run.phaseStartedAt = now }
             runsByDevice[deviceId] = run

@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "alsa",
  "anyhow",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-client"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bridgething-sdk-runtime",
  "futures",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-codegen"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "quote",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-gateway"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bridgething-sdk-runtime",
  "futures",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-host-gateway"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-iap2"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "bitflags 2.11.1",
@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-macros"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-mfi"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "hex-literal",
  "i2cdev",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-mfi-proxy"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bridgething-mfi",
  "tracing",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "bridgething-sdk-runtime"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "futures",
  "libbridgething",
@@ -693,14 +693,14 @@ dependencies = [
 
 [[package]]
 name = "bridgething-swupdate-sys"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "bridgething-test-harness"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2393,7 +2393,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libbridgething"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bridgething-macros",
  "bytes",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "spotify"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64",
  "flate2",

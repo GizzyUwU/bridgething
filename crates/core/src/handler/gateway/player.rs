@@ -9,8 +9,10 @@ use std::{
 use bridgething_iap2::HidCommand;
 use libbridgething::{
   PlayerState,
+  client::{BridgeToClientPlayerMsgEvent, PlayerErrorReply as ClientPlayerErrorReply},
   gateway::{
-    GatewayToBridgePlayerMsgCommandDispatch, GatewayToBridgePlayerMsgEventDispatch, PlaybackTargets, QueueSnapshot,
+    GatewayToBridgePlayerMsgCommandDispatch, GatewayToBridgePlayerMsgEventDispatch, PlaybackTargets, PlayerErrorReply,
+    QueueSnapshot,
   },
 };
 
@@ -73,6 +75,19 @@ impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
       .state
       .playback_targets
       .apply_companion(params.targets)
+      .await?;
+    Ok(())
+  }
+
+  async fn error_event(&self, params: PlayerErrorReply) -> HandlerResult {
+    tracing::warn!(error = ?params.error, "companion refused a player verb");
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientPlayerMsgEvent::ErrorEvent(ClientPlayerErrorReply {
+        error: params.error,
+      }))
       .await?;
     Ok(())
   }

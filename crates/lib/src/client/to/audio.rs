@@ -3,6 +3,16 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::AudioError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+/// Emitted when an audio verb could not be carried out
+pub struct AudioErrorReply {
+  pub error: AudioError,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
@@ -50,4 +60,6 @@ pub enum BridgeToClientAudioMsg {
   TtsEnded(TtsEnded),
   #[bridge_event]
   VolumeChanged(VolumeChanged),
+  #[bridge_event]
+  ErrorEvent(AudioErrorReply),
 }

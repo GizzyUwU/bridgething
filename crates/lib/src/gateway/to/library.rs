@@ -18,7 +18,7 @@ use crate::{ItemKind, ItemRef};
   response = crate::gateway::BrowseReply,
   response_variant = BrowseReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryBrowseRequest {
   pub node_id: Option<String>,
@@ -42,7 +42,7 @@ pub struct LibraryBrowseRequest {
   response = crate::gateway::ContextResolveReply,
   response_variant = ContextResolveReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryResolveContextRequest {
   pub uri: String,
@@ -60,7 +60,7 @@ pub struct LibraryResolveContextRequest {
   response = crate::gateway::SearchReply,
   response_variant = SearchReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibrarySearchRequest {
   pub query: String,
@@ -81,7 +81,7 @@ pub struct LibrarySearchRequest {
   response = crate::gateway::RecommendationsReply,
   response_variant = RecommendationsReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryRecommendationsRequest {
   pub seeds: Vec<ItemRef>,
@@ -102,7 +102,7 @@ pub struct LibraryRecommendationsRequest {
   response = crate::gateway::FavoritesListReply,
   response_variant = FavoritesListReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryFavoritesListRequest {
   pub limit: u32,
@@ -121,7 +121,7 @@ pub struct LibraryFavoritesListRequest {
   response = crate::gateway::FavoritesContainsReply,
   response_variant = FavoritesContainsReply,
   error = crate::gateway::LibraryErrorReply,
-  error_variant = LibraryErrorReply,
+  error_variant = ErrorReply,
 )]
 pub struct LibraryFavoritesContainsRequest {
   pub uris: Vec<String>,

@@ -28,6 +28,7 @@ import type {
   AssetNotFound,
   AssetPreload,
   AssetReady,
+  AudioErrorReply,
   BluetoothInterface,
   BluetoothPairingResult,
   BluetoothPin,
@@ -104,6 +105,7 @@ import type {
   NetWsSend,
   NotificationInvoke,
   NotificationRemoved,
+  NotificationsErrorReply,
   PairedDevicesMap,
   PeerSnapshotMap,
   PhoneAcceptAction,
@@ -171,6 +173,7 @@ export type AudioInboundHandlers = {
   ttsStarted: (msg: TtsStarted) => void;
   ttsEnded: (msg: TtsEnded) => void;
   volumeChanged: (msg: VolumeChanged) => void;
+  errorEvent: (msg: AudioErrorReply) => void;
 };
 
 export type BluetoothInboundHandlers = {
@@ -203,6 +206,7 @@ export type DocInboundHandlers = {
 
 export type GeoInboundHandlers = {
   position: (msg: Position) => void;
+  errorEvent: (msg: GeoErrorReply) => void;
   watchReply: (msg: GeoWatchReply) => void;
   getOnceReply: (msg: GeoGetOnceReply) => void;
   errorReply: (msg: GeoErrorReply) => void;
@@ -221,8 +225,9 @@ export type LibraryInboundHandlers = {
   resolveContextReply: (msg: LibraryResolveContextReply) => void;
   favoritesListReply: (msg: LibraryFavoritesListReply) => void;
   favoritesContainsReply: (msg: LibraryFavoritesContainsReply) => void;
-  libraryErrorReply: (msg: LibraryErrorReply) => void;
+  errorReply: (msg: LibraryErrorReply) => void;
   favoriteChanged: (msg: FavoriteChanged) => void;
+  errorEvent: (msg: LibraryErrorReply) => void;
 };
 
 export type NetInboundHandlers = {
@@ -243,6 +248,7 @@ export type NotificationsInboundHandlers = {
   posted: (msg: Notification) => void;
   updated: (msg: Notification) => void;
   removed: (msg: NotificationRemoved) => void;
+  errorEvent: (msg: NotificationsErrorReply) => void;
 };
 
 export type PhoneInboundHandlers = {
@@ -250,6 +256,7 @@ export type PhoneInboundHandlers = {
   callUpdated: (msg: PhoneCall) => void;
   callEnded: (msg: PhoneCallEnded) => void;
   communicationsChanged: (msg: PhoneCommunicationsReply) => void;
+  errorEvent: (msg: PhoneErrorReply) => void;
   stateReply: (msg: PhoneStateReply) => void;
   errorReply: (msg: PhoneErrorReply) => void;
 };
@@ -261,6 +268,7 @@ export type PlayerInboundHandlers = {
   targetsChanged: (msg: PlayerTargetsReply) => void;
   stateReply: (msg: PlayerStateReply) => void;
   queueReply: (msg: PlayerQueueReply) => void;
+  errorEvent: (msg: PlayerErrorReply) => void;
   targetsReply: (msg: PlayerTargetsReply) => void;
   errorReply: (msg: PlayerErrorReply) => void;
 };
@@ -462,6 +470,18 @@ export class AudioSurface {
     });
   }
 
+  /** Subscribe to `Audio::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: AudioErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Audio` variants. */
   subscribe(handlers: AudioInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -489,6 +509,10 @@ export class AudioSurface {
         }
         case 'volumeChanged': {
           handlers.volumeChanged?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         default: {
@@ -1132,6 +1156,18 @@ export class GeoSurface {
     });
   }
 
+  /** Subscribe to `Geo::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: GeoErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Geo::WatchReply` from the daemon. */
   onWatchReply(handler: (msg: GeoWatchReply) => void): () => void {
     return this._client.on(event => {
@@ -1187,6 +1223,10 @@ export class GeoSurface {
       switch (inner.event) {
         case 'position': {
           handlers.position?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         case 'watchReply': {
@@ -1439,14 +1479,14 @@ export class LibrarySurface {
     });
   }
 
-  /** Subscribe to `Library::LibraryErrorReply` from the daemon. */
-  onLibraryErrorReply(handler: (msg: LibraryErrorReply) => void): () => void {
+  /** Subscribe to `Library::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: LibraryErrorReply) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'library') return;
       const inner = data.data;
-      if (inner.event !== 'libraryErrorReply') return;
+      if (inner.event !== 'errorReply') return;
       handler(inner.data);
     });
   }
@@ -1459,6 +1499,18 @@ export class LibrarySurface {
       if (data.type !== 'library') return;
       const inner = data.data;
       if (inner.event !== 'favoriteChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: LibraryErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
       handler(inner.data);
     });
   }
@@ -1504,12 +1556,16 @@ export class LibrarySurface {
           handlers.favoritesContainsReply?.(inner.data);
           return;
         }
-        case 'libraryErrorReply': {
-          handlers.libraryErrorReply?.(inner.data);
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
           return;
         }
         case 'favoriteChanged': {
           handlers.favoriteChanged?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         default: {
@@ -1561,7 +1617,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'browseReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1578,7 +1634,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'searchReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1595,7 +1651,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'recommendationsReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1612,7 +1668,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'resolveContextReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1629,7 +1685,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'favoritesListReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1646,7 +1702,7 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'favoritesContainsReply') return { ok: true, response: inner.data };
-      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -1971,6 +2027,18 @@ export class NotificationsSurface {
     });
   }
 
+  /** Subscribe to `Notifications::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: NotificationsErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Notifications` variants. */
   subscribe(handlers: NotificationsInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1998,6 +2066,10 @@ export class NotificationsSurface {
         }
         case 'removed': {
           handlers.removed?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         default: {
@@ -2096,6 +2168,18 @@ export class PhoneSurface {
     });
   }
 
+  /** Subscribe to `Phone::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: PhoneErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::StateReply` from the daemon. */
   onStateReply(handler: (msg: PhoneStateReply) => void): () => void {
     return this._client.on(event => {
@@ -2151,6 +2235,10 @@ export class PhoneSurface {
         }
         case 'communicationsChanged': {
           handlers.communicationsChanged?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         case 'stateReply': {
@@ -2378,6 +2466,18 @@ export class PlayerSurface {
     });
   }
 
+  /** Subscribe to `Player::ErrorEvent` from the daemon. */
+  onErrorEvent(handler: (msg: PlayerErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'errorEvent') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Player::TargetsReply` from the daemon. */
   onTargetsReply(handler: (msg: PlayerTargetsReply) => void): () => void {
     return this._client.on(event => {
@@ -2441,6 +2541,10 @@ export class PlayerSurface {
         }
         case 'queueReply': {
           handlers.queueReply?.(inner.data);
+          return;
+        }
+        case 'errorEvent': {
+          handlers.errorEvent?.(inner.data);
           return;
         }
         case 'targetsReply': {
@@ -3884,6 +3988,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.volumeChanged?.(inner.data);
             return;
           }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
+            return;
+          }
           default: {
             if (!partial) c.logger.warn('Audio: no handler for inner', inner);
             return;
@@ -4022,6 +4130,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.position?.(inner.data);
             return;
           }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
+            return;
+          }
           case 'watchReply': {
             innerHandlers.watchReply?.(inner.data);
             return;
@@ -4098,12 +4210,16 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.favoritesContainsReply?.(inner.data);
             return;
           }
-          case 'libraryErrorReply': {
-            innerHandlers.libraryErrorReply?.(inner.data);
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
             return;
           }
           case 'favoriteChanged': {
             innerHandlers.favoriteChanged?.(inner.data);
+            return;
+          }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
             return;
           }
           default: {
@@ -4190,6 +4306,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.removed?.(inner.data);
             return;
           }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
+            return;
+          }
           default: {
             if (!partial) c.logger.warn('Notifications: no handler for inner', inner);
             return;
@@ -4227,6 +4347,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'communicationsChanged': {
             innerHandlers.communicationsChanged?.(inner.data);
+            return;
+          }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
             return;
           }
           case 'stateReply': {
@@ -4273,6 +4397,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'queueReply': {
             innerHandlers.queueReply?.(inner.data);
+            return;
+          }
+          case 'errorEvent': {
+            innerHandlers.errorEvent?.(inner.data);
             return;
           }
           case 'targetsReply': {

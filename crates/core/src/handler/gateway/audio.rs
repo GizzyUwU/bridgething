@@ -1,9 +1,9 @@
 use libbridgething::{
   client::{
-    BridgeToClientAudioMsgEvent, TtsEnded as ClientTtsEnded, TtsStarted as ClientTtsStarted,
-    VolumeChanged as ClientVolumeChanged,
+    AudioErrorReply as ClientAudioErrorReply, BridgeToClientAudioMsgEvent, TtsEnded as ClientTtsEnded,
+    TtsStarted as ClientTtsStarted, VolumeChanged as ClientVolumeChanged,
   },
-  gateway::{GatewayToBridgeAudioMsgEventDispatch, TtsEnded, TtsStarted, VolumeChanged},
+  gateway::{AudioErrorReply, GatewayToBridgeAudioMsgEventDispatch, TtsEnded, TtsStarted, VolumeChanged},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -46,6 +46,13 @@ impl GatewayToBridgeAudioMsgEventDispatch for AudioHandler {
         muted: params.muted,
       })
       .await?;
+    Ok(())
+  }
+
+  async fn error_event(&self, params: AudioErrorReply) -> HandlerResult {
+    tracing::warn!(error = ?params.error, "companion refused an audio verb");
+    let event = BridgeToClientAudioMsgEvent::ErrorEvent(ClientAudioErrorReply { error: params.error });
+    self.handle.state.bus.broadcast_event(event).await?;
     Ok(())
   }
 }

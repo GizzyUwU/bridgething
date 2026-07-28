@@ -3,7 +3,7 @@ import type { RangePart } from '@bridgething/lib';
 import type { AckRegistry } from './ack-window.js';
 import { streamRangeFragments } from './fragments.js';
 import type { GatewayDevice } from './gateway-device.js';
-import type { ArtifactSource } from './source.js';
+import { readExact, type ArtifactSource } from './source.js';
 
 const RANGE_INLINE_MAX_BYTES = 16 * 1024;
 const RANGE_CHUNK_BYTES = 64 * 1024;
@@ -32,7 +32,7 @@ export function serveOtaAssetRanges(
 
     if (streamLen <= RANGE_INLINE_MAX_BYTES) {
       const pieces: Uint8Array[] = [];
-      for (const part of parts) pieces.push(await source.read(part.start, part.length));
+      for (const part of parts) pieces.push(await readExact(source, part.start, part.length));
       await handle.respond({ totalSize: source.size, parts, body: { type: 'inline', data: concat(pieces) } });
       return;
     }

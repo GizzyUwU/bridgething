@@ -10,7 +10,7 @@ pub mod wire;
 pub mod protocol;
 
 pub use shared::{
-  AcceptCallAction, Album, AncsAuthState, ArtProfile, Artist, AssetRetention, AudioCapabilities, BoolField,
+  AcceptCallAction, Album, AncsAuthState, ArtProfile, Artist, AssetRetention, AudioCapabilities, AudioError, BoolField,
   BridgeThingMeta, BrightnessMode, BrightnessState, BrowseEntry, BrowseFolder, BrowseResult, CARTHING_HACKS_LOGO,
   CallEndReason, Capabilities, CommunicationsState, CompanionAuthorityScope, ConfigEntry, ConfigField,
   CurrentlyActiveApplication, Device, DeviceType, Diagnostics, DismissReason, DocEntry, DtmfTone, EndCallAction,
@@ -20,16 +20,16 @@ pub use shared::{
   MediaItemUpdate, MediaType, MusicProvider, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
   NluAlternate, NluBrightnessMode, NluConfidence, NluDirection, NluPhoneAction, NluPlaybackSpeed, NluRepeatMode,
   NluResolvedIntent, NluSlots, NluSystemAction, NluView, Notification, NotificationAction, NotificationApp,
-  NotificationCategory, NotificationFlags, NowPlayingUpdate, NumberField, OtaError, OtaErrorCode, OtaFinished, OtaKind,
-  OtaPhase, OtaProgress, OverlayProfile, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall, PhoneCallDirection,
-  PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback, PlaybackContext, PlaybackOptions,
-  PlaybackQueue, PlaybackRestrictions, PlaybackState, PlaybackTarget, PlaybackTargetKind, PlaybackUpdate, PlayerError,
-  PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RECENTS_NODE_ID,
-  RangePart, RangeSpec, RecommendationsResult, RedirectPolicy, RegistrationStatus, RepeatMode, SearchResult, Show,
-  ShuffleMode, Station, StreamBegin, StreamChunk, StreamEnd, StreamError, StringField, SurfaceAvailability,
-  THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, TunnelClosed, TunnelData, TunnelError, VoiceDescriptor,
-  VoiceDispatchErrorCode, VoiceDispatchTarget, WEBAPP_PROVENANCE_MAX_LEN, WebappError, WebappInfo, WebappManifest,
-  WebappRole, WebappSource, WsError, WsFrame, to_slug,
+  NotificationCategory, NotificationFlags, NotificationsError, NowPlayingUpdate, NumberField, OtaError, OtaErrorCode,
+  OtaFinished, OtaKind, OtaPhase, OtaProgress, OverlayProfile, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
+  PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback,
+  PlaybackContext, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackState, PlaybackTarget,
+  PlaybackTargetKind, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position,
+  Priority, QueueItem, QueuePosition, RECENTS_NODE_ID, RangePart, RangeSpec, RecommendationsResult, RedirectPolicy,
+  RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station, StreamBegin, StreamChunk, StreamEnd,
+  StreamError, StringField, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, TunnelClosed,
+  TunnelData, TunnelError, VoiceDescriptor, VoiceDispatchErrorCode, VoiceDispatchTarget, WEBAPP_PROVENANCE_MAX_LEN,
+  WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource, WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

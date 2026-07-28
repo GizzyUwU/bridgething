@@ -714,6 +714,7 @@ public actor BridgethingCompanion {
             case let .play(p):
                 guard let glue = glue(forUri: p.uri) else {
                     log(.warn, "play dropped: no provider claims \(p.uri)")
+                    await reportPlayerError(.schemeUnclaimed(PlayerErrorSchemeUnclaimedInner(scheme: Self.scheme(of: p.uri))))
                     return
                 }
                 lastPlayedFromGlueId = type(of: glue).name
@@ -721,14 +722,21 @@ public actor BridgethingCompanion {
             case let .queue(q):
                 guard let glue = glue(forUri: q.uri) else {
                     log(.warn, "queue dropped: no provider claims \(q.uri)")
+                    await reportPlayerError(.schemeUnclaimed(PlayerErrorSchemeUnclaimedInner(scheme: Self.scheme(of: q.uri))))
                     return
                 }
                 try await glue.queue(q)
             case let .transferTo(t):
-                guard let glue = audibleGlue() ?? libraryGlue() else { return }
+                guard let glue = audibleGlue() ?? libraryGlue() else {
+                    await reportPlayerError(.unknownTarget(PlayerErrorUnknownTargetInner(target_id: t.targetId)))
+                    return
+                }
                 try await glue.transferTo(targetId: t.targetId)
             default:
-                guard let transport = nowPlayingHub.currentTransport() ?? libraryGlue() else { return }
+                guard let transport = nowPlayingHub.currentTransport() ?? libraryGlue() else {
+                    await reportPlayerError(.playFailed(PlayerErrorPlayFailedInner(reason: "no active transport")))
+                    return
+                }
                 try await dispatchTransport(player, to: transport)
             }
         } catch {
@@ -737,7 +745,30 @@ public actor BridgethingCompanion {
                 "player verb \(String(describing: player)) failed: \(error.localizedDescription)",
                 observer: observer
             )
+            await reportPlayerError(.playFailed(PlayerErrorPlayFailedInner(reason: error.localizedDescription)))
         }
+    }
+
+    private func reportPlayerError(_ error: PlayerError) async {
+        try? await gateway.player.errorEvent(PlayerErrorReply(error: error))
+    }
+
+    private func reportLibraryError(_ error: LibraryError) async {
+        try? await gateway.library.errorEvent(LibraryErrorReply(error: error))
+    }
+
+    private func reportLibraryWriteFailure(_ error: Error) async {
+        switch Self.mapLibraryFailure(error) {
+        case .wire:
+            await reportLibraryError(.notSupported(LibraryErrorNotSupportedInner(reason: "unimplemented")))
+        case let .domain(reply):
+            await reportLibraryError(reply.error)
+        }
+    }
+
+    private static func scheme(of uri: String) -> String {
+        guard let idx = uri.firstIndex(of: ":") else { return uri }
+        return String(uri[uri.startIndex ..< idx])
     }
 
     private nonisolated func dispatchTransport(
@@ -971,18 +1002,26 @@ public actor BridgethingCompanion {
 
     private func runLibraryFavoritesToggle() async {
         for await (_, msg) in gateway.library.favoritesToggle {
-            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else { continue }
+            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else {
+                await reportLibraryError(.noGateway)
+                continue
+            }
             do { try await glue.favoritesToggle(msg.item) } catch {
                 log(.warn, "favoritesToggle failed: \(error.localizedDescription)")
+                await reportLibraryWriteFailure(error)
             }
         }
     }
 
     private func runLibraryFavoritesSet() async {
         for await (_, msg) in gateway.library.favoritesSet {
-            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else { continue }
+            guard let glue = glue(forUri: msg.item.uri) ?? libraryGlue() else {
+                await reportLibraryError(.noGateway)
+                continue
+            }
             do { try await glue.favoritesSet(msg.item, liked: msg.liked) } catch {
                 log(.warn, "favoritesSet failed: \(error.localizedDescription)")
+                await reportLibraryWriteFailure(error)
             }
         }
     }
@@ -998,6 +1037,7 @@ public actor BridgethingCompanion {
                 guard let glue = glues[id] else { continue }
                 do { try await glue.favoritesSetMany(entries) } catch {
                     log(.warn, "favoritesSetMany failed for \(id): \(error.localizedDescription)")
+                    await reportLibraryWriteFailure(error)
                 }
             }
         }
@@ -1007,24 +1047,35 @@ public actor BridgethingCompanion {
         LibraryErrorNotSupportedInner(reason: "no active music provider")
     )
 
+    private enum LibraryFailure {
+        case wire(WireError)
+        case domain(LibraryErrorReply)
+    }
+
+    private static func mapLibraryFailure(_ error: Error) -> LibraryFailure {
+        guard let glueError = error as? GlueError else {
+            return .domain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: error)))))
+        }
+        switch glueError {
+        case .notImplemented:
+            return .wire(.unimplemented)
+        case .notAuthenticated:
+            return .domain(LibraryErrorReply(error: .unauthorized))
+        case .detached:
+            return .domain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: "music provider detached"))))
+        case let .underlying(inner):
+            return .domain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: inner)))))
+        }
+    }
+
     private static func failLibrary(
         _ error: Error,
         onProtocol: (WireError) async -> Void,
         onDomain: (LibraryErrorReply) async -> Void
     ) async {
-        guard let glueError = error as? GlueError else {
-            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: error)))))
-            return
-        }
-        switch glueError {
-        case .notImplemented:
-            await onProtocol(.unimplemented)
-        case .notAuthenticated:
-            await onDomain(LibraryErrorReply(error: .unauthorized))
-        case .detached:
-            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: "music provider detached"))))
-        case let .underlying(inner):
-            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: inner)))))
+        switch mapLibraryFailure(error) {
+        case let .wire(wire): await onProtocol(wire)
+        case let .domain(reply): await onDomain(reply)
         }
     }
 

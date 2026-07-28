@@ -31,6 +31,8 @@ pub struct GeoErrorReply {
 pub enum GatewayToBridgeGeoMsg {
   #[bridge_event]
   Position(Position),
+  #[bridge_event]
+  ErrorEvent(GeoErrorReply),
   #[bridge_response]
   GetOnceReply(GeoGetOnceReply),
   #[bridge_response]

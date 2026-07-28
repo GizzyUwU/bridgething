@@ -1,12 +1,13 @@
 {
   "name": "@bridgething/mobile",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "main": "index.js",
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "start": "react-native start",
+    "test": "jest",
     "typecheck": "tsc --noEmit",
     "ui": "bunx @react-native-reusables/cli@latest"
   },
@@ -59,10 +60,15 @@
     "@react-native/babel-preset": "0.85.2",
     "@react-native/codegen": "0.85.2",
     "@react-native/gradle-plugin": "0.85.2",
+    "@react-native/jest-preset": "0.85.2",
     "@react-native/metro-config": "0.85.2",
     "@react-native/typescript-config": "0.85.2",
+    "@types/jest": "^30.0.0",
     "@types/react": "^19.2.14",
+    "babel-jest": "^30.4.1",
     "hermes-compiler": "250829098.0.10",
+    "jest": "^30.4.2",
+    "jest-environment-node": "^30.4.1",
     "tailwindcss": "^3.4.14"
   },
   "engines": {

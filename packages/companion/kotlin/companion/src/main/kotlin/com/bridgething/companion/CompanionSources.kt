@@ -7,6 +7,7 @@ import com.bridgething.schema.DtmfTone
 import com.bridgething.schema.EndCallAction
 import com.bridgething.schema.Notification as WireNotification
 import com.bridgething.schema.NotificationRemoved
+import com.bridgething.schema.NotificationsError
 import com.bridgething.schema.PhoneCall
 import com.bridgething.schema.PhoneCallEnded
 import com.bridgething.schema.PhoneInitiateAction
@@ -50,14 +51,15 @@ public sealed interface NotificationOutEvent {
 
 public interface NotificationBackend {
     public val events: Flow<NotificationOutEvent>
-    public suspend fun invokePositive(id: String)
-    public suspend fun invokeNegative(id: String)
+
+    public suspend fun invokePositive(id: String): NotificationsError?
+    public suspend fun invokeNegative(id: String): NotificationsError?
 }
 
 public object NoOpNotificationBackend : NotificationBackend {
     override val events: Flow<NotificationOutEvent> = emptyFlow()
-    override suspend fun invokePositive(id: String) {}
-    override suspend fun invokeNegative(id: String) {}
+    override suspend fun invokePositive(id: String): NotificationsError? = null
+    override suspend fun invokeNegative(id: String): NotificationsError? = null
 }
 
 public sealed interface PhoneOutEvent {

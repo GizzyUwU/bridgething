@@ -2,7 +2,15 @@ use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{DismissReason, Notification};
+use crate::{DismissReason, Notification, NotificationsError};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+/// Emitted when `invokePositive`/`invokeNegative` could not be carried out
+pub struct NotificationsErrorReply {
+  pub error: NotificationsError,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -28,4 +36,6 @@ pub enum BridgeToClientNotificationsMsg {
   Updated(Notification),
   #[bridge_event]
   Removed(NotificationRemoved),
+  #[bridge_event]
+  ErrorEvent(NotificationsErrorReply),
 }

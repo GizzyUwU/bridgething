@@ -13,10 +13,13 @@ use bridgething_test_harness::{
   Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport,
 };
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, MediaItem, PhoneCall, PhoneCallDirection,
-  PhoneCallStatus, PlayerState, Position,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, GeoError, MediaItem, PhoneCall,
+  PhoneCallDirection, PhoneCallStatus, PlayerState, Position,
   client::{GeoWatch, SetShuffle},
-  gateway::AuthorityClaim,
+  gateway::{
+    AuthorityClaim, BridgeToGatewayGeoMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData,
+    GeoErrorReply as GatewayGeoErrorReply,
+  },
 };
 
 const SNAPSHOT_BARRIER: Duration = Duration::from_secs(10);
@@ -533,6 +536,101 @@ lift!(cold_spotify_wake_withholds_play_when_another_app_claims, [t1]);
 lift!(duplicate_spotify_wakes_tap_play_exactly_once, [t1]);
 
 lift!(geo_position_reaches_watching_webapp, [t1]);
+
+async fn geo_watch_failure_reaches_watching_webapp<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: CommandDriver + GatewayDriver + FrameObserve,
+{
+  let mut frames = tier.frames().await?;
+  let gateway = tier.gateway().await?;
+  let mut announce = caps();
+  announce.available.geo = true;
+  gateway.capabilities().announce(announce).await.expect("announce");
+  let client = tier.command_client().await?;
+
+  client
+    .geo()
+    .watch(GeoWatch {
+      accuracy: GeoAccuracy::Fine,
+      min_interval_ms: 1000,
+    })
+    .await
+    .expect("geo watch");
+  gateway
+    .geo()
+    .error_event(GatewayGeoErrorReply {
+      error: GeoError::PermissionDenied,
+    })
+    .await
+    .expect("error event");
+
+  let observed = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let json = f.json();
+      json.contains("errorEvent") && json.contains("permissionDenied")
+    })
+    .await;
+  anyhow::ensure!(
+    observed.is_some(),
+    "companion geo watch failure never reached the watching webapp"
+  );
+  Ok(())
+}
+
+lift!(geo_watch_failure_reaches_watching_webapp, [t1]);
+
+async fn abrupt_webapp_disconnect_releases_geo_watch<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: CommandDriver + GatewayDriver,
+{
+  let gateway = tier.gateway().await?;
+  let mut events = gateway.events();
+  let mut announce = caps();
+  announce.available.geo = true;
+  gateway.capabilities().announce(announce).await.expect("announce");
+
+  let client = tier.command_client().await?;
+  client
+    .geo()
+    .watch(GeoWatch {
+      accuracy: GeoAccuracy::Fine,
+      min_interval_ms: 1000,
+    })
+    .await
+    .expect("geo watch");
+
+  wait_for_geo(&mut events, |msg| matches!(msg, BridgeToGatewayGeoMsg::Watch(_)))
+    .await
+    .ok_or_else(|| anyhow::anyhow!("the watch never reached the companion"))?;
+
+  drop(client);
+
+  wait_for_geo(&mut events, |msg| matches!(msg, BridgeToGatewayGeoMsg::Unwatch))
+    .await
+    .ok_or_else(|| anyhow::anyhow!("watch was never released after the webapp vanished"))?;
+  Ok(())
+}
+
+async fn wait_for_geo<F>(events: &mut tokio::sync::broadcast::Receiver<BridgeToGatewayMsg>, pred: F) -> Option<()>
+where
+  F: Fn(&BridgeToGatewayGeoMsg) -> bool,
+{
+  tokio::time::timeout(SNAPSHOT_BARRIER, async {
+    while let Ok(msg) = events.recv().await {
+      if let BridgeToGatewayMsgData::Geo(geo) = &msg.data
+        && pred(geo)
+      {
+        return Some(());
+      }
+    }
+    None
+  })
+  .await
+  .ok()
+  .flatten()
+}
+
+lift!(abrupt_webapp_disconnect_releases_geo_watch, [t1]);
 
 lift!(iap2_source_now_playing_reaches_frame_tap, [t1, t3_emulator]);
 lift!(single_source_artwork_reaches_frame_tap, [t1, t3_emulator]);

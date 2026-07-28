@@ -13,6 +13,9 @@ import kotlinx.serialization.KSerializer
 public object AssetRetentionSerializer :
   KSerializer<AssetRetention> by AdjacentTaggedSerializer(AssetRetention::class, discriminator = "type")
 
+public object AudioErrorSerializer :
+  KSerializer<AudioError> by AdjacentTaggedSerializer(AudioError::class, discriminator = "type")
+
 public object BridgeToGatewayAssetMsgSerializer :
   KSerializer<BridgeToGatewayAssetMsg> by AdjacentTaggedSerializer(BridgeToGatewayAssetMsg::class, discriminator = "event")
 
@@ -141,6 +144,9 @@ public object MsgMetaSerializer :
 
 public object NetErrorSerializer :
   KSerializer<NetError> by AdjacentTaggedSerializer(NetError::class, discriminator = "type")
+
+public object NotificationsErrorSerializer :
+  KSerializer<NotificationsError> by AdjacentTaggedSerializer(NotificationsError::class, discriminator = "type")
 
 public object PeerCompanionStatusSerializer :
   KSerializer<PeerCompanionStatus> by AdjacentTaggedSerializer(PeerCompanionStatus::class, discriminator = "type")

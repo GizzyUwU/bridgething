@@ -1,6 +1,9 @@
 use libbridgething::{
   PhoneCall,
-  gateway::{CommunicationsSnapshot, GatewayToBridgePhoneMsgEventDispatch, PhoneCallEnded, PhoneStateReply},
+  client::{BridgeToClientPhoneMsgEvent, PhoneErrorReply as ClientPhoneErrorReply},
+  gateway::{
+    CommunicationsSnapshot, GatewayToBridgePhoneMsgEventDispatch, PhoneCallEnded, PhoneErrorReply, PhoneStateReply,
+  },
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -62,6 +65,19 @@ impl GatewayToBridgePhoneMsgEventDispatch for PhoneHandler {
     {
       tracing::warn!(?err, "failed to apply companion phone event");
     }
+    Ok(())
+  }
+
+  async fn error_event(&self, params: PhoneErrorReply) -> HandlerResult {
+    tracing::warn!(error = ?params.error, "companion refused a phone action");
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientPhoneMsgEvent::ErrorEvent(ClientPhoneErrorReply {
+        error: params.error,
+      }))
+      .await?;
     Ok(())
   }
 }

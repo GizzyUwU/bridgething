@@ -231,6 +231,20 @@ public struct AudioSurface: Sendable {
     }
   }
 
+  /// Send `Audio::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: AudioErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .audio(.errorEvent(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `Geo` wire surface.
@@ -296,6 +310,20 @@ public struct GeoSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .geo(.position(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Geo::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: GeoErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .geo(.errorEvent(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -489,6 +517,20 @@ public struct LibrarySurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.libraryChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Library::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: LibraryErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.errorEvent(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -803,6 +845,20 @@ public struct NotificationsSurface: Sendable {
     }
   }
 
+  /// Send `Notifications::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: NotificationsErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .notifications(.errorEvent(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `Phone` wire surface.
@@ -1101,6 +1157,20 @@ public struct PhoneSurface: Sendable {
     }
   }
 
+  /// Send `Phone::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: PhoneErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .phone(.errorEvent(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `Player` wire surface.
@@ -1363,6 +1433,20 @@ public struct PlayerSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.targetsChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Player::ErrorEvent` to every connected peer (broadcast).
+  public func errorEvent(_ payload: PlayerErrorReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.errorEvent(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -3000,6 +3084,12 @@ public struct AudioSurfaceForDevice: Sendable {
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
+  /// Send `Audio::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: AudioErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .audio(.errorEvent(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
 }
 
 /// Per-peer methods for the `Geo` wire surface (deviceId is baked in).
@@ -3065,6 +3155,12 @@ public struct GeoSurfaceForDevice: Sendable {
   /// Send `Geo::Position` to this peer.
   public func position(_ payload: Position, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .geo(.position(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Geo::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: GeoErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .geo(.errorEvent(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -3252,6 +3348,12 @@ public struct LibrarySurfaceForDevice: Sendable {
   /// Send `Library::LibraryChanged` to this peer.
   public func libraryChanged(_ payload: LibraryChanged, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.libraryChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Library::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: LibraryErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.errorEvent(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -3490,6 +3592,12 @@ public struct NotificationsSurfaceForDevice: Sendable {
   /// Send `Notifications::Removed` to this peer.
   public func removed(_ payload: NotificationRemoved, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .notifications(.removed(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Notifications::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: NotificationsErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .notifications(.errorEvent(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -3765,6 +3873,12 @@ public struct PhoneSurfaceForDevice: Sendable {
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
+  /// Send `Phone::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: PhoneErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .phone(.errorEvent(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
 }
 
 /// Per-peer methods for the `Player` wire surface (deviceId is baked in).
@@ -4021,6 +4135,12 @@ public struct PlayerSurfaceForDevice: Sendable {
   /// Send `Player::TargetsChanged` to this peer.
   public func targetsChanged(_ payload: PlaybackTargets, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.targetsChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Player::ErrorEvent` to this peer.
+  public func errorEvent(_ payload: PlayerErrorReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.errorEvent(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -5508,7 +5628,7 @@ public final class LibraryBrowseRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }
@@ -5547,7 +5667,7 @@ public final class LibraryResolveContextRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }
@@ -5586,7 +5706,7 @@ public final class LibrarySearchRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }
@@ -5625,7 +5745,7 @@ public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }
@@ -5664,7 +5784,7 @@ public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }
@@ -5703,7 +5823,7 @@ public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
-      data: .library(.libraryErrorReply(error))
+      data: .library(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }

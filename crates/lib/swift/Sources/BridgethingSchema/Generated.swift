@@ -155,6 +155,108 @@ public struct AudioCapabilities: Codable, Sendable {
 	}
 }
 
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `AudioError` Rust enum
+public struct AudioErrorActionRejectedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `TtsFailed` of the `AudioError` Rust enum
+public struct AudioErrorTtsFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `Unavailable` of the `AudioError` Rust enum
+public struct AudioErrorUnavailableInner: Codable, Sendable {
+	public let verb: String
+
+	public init(verb: String) {
+		self.verb = verb
+	}
+}
+public enum AudioError: Codable, Sendable {
+	/// The companion accepted the verb but the platform refused it (no output
+	/// route, audio session denied, another app holds the channel).
+	case actionRejected(AudioErrorActionRejectedInner)
+	/// Speech synthesis could not start, or the platform cut it short.
+	case ttsFailed(AudioErrorTtsFailedInner)
+	/// The verb needs a capability the connected companion does not advertise.
+	case unavailable(AudioErrorUnavailableInner)
+	/// No companion is connected, so there is nowhere to send the verb.
+	case noTarget
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case actionRejected,
+			ttsFailed,
+			unavailable,
+			noTarget
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .actionRejected:
+				if let content = try? container.decode(AudioErrorActionRejectedInner.self, forKey: .data) {
+					self = .actionRejected(content)
+					return
+				}
+			case .ttsFailed:
+				if let content = try? container.decode(AudioErrorTtsFailedInner.self, forKey: .data) {
+					self = .ttsFailed(content)
+					return
+				}
+			case .unavailable:
+				if let content = try? container.decode(AudioErrorUnavailableInner.self, forKey: .data) {
+					self = .unavailable(content)
+					return
+				}
+			case .noTarget:
+				self = .noTarget
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(AudioError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for AudioError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .actionRejected(let content):
+			try container.encode(CodingKeys.actionRejected, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .ttsFailed(let content):
+			try container.encode(CodingKeys.ttsFailed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .unavailable(let content):
+			try container.encode(CodingKeys.unavailable, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noTarget:
+			try container.encode(CodingKeys.noTarget, forKey: .type)
+		}
+	}
+}
+
+public struct AudioErrorReply: Codable, Sendable {
+	public let error: AudioError
+
+	public init(error: AudioError) {
+		self.error = error
+	}
+}
+
 /// One axis the companion can declare authority over. Each scope has a
 /// fallback source the daemon merges with when no claim is active or
 /// the claim has gone stale. Unknown scopes arriving at an older daemon
@@ -2590,6 +2692,89 @@ public struct NotificationRemoved: Codable, Sendable {
 	}
 }
 
+
+/// Generated type representing the anonymous struct variant `NotFound` of the `NotificationsError` Rust enum
+public struct NotificationsErrorNotFoundInner: Codable, Sendable {
+	public let id: String
+
+	public init(id: String) {
+		self.id = id
+	}
+}
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `NotificationsError` Rust enum
+public struct NotificationsErrorActionRejectedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+/// Why a notification action slot could not be invoked. Both invoke verbs are
+/// fire-and-forget commands, so a refusal has no reply to ride on.
+public enum NotificationsError: Codable, Sendable {
+	/// The id is no longer in the companion's active notification set.
+	case notFound(NotificationsErrorNotFoundInner)
+	/// The slot is absent on this notification, or the platform refused it.
+	case actionRejected(NotificationsErrorActionRejectedInner)
+	/// No companion is connected, so there is nowhere to send the action.
+	case noTarget
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case notFound,
+			actionRejected,
+			noTarget
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .notFound:
+				if let content = try? container.decode(NotificationsErrorNotFoundInner.self, forKey: .data) {
+					self = .notFound(content)
+					return
+				}
+			case .actionRejected:
+				if let content = try? container.decode(NotificationsErrorActionRejectedInner.self, forKey: .data) {
+					self = .actionRejected(content)
+					return
+				}
+			case .noTarget:
+				self = .noTarget
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(NotificationsError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for NotificationsError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .notFound(let content):
+			try container.encode(CodingKeys.notFound, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .actionRejected(let content):
+			try container.encode(CodingKeys.actionRejected, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noTarget:
+			try container.encode(CodingKeys.noTarget, forKey: .type)
+		}
+	}
+}
+
+public struct NotificationsErrorReply: Codable, Sendable {
+	public let error: NotificationsError
+
+	public init(error: NotificationsError) {
+		self.error = error
+	}
+}
+
 /// Three-state shuffle. iAP2 and Apple Music distinguish track-level
 /// from album-level shuffle; companion gateways without that distinction
 /// project to `Songs` when on. Webapps that just need an on/off signal
@@ -3267,6 +3452,109 @@ public struct PhoneEndAction: Codable, Sendable {
 	}
 }
 
+
+/// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
+public struct PhoneErrorCallNotFoundInner: Codable, Sendable {
+	public let call_id: String
+
+	public init(call_id: String) {
+		self.call_id = call_id
+	}
+}
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `PhoneError` Rust enum
+public struct PhoneErrorActionRejectedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
+public struct PhoneErrorUnavailableInner: Codable, Sendable {
+	public let verb: String
+
+	public init(verb: String) {
+		self.verb = verb
+	}
+}
+public enum PhoneError: Codable, Sendable {
+	/// The supplied `call_id` is not in the daemon's active set.
+	case callNotFound(PhoneErrorCallNotFoundInner)
+	/// The companion or platform refused the action (e.g. answer while no
+	/// ringing call exists, end on a remote-controlled conference leg).
+	case actionRejected(PhoneErrorActionRejectedInner)
+	/// No iAP2 link or companion attached, so there's nowhere to send the
+	/// outbound action.
+	case noTarget
+	/// `*Available` flag for this verb was false at action time.
+	case unavailable(PhoneErrorUnavailableInner)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case callNotFound,
+			actionRejected,
+			noTarget,
+			unavailable
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .callNotFound:
+				if let content = try? container.decode(PhoneErrorCallNotFoundInner.self, forKey: .data) {
+					self = .callNotFound(content)
+					return
+				}
+			case .actionRejected:
+				if let content = try? container.decode(PhoneErrorActionRejectedInner.self, forKey: .data) {
+					self = .actionRejected(content)
+					return
+				}
+			case .noTarget:
+				self = .noTarget
+				return
+			case .unavailable:
+				if let content = try? container.decode(PhoneErrorUnavailableInner.self, forKey: .data) {
+					self = .unavailable(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(PhoneError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PhoneError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .callNotFound(let content):
+			try container.encode(CodingKeys.callNotFound, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .actionRejected(let content):
+			try container.encode(CodingKeys.actionRejected, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noTarget:
+			try container.encode(CodingKeys.noTarget, forKey: .type)
+		case .unavailable(let content):
+			try container.encode(CodingKeys.unavailable, forKey: .type)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public struct PhoneErrorReply: Codable, Sendable {
+	public let error: PhoneError
+
+	public init(error: PhoneError) {
+		self.error = error
+	}
+}
+
 /// What kind of outbound call the accessory wants placed.
 public enum InitiateCallType: String, Codable, Sendable {
 	case destination
@@ -3447,12 +3735,133 @@ public struct PlaybackTarget: Codable, Sendable {
 	}
 }
 
-/// Complete replacement list of the provider's remote endpoints.
 public struct PlaybackTargets: Codable, Sendable {
 	public let targets: [PlaybackTarget]
 
 	public init(targets: [PlaybackTarget]) {
 		self.targets = targets
+	}
+}
+
+
+/// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
+public struct PlayerErrorSchemeUnclaimedInner: Codable, Sendable {
+	public let scheme: String
+
+	public init(scheme: String) {
+		self.scheme = scheme
+	}
+}
+
+/// Generated type representing the anonymous struct variant `PlayFailed` of the `PlayerError` Rust enum
+public struct PlayerErrorPlayFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `NotInQueue` of the `PlayerError` Rust enum
+public struct PlayerErrorNotInQueueInner: Codable, Sendable {
+	public let index: UInt32
+
+	public init(index: UInt32) {
+		self.index = index
+	}
+}
+
+/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
+public struct PlayerErrorUnknownTargetInner: Codable, Sendable {
+	public let target_id: String
+
+	public init(target_id: String) {
+		self.target_id = target_id
+	}
+}
+public enum PlayerError: Codable, Sendable {
+	/// `play({uri})` was called with a scheme no connected gateway claims.
+	/// Returned synchronously by the daemon without round-tripping.
+	case schemeUnclaimed(PlayerErrorSchemeUnclaimedInner)
+	/// Gateway acknowledged the verb but couldn't fulfill it.
+	case playFailed(PlayerErrorPlayFailedInner)
+	/// No companion is connected.
+	case noGateway
+	/// `skipToIndex` referenced a queue index that doesn't exist.
+	case notInQueue(PlayerErrorNotInQueueInner)
+	/// `transferTo` named an endpoint that is not in the current target list.
+	case unknownTarget(PlayerErrorUnknownTargetInner)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case schemeUnclaimed,
+			playFailed,
+			noGateway,
+			notInQueue,
+			unknownTarget
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .schemeUnclaimed:
+				if let content = try? container.decode(PlayerErrorSchemeUnclaimedInner.self, forKey: .data) {
+					self = .schemeUnclaimed(content)
+					return
+				}
+			case .playFailed:
+				if let content = try? container.decode(PlayerErrorPlayFailedInner.self, forKey: .data) {
+					self = .playFailed(content)
+					return
+				}
+			case .noGateway:
+				self = .noGateway
+				return
+			case .notInQueue:
+				if let content = try? container.decode(PlayerErrorNotInQueueInner.self, forKey: .data) {
+					self = .notInQueue(content)
+					return
+				}
+			case .unknownTarget:
+				if let content = try? container.decode(PlayerErrorUnknownTargetInner.self, forKey: .data) {
+					self = .unknownTarget(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(PlayerError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PlayerError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .schemeUnclaimed(let content):
+			try container.encode(CodingKeys.schemeUnclaimed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .playFailed(let content):
+			try container.encode(CodingKeys.playFailed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noGateway:
+			try container.encode(CodingKeys.noGateway, forKey: .type)
+		case .notInQueue(let content):
+			try container.encode(CodingKeys.notInQueue, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .unknownTarget(let content):
+			try container.encode(CodingKeys.unknownTarget, forKey: .type)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public struct PlayerErrorReply: Codable, Sendable {
+	public let error: PlayerError
+
+	public init(error: PlayerError) {
+		self.error = error
 	}
 }
 
@@ -6147,11 +6556,13 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 	case ttsStarted(TtsStarted)
 	case ttsEnded(TtsEnded)
 	case volumeChanged(VolumeChanged)
+	case errorEvent(AudioErrorReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case ttsStarted,
 			ttsEnded,
-			volumeChanged
+			volumeChanged,
+			errorEvent
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6177,6 +6588,11 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 					self = .volumeChanged(content)
 					return
 				}
+			case .errorEvent:
+				if let content = try? container.decode(AudioErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeAudioMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeAudioMsg"))
@@ -6193,6 +6609,9 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .volumeChanged(let content):
 			try container.encode(CodingKeys.volumeChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6315,11 +6734,13 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 
 public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 	case position(Position)
+	case errorEvent(GeoErrorReply)
 	case getOnceReply(GeoGetOnceReply)
 	case errorReply(GeoErrorReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case position,
+			errorEvent,
 			getOnceReply,
 			errorReply
 	}
@@ -6335,6 +6756,11 @@ public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 			case .position:
 				if let content = try? container.decode(Position.self, forKey: .data) {
 					self = .position(content)
+					return
+				}
+			case .errorEvent:
+				if let content = try? container.decode(GeoErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
 					return
 				}
 			case .getOnceReply:
@@ -6358,6 +6784,9 @@ public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 		case .position(let content):
 			try container.encode(CodingKeys.position, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
+			try container.encode(content, forKey: .data)
 		case .getOnceReply(let content):
 			try container.encode(CodingKeys.getOnceReply, forKey: .event)
 			try container.encode(content, forKey: .data)
@@ -6375,9 +6804,10 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 	case recommendationsReply(RecommendationsReply)
 	case favoritesListReply(FavoritesListReply)
 	case favoritesContainsReply(FavoritesContainsReply)
-	case libraryErrorReply(LibraryErrorReply)
+	case errorReply(LibraryErrorReply)
 	case favoriteChanged(FavoriteChanged)
 	case libraryChanged(LibraryChanged)
+	case errorEvent(LibraryErrorReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browseReply,
@@ -6386,9 +6816,10 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			recommendationsReply,
 			favoritesListReply,
 			favoritesContainsReply,
-			libraryErrorReply,
+			errorReply,
 			favoriteChanged,
-			libraryChanged
+			libraryChanged,
+			errorEvent
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6429,9 +6860,9 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 					self = .favoritesContainsReply(content)
 					return
 				}
-			case .libraryErrorReply:
+			case .errorReply:
 				if let content = try? container.decode(LibraryErrorReply.self, forKey: .data) {
-					self = .libraryErrorReply(content)
+					self = .errorReply(content)
 					return
 				}
 			case .favoriteChanged:
@@ -6442,6 +6873,11 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			case .libraryChanged:
 				if let content = try? container.decode(LibraryChanged.self, forKey: .data) {
 					self = .libraryChanged(content)
+					return
+				}
+			case .errorEvent:
+				if let content = try? container.decode(LibraryErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
 					return
 				}
 			}
@@ -6470,14 +6906,17 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 		case .favoritesContainsReply(let content):
 			try container.encode(CodingKeys.favoritesContainsReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .libraryErrorReply(let content):
-			try container.encode(CodingKeys.libraryErrorReply, forKey: .event)
+		case .errorReply(let content):
+			try container.encode(CodingKeys.errorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .favoriteChanged(let content):
 			try container.encode(CodingKeys.favoriteChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .libraryChanged(let content):
 			try container.encode(CodingKeys.libraryChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6667,11 +7106,13 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 	case posted(Notification)
 	case updated(Notification)
 	case removed(NotificationRemoved)
+	case errorEvent(NotificationsErrorReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case posted,
 			updated,
-			removed
+			removed,
+			errorEvent
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6697,6 +7138,11 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 					self = .removed(content)
 					return
 				}
+			case .errorEvent:
+				if let content = try? container.decode(NotificationsErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeNotificationsMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeNotificationsMsg"))
@@ -6714,6 +7160,9 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 		case .removed(let content):
 			try container.encode(CodingKeys.removed, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
+			try container.encode(content, forKey: .data)
 		}
 	}
 }
@@ -6724,6 +7173,7 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	case callStarted(PhoneCall)
 	case callUpdated(PhoneCall)
 	case callEnded(PhoneCallEnded)
+	case errorEvent(PhoneErrorReply)
 	case stateReply(PhoneStateReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -6732,6 +7182,7 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 			callStarted,
 			callUpdated,
 			callEnded,
+			errorEvent,
 			stateReply
 	}
 
@@ -6768,6 +7219,11 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 					self = .callEnded(content)
 					return
 				}
+			case .errorEvent:
+				if let content = try? container.decode(PhoneErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
+					return
+				}
 			case .stateReply:
 				if let content = try? container.decode(PhoneStateReply.self, forKey: .data) {
 					self = .stateReply(content)
@@ -6796,6 +7252,9 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 		case .callEnded(let content):
 			try container.encode(CodingKeys.callEnded, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
+			try container.encode(content, forKey: .data)
 		case .stateReply(let content):
 			try container.encode(CodingKeys.stateReply, forKey: .event)
 			try container.encode(content, forKey: .data)
@@ -6807,12 +7266,14 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
 	case queueChanged(QueueSnapshot)
 	case targetsChanged(PlaybackTargets)
+	case errorEvent(PlayerErrorReply)
 	case requestSpotifyWake
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
 			queueChanged,
 			targetsChanged,
+			errorEvent,
 			requestSpotifyWake
 	}
 
@@ -6839,6 +7300,11 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 					self = .targetsChanged(content)
 					return
 				}
+			case .errorEvent:
+				if let content = try? container.decode(PlayerErrorReply.self, forKey: .data) {
+					self = .errorEvent(content)
+					return
+				}
 			case .requestSpotifyWake:
 				self = .requestSpotifyWake
 				return
@@ -6858,6 +7324,9 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .targetsChanged(let content):
 			try container.encode(CodingKeys.targetsChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .errorEvent(let content):
+			try container.encode(CodingKeys.errorEvent, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .requestSpotifyWake:
 			try container.encode(CodingKeys.requestSpotifyWake, forKey: .event)
@@ -7427,215 +7896,6 @@ public enum Image: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .bytes(let content):
 			try container.encode(CodingKeys.bytes, forKey: .type)
-			try container.encode(content, forKey: .data)
-		}
-	}
-}
-
-
-/// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
-public struct PhoneErrorCallNotFoundInner: Codable, Sendable {
-	public let call_id: String
-
-	public init(call_id: String) {
-		self.call_id = call_id
-	}
-}
-
-/// Generated type representing the anonymous struct variant `ActionRejected` of the `PhoneError` Rust enum
-public struct PhoneErrorActionRejectedInner: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-
-/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
-public struct PhoneErrorUnavailableInner: Codable, Sendable {
-	public let verb: String
-
-	public init(verb: String) {
-		self.verb = verb
-	}
-}
-public enum PhoneError: Codable, Sendable {
-	/// The supplied `call_id` is not in the daemon's active set.
-	case callNotFound(PhoneErrorCallNotFoundInner)
-	/// The companion or platform refused the action (e.g. answer while no
-	/// ringing call exists, end on a remote-controlled conference leg).
-	case actionRejected(PhoneErrorActionRejectedInner)
-	/// No iAP2 link or companion attached, so there's nowhere to send the
-	/// outbound action.
-	case noTarget
-	/// `*Available` flag for this verb was false at action time.
-	case unavailable(PhoneErrorUnavailableInner)
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case callNotFound,
-			actionRejected,
-			noTarget,
-			unavailable
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case type, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
-			switch type {
-			case .callNotFound:
-				if let content = try? container.decode(PhoneErrorCallNotFoundInner.self, forKey: .data) {
-					self = .callNotFound(content)
-					return
-				}
-			case .actionRejected:
-				if let content = try? container.decode(PhoneErrorActionRejectedInner.self, forKey: .data) {
-					self = .actionRejected(content)
-					return
-				}
-			case .noTarget:
-				self = .noTarget
-				return
-			case .unavailable:
-				if let content = try? container.decode(PhoneErrorUnavailableInner.self, forKey: .data) {
-					self = .unavailable(content)
-					return
-				}
-			}
-		}
-		throw DecodingError.typeMismatch(PhoneError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PhoneError"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .callNotFound(let content):
-			try container.encode(CodingKeys.callNotFound, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .actionRejected(let content):
-			try container.encode(CodingKeys.actionRejected, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .noTarget:
-			try container.encode(CodingKeys.noTarget, forKey: .type)
-		case .unavailable(let content):
-			try container.encode(CodingKeys.unavailable, forKey: .type)
-			try container.encode(content, forKey: .data)
-		}
-	}
-}
-
-
-/// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
-public struct PlayerErrorSchemeUnclaimedInner: Codable, Sendable {
-	public let scheme: String
-
-	public init(scheme: String) {
-		self.scheme = scheme
-	}
-}
-
-/// Generated type representing the anonymous struct variant `PlayFailed` of the `PlayerError` Rust enum
-public struct PlayerErrorPlayFailedInner: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-
-/// Generated type representing the anonymous struct variant `NotInQueue` of the `PlayerError` Rust enum
-public struct PlayerErrorNotInQueueInner: Codable, Sendable {
-	public let index: UInt32
-
-	public init(index: UInt32) {
-		self.index = index
-	}
-}
-
-/// Generated type representing the anonymous struct variant `UnknownTarget` of the `PlayerError` Rust enum
-public struct PlayerErrorUnknownTargetInner: Codable, Sendable {
-	public let target_id: String
-
-	public init(target_id: String) {
-		self.target_id = target_id
-	}
-}
-public enum PlayerError: Codable, Sendable {
-	/// `play({uri})` was called with a scheme no connected gateway claims.
-	/// Returned synchronously by the daemon without round-tripping.
-	case schemeUnclaimed(PlayerErrorSchemeUnclaimedInner)
-	/// Gateway acknowledged the verb but couldn't fulfill it.
-	case playFailed(PlayerErrorPlayFailedInner)
-	/// No companion is connected.
-	case noGateway
-	/// `skipToIndex` referenced a queue index that doesn't exist.
-	case notInQueue(PlayerErrorNotInQueueInner)
-	/// `transferTo` named an endpoint that is not in the current target list.
-	case unknownTarget(PlayerErrorUnknownTargetInner)
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case schemeUnclaimed,
-			playFailed,
-			noGateway,
-			notInQueue,
-			unknownTarget
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case type, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
-			switch type {
-			case .schemeUnclaimed:
-				if let content = try? container.decode(PlayerErrorSchemeUnclaimedInner.self, forKey: .data) {
-					self = .schemeUnclaimed(content)
-					return
-				}
-			case .playFailed:
-				if let content = try? container.decode(PlayerErrorPlayFailedInner.self, forKey: .data) {
-					self = .playFailed(content)
-					return
-				}
-			case .noGateway:
-				self = .noGateway
-				return
-			case .notInQueue:
-				if let content = try? container.decode(PlayerErrorNotInQueueInner.self, forKey: .data) {
-					self = .notInQueue(content)
-					return
-				}
-			case .unknownTarget:
-				if let content = try? container.decode(PlayerErrorUnknownTargetInner.self, forKey: .data) {
-					self = .unknownTarget(content)
-					return
-				}
-			}
-		}
-		throw DecodingError.typeMismatch(PlayerError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PlayerError"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .schemeUnclaimed(let content):
-			try container.encode(CodingKeys.schemeUnclaimed, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .playFailed(let content):
-			try container.encode(CodingKeys.playFailed, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .noGateway:
-			try container.encode(CodingKeys.noGateway, forKey: .type)
-		case .notInQueue(let content):
-			try container.encode(CodingKeys.notInQueue, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .unknownTarget(let content):
-			try container.encode(CodingKeys.unknownTarget, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}

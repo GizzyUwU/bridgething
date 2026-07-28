@@ -20,6 +20,7 @@ import com.bridgething.gateway.capabilities
 import com.bridgething.gateway.device
 import com.bridgething.gateway.lyrics
 import com.bridgething.gateway.notifications
+import com.bridgething.gateway.player
 import com.bridgething.gateway.system
 import com.bridgething.gateway.time
 import com.bridgething.gateway.transfer
@@ -90,6 +91,11 @@ import com.bridgething.schema.RecommendationsReply
 import com.bridgething.schema.FavoritesListReply
 import com.bridgething.schema.FavoritesContainsReply
 import com.bridgething.schema.LibraryErrorReply
+import com.bridgething.schema.PlayerError
+import com.bridgething.schema.PlayerErrorPlayFailedInner
+import com.bridgething.schema.PlayerErrorReply
+import com.bridgething.schema.PlayerErrorSchemeUnclaimedInner
+import com.bridgething.schema.PlayerErrorUnknownTargetInner
 import com.bridgething.schema.LibraryError
 import com.bridgething.schema.LibraryErrorNotSupportedInner
 import com.bridgething.schema.WireError
@@ -659,12 +665,17 @@ public class BridgethingCompanion(
                         glue.play(player.data)
                     } else {
                         log(CompanionLogLevel.Warn, "play dropped: no provider claims ${player.data.uri}")
+                        reportPlayerError(PlayerError.SchemeUnclaimed(PlayerErrorSchemeUnclaimedInner(schemeOf(player.data.uri))))
                     }
                 }
                 is BridgeToGatewayPlayerMsg.Queue -> {
                     val glue = glueForUri(player.data.uri)
-                    if (glue != null) glue.queue(player.data)
-                    else log(CompanionLogLevel.Warn, "queue dropped: no provider claims ${player.data.uri}")
+                    if (glue != null) {
+                        glue.queue(player.data)
+                    } else {
+                        log(CompanionLogLevel.Warn, "queue dropped: no provider claims ${player.data.uri}")
+                        reportPlayerError(PlayerError.SchemeUnclaimed(PlayerErrorSchemeUnclaimedInner(schemeOf(player.data.uri))))
+                    }
                 }
                 BridgeToGatewayPlayerMsg.Pause -> transport?.pause()
                 BridgeToGatewayPlayerMsg.Resume -> transport?.resume()
@@ -678,14 +689,50 @@ public class BridgethingCompanion(
                 is BridgeToGatewayPlayerMsg.SetCrossfade -> transport?.setCrossfade(player.data.durationMs)
                 is BridgeToGatewayPlayerMsg.TransferTo -> {
                     val glue = audibleGlue() ?: libraryGlue()
-                    if (glue != null) glue.transferTo(player.data.targetId)
-                    else log(CompanionLogLevel.Warn, "transferTo dropped: no music provider")
+                    if (glue != null) {
+                        glue.transferTo(player.data.targetId)
+                    } else {
+                        log(CompanionLogLevel.Warn, "transferTo dropped: no music provider")
+                        reportPlayerError(PlayerError.UnknownTarget(PlayerErrorUnknownTargetInner(player.data.targetId)))
+                    }
                 }
+            }
+            if (transport == null && needsTransport(player)) {
+                reportPlayerError(PlayerError.PlayFailed(PlayerErrorPlayFailedInner("no active transport")))
             }
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "player verb $player failed: ${e.message ?: e.toString()}")
+            reportPlayerError(PlayerError.PlayFailed(PlayerErrorPlayFailedInner(e.message ?: e.toString())))
         }
     }
+
+    private fun needsTransport(player: BridgeToGatewayPlayerMsg): Boolean = when (player) {
+        is BridgeToGatewayPlayerMsg.Play,
+        is BridgeToGatewayPlayerMsg.Queue,
+        is BridgeToGatewayPlayerMsg.TransferTo,
+        -> false
+        else -> true
+    }
+
+    private suspend fun reportPlayerError(error: PlayerError) {
+        runCatching { gateway.player.errorEvent(PlayerErrorReply(error)) }
+    }
+
+    private suspend fun reportLibraryError(error: LibraryError) {
+        runCatching { gateway.library.errorEvent(LibraryErrorReply(error)) }
+    }
+
+    private suspend fun reportLibraryWriteFailure(error: Throwable) {
+        respondLibraryError(
+            error,
+            onProtocol = {
+                reportLibraryError(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = "unimplemented")))
+            },
+            onDomain = { reply -> reportLibraryError(reply.error) },
+        )
+    }
+
+    private fun schemeOf(uri: String): String = uri.substringBefore(':', uri)
 
     private suspend fun runAssetDispatch() {
         gateway.asset.requestRequests.collect { (handle, req) ->
@@ -885,11 +932,15 @@ public class BridgethingCompanion(
             systemMediaSource.toggleLiked()
             return
         }
-        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: return
+        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: run {
+            reportLibraryError(LibraryError.NoGateway)
+            return
+        }
         try {
             glue.favoritesToggle(msg.item)
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "favoritesToggle failed: ${e.message ?: e.toString()}")
+            reportLibraryWriteFailure(e)
         }
     }
 
@@ -898,11 +949,15 @@ public class BridgethingCompanion(
             systemMediaSource.setLiked(msg.liked)
             return
         }
-        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: return
+        val glue = glueForUri(msg.item.uri) ?: libraryGlue() ?: run {
+            reportLibraryError(LibraryError.NoGateway)
+            return
+        }
         try {
             glue.favoritesSet(msg.item, msg.liked)
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "favoritesSet failed: ${e.message ?: e.toString()}")
+            reportLibraryWriteFailure(e)
         }
     }
 
@@ -914,6 +969,7 @@ public class BridgethingCompanion(
                 glue.favoritesSetMany(entries)
             } catch (e: Throwable) {
                 log(CompanionLogLevel.Warn, "favoritesSetMany failed for $id: ${e.message ?: e.toString()}")
+                reportLibraryWriteFailure(e)
             }
         }
     }

@@ -51,7 +51,8 @@
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "bun test"
   },
   "dependencies": {
     "@bridgething/adapter-network": "workspace:*",

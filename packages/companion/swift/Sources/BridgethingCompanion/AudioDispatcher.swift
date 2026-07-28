@@ -25,22 +25,24 @@ public actor AudioDispatcher {
         let backend = backend
         tasks.append(Task { [weak self] in
             for await _ in gateway.audio.volumeUp {
-                if let glue = await self?.volumeGlue() { try? await glue.volumeUp() } else { await backend.volumeUp() }
+                guard let glue = await self?.volumeGlue() else { await backend.volumeUp(); continue }
+                do { try await glue.volumeUp() } catch { await Self.reportRejected("volumeUp", error, gateway: gateway) }
             }
         })
         tasks.append(Task { [weak self] in
             for await _ in gateway.audio.volumeDown {
-                if let glue = await self?.volumeGlue() { try? await glue.volumeDown() } else { await backend.volumeDown() }
+                guard let glue = await self?.volumeGlue() else { await backend.volumeDown(); continue }
+                do { try await glue.volumeDown() } catch { await Self.reportRejected("volumeDown", error, gateway: gateway) }
             }
         })
         tasks.append(Task { [weak self] in
             for await (_, msg) in gateway.audio.setVolume {
-                if let glue = await self?.volumeGlue() { try? await glue.setVolume(msg.level) } else { await backend.setVolume(msg.level) }
+                guard let glue = await self?.volumeGlue() else { await backend.setVolume(msg.level); continue }
+                do { try await glue.setVolume(msg.level) } catch { await Self.reportRejected("setVolume", error, gateway: gateway) }
             }
         })
         tasks.append(Task { [weak self] in
             for await _ in gateway.audio.muteToggle {
-                // connect has no mute surface; swallow rather than mute the phone
                 if await self?.volumeGlue() == nil { await backend.muteToggle() }
             }
         })
@@ -51,7 +53,14 @@ public actor AudioDispatcher {
         })
         tasks.append(Task { for await (_, msg) in gateway.audio.ttsCancel { await backend.cancel(id: msg.id) } })
         tasks.append(Task { for await _ in gateway.audio.ttsCancelAll { await backend.cancelAll() } })
-        tasks.append(Task { for await (_, msg) in gateway.audio.earcon { _ = await backend.playEarcon(name: msg.name) } })
+        tasks.append(Task {
+            for await (_, msg) in gateway.audio.earcon where await !backend.playEarcon(name: msg.name) {
+                await Self.reportAudioError(
+                    .unavailable(AudioErrorUnavailableInner(verb: "earcon")),
+                    gateway: gateway
+                )
+            }
+        })
         tasks.append(Task { [weak self] in
             for await (_, msg) in gateway.audio.tts {
                 await self?.handleTts(msg, gateway: gateway)
@@ -63,6 +72,17 @@ public actor AudioDispatcher {
         for task in tasks { task.cancel() }
         tasks.removeAll()
         await backend.cancelAll()
+    }
+
+    private static func reportRejected(_ verb: String, _ error: Error, gateway: BridgethingGateway) async {
+        await reportAudioError(
+            .actionRejected(AudioErrorActionRejectedInner(reason: "\(verb): \(error.localizedDescription)")),
+            gateway: gateway
+        )
+    }
+
+    private static func reportAudioError(_ error: AudioError, gateway: BridgethingGateway) async {
+        try? await gateway.audio.errorEvent(AudioErrorReply(error: error))
     }
 
     private func handleTts(_ msg: Tts, gateway: BridgethingGateway) async {

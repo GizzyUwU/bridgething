@@ -663,8 +663,9 @@ public class OtaService(
         linkOpenAt[deviceId] = System.currentTimeMillis()
     }
 
-    private suspend fun noteLinkClosed(deviceId: String) = mutex.withLock {
-        linkOpenAt.remove(deviceId)
+    private suspend fun noteLinkClosed(deviceId: String) {
+        mutex.withLock { linkOpenAt.remove(deviceId) }
+        runStore.interrupt(deviceId)?.let { storeChangesFlow.emit(OtaStoreChange.Run(it)) }
     }
 
     private suspend fun linkStable(deviceId: String): Boolean = mutex.withLock {

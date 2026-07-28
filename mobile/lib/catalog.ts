@@ -16,7 +16,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import { getSession } from './bridge';
-import { useSessionStore } from './session';
+import { useSessionStore, type SessionState } from './session';
 import { storage } from './storage';
 import { useWebappsStore } from './webapps';
 
@@ -39,7 +39,7 @@ type CatalogState = {
 
 const PREVIEW_TTL_MS = 5 * 60 * 1000;
 
-const useCatalogStore = create<CatalogState>(() => ({
+export const useCatalogStore = create<CatalogState>(() => ({
   sources: loadSources(),
   catalogs: [],
   directory: null,
@@ -74,7 +74,10 @@ export async function fetchCatalog(url: string): Promise<Catalog> {
   return validate(await response.json());
 }
 
+let refreshGeneration = 0;
+
 export async function refreshCatalog(): Promise<void> {
+  const generation = ++refreshGeneration;
   const { sources } = useCatalogStore.getState();
   useCatalogStore.setState({ refreshing: true });
 
@@ -101,6 +104,7 @@ export async function refreshCatalog(): Promise<void> {
     else catalogs.push(result);
   }
 
+  if (generation !== refreshGeneration) return;
   useCatalogStore.setState({
     catalogs,
     directory,
@@ -163,15 +167,21 @@ function toInstalled(list: BridgethingWebappInfo[]): InstalledWebapp[] {
   }));
 }
 
+export function deviceLibVersion(
+  state: SessionState,
+  deviceId: string | null,
+): string | null {
+  if (!deviceId) return null;
+  return state.ledger[deviceId]?.libVersion ?? null;
+}
+
 function useDerivedInputs(deviceId: string | null) {
   const catalogs = useCatalogStore(s => s.catalogs);
   const installed = useWebappsStore(
     useShallow(s => (deviceId ? (s.byDevice[deviceId]?.list ?? []) : [])),
   );
-  const deviceLibVersion = useSessionStore(s =>
-    deviceId ? (s.deviceMeta[deviceId]?.libbridgethingVersion ?? null) : null,
-  );
-  return { catalogs, installed, deviceLibVersion };
+  const libVersion = useSessionStore(s => deviceLibVersion(s, deviceId));
+  return { catalogs, installed, deviceLibVersion: libVersion };
 }
 
 export function useListings(deviceId: string | null): CatalogAppListing[] {

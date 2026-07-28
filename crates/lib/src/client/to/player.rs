@@ -67,6 +67,8 @@ pub enum BridgeToClientPlayerMsg {
   StateReply(PlayerStateReply),
   #[bridge_response]
   QueueReply(PlayerQueueReply),
+  #[bridge_event]
+  ErrorEvent(PlayerErrorReply),
   #[bridge_response]
   TargetsReply(PlayerTargetsReply),
   #[bridge_response]
