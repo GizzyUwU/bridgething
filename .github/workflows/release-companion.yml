@@ -278,7 +278,7 @@ jobs:
   ios:
     needs: decide
     if: needs.decide.outputs.ios == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       R2_BUCKET: bridgething-ota
       PUBLIC_BASE: https://ota.bridgething.com
