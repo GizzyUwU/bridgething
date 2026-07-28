@@ -49,6 +49,13 @@ cargo run -q --bin uniffi-bindgen -- generate \
   --library "$(host_dylib)" \
   --language kotlin --out-dir "$KOTLIN_OUT"
 
+# the host debug tree only exists to feed uniffi-bindgen, and it is the largest thing on the disk
+# the cross build and gradle still have to share.
+if [ "${PRUNE_HOST_BUILD:-0}" = "1" ]; then
+  echo "== prune host debug tree =="
+  rm -rf "${CARGO_TARGET_DIR:-target}/debug"
+fi
+
 echo "== build jniLibs (release, arm64-v8a) =="
 rm -rf "$JNILIBS"; mkdir -p "$JNILIBS"
 cargo ndk \

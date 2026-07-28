@@ -134,6 +134,9 @@ jobs:
       R2_BUCKET: bridgething-ota
       PUBLIC_BASE: https://ota.bridgething.com
       PURGE_URLS: /tmp/purge-urls.txt
+      # incremental state never outlives a runner, and it doubles the debug tree on the disk gradle needs.
+      CARGO_INCREMENTAL: "0"
+      PRUNE_HOST_BUILD: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -218,12 +221,15 @@ jobs:
           RUSTC_WRAPPER="" cargo install cargo-ndk --locked
           bash crates/spotify/scripts/build-jnilibs.sh
           sccache --show-stats
+          df -h / /mnt
 
       - name: build the release apk
         env:
           BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
         run: |
           set -euo pipefail
+          # gradle dying of ENOSPC also kills the runner's log upload, so leave the disk state behind.
+          trap 'df -h / /mnt' EXIT
           [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
           bash mobile/scripts/build-apk.sh
 
