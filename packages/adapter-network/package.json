@@ -43,12 +43,15 @@
     "@bridgething/lib": "workspace:*"
   },
   "peerDependencies": {
-    "bonjour-service": "^1.3.0",
+    "bonjour-service": "^1.4.4",
     "typescript": "^6.0.3"
   },
   "peerDependenciesMeta": {
     "bonjour-service": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "bonjour-service": "^1.4.4"
   }
 }
