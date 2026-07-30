@@ -1,0 +1,165 @@
+//! Diagnoses the scene estimator rather than scoring it.
+//!
+//! A front end that does not help and a front end that never engaged score identically, and they
+//! want opposite fixes. This reports whether the noise field was adopted, how many bins adopted a
+//! measured look direction, and what bearing that look direction implies against the scene's truth.
+//!
+//! The last argument sweeps the short-horizon time constant the target covariance is snapshotted
+//! over, which trades how much of the phrase the estimate averages against how much surrounding
+//! noise it admits. Coverage and accuracy move against each other, so both are reported.
+//!
+//! ```text
+//! cargo run --release --example scene_probe -- <scene-dir> [scenes] [noise-prerolls] [recent-tau-csv]
+//! ```
+
+use std::{env, path::Path};
+
+use bridgething_dsp::{
+  beamformer::Design,
+  geometry::CHANNELS,
+  pipeline::{Beamformer, Config},
+  scene,
+  stft::{BINS, bin_frequencies},
+};
+use serde::Deserialize;
+
+const RATE: f64 = 16_000.0;
+
+#[derive(Deserialize)]
+struct Scene {
+  audio: String,
+  archetype: String,
+  talker_deg: f64,
+  snr_db: Option<f64>,
+  speech_start: usize,
+  speech_len: usize,
+}
+
+fn read_scene(path: &Path) -> Option<Vec<i32>> {
+  let mut reader = hound::WavReader::open(path).ok()?;
+  Some(
+    reader
+      .samples::<f32>()
+      .filter_map(Result::ok)
+      .map(|s| (s.clamp(-1.0, 1.0) as f64 * i32::MAX as f64) as i32)
+      .collect(),
+  )
+}
+
+fn main() {
+  let args: Vec<String> = env::args().collect();
+  let scene_dir = Path::new(&args[1]);
+  let limit: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(60);
+  let rounds: usize = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
+  let taus: Vec<f64> = args.get(4).map_or_else(
+    || vec![scene::Config::default().recent_tau_s],
+    |csv| csv.split(',').filter_map(|v| v.trim().parse().ok()).collect(),
+  );
+
+  let manifest: Vec<Scene> =
+    serde_json::from_slice(&std::fs::read(scene_dir.join("manifest.json")).expect("manifest.json"))
+      .expect("manifest parses");
+
+  let frequencies = bin_frequencies(RATE);
+  let band: Vec<usize> = (0..BINS)
+    .filter(|b| (750.0..4000.0).contains(&frequencies[*b]))
+    .collect();
+
+  let scenes: Vec<(&Scene, Vec<i32>)> = manifest
+    .iter()
+    .take(limit)
+    .filter_map(|meta| Some((meta, read_scene(&scene_dir.join(&meta.audio))?)))
+    .collect();
+
+  println!(
+    "{} scenes, {rounds} noise pre-roll(s), rtf measured over {} bins\n",
+    scenes.len(),
+    band.len()
+  );
+
+  let mut summaries = Vec::new();
+  for (index, tau) in taus.iter().enumerate() {
+    let detailed = index == 0;
+    if detailed {
+      println!(
+        "{:>10} {:>7} {:>7} {:>6} {:>9} {:>9} {:>8}",
+        "archetype", "snr", "truth", "noise", "rtf bins", "bearing", "error"
+      );
+    }
+
+    let (mut adopted_total, mut noise_total, mut errors) = (0usize, 0usize, Vec::new());
+    for (meta, scene) in &scenes {
+      let mut beamformer = Beamformer::new(Config {
+        steering_deg: 0.0,
+        design: Design::Superdirective { wng_floor_db: -6.0 },
+        adaptation: Some(scene::Config {
+          recent_tau_s: *tau,
+          ..scene::Config::default()
+        }),
+        ..Config::default()
+      });
+
+      let lead_in = (meta.speech_start * CHANNELS).min(scene.len());
+      let mut discard = Vec::new();
+      for _ in 0..rounds {
+        discard.clear();
+        beamformer.process(&scene[..lead_in], &mut discard);
+      }
+      if rounds > 0 {
+        beamformer.reset_frames();
+      }
+
+      let phrase_end = ((meta.speech_start + meta.speech_len) * CHANNELS).min(scene.len());
+      discard.clear();
+      beamformer.process(&scene[..phrase_end], &mut discard);
+      beamformer.mark_target();
+
+      let (adopted, noise_measured) = beamformer.adoption();
+      adopted_total += adopted;
+      noise_total += usize::from(noise_measured);
+
+      let bearing = beamformer.bearing_deg().unwrap_or(f64::NAN);
+      if bearing.is_finite() {
+        errors.push((bearing - meta.talker_deg).abs());
+      }
+
+      if detailed {
+        println!(
+          "{:>10} {:>7} {:>7.1} {:>6} {:>9} {:>9.1} {:>8.1}",
+          meta.archetype,
+          meta.snr_db.map(|s| format!("{s:.1}")).unwrap_or_else(|| "-".into()),
+          meta.talker_deg,
+          if noise_measured { "yes" } else { "no" },
+          adopted,
+          bearing,
+          bearing - meta.talker_deg
+        );
+      }
+    }
+
+    errors.sort_by(f64::total_cmp);
+    summaries.push((
+      *tau,
+      noise_total,
+      adopted_total as f64 / scenes.len().max(1) as f64,
+      errors.clone(),
+    ));
+  }
+
+  println!(
+    "\n{:>10} {:>8} {:>10} {:>10} {:>10} {:>9}",
+    "recent tau", "noise", "rtf bins", "resolving", "median err", "p90 err"
+  );
+  for (tau, noise_total, adopted, errors) in &summaries {
+    let (median, p90) = if errors.is_empty() {
+      (f64::NAN, f64::NAN)
+    } else {
+      (errors[errors.len() / 2], errors[errors.len() * 9 / 10])
+    };
+    println!(
+      "{tau:>10.2} {:>8} {adopted:>10.1} {:>10} {median:>10.1} {p90:>9.1}",
+      format!("{noise_total}/{}", scenes.len()),
+      format!("{}/{}", errors.len(), scenes.len()),
+    );
+  }
+}

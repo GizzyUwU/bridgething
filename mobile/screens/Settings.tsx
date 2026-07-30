@@ -101,7 +101,6 @@ export function SettingsScreen({ navigation }: Props) {
   const ledger = useSession(s => s.ledger);
   const metaByDevice = useSession(s => s.deviceMeta);
   const host = useSession(s => s.hostInfo);
-  const otaRuns = useOta(s => s.runs);
   const otaAvailable = useOta(s => s.available);
 
   const livePeers = connectedPeers(peers);

@@ -10,12 +10,12 @@ use bridgething_iap2::{
 };
 use bridgething_test_harness::{
   CommandDriver, DeviceHarness, DeviceTier, FrameObserve, FrameObserver, GatewayDriver, Harness, Iap2OutboundObserve,
-  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport,
+  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport, WebappProvision,
 };
 use libbridgething::{
   CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, GeoError, MediaItem, PhoneCall,
   PhoneCallDirection, PhoneCallStatus, PlayerState, Position,
-  client::{GeoWatch, SetShuffle},
+  client::{GeoGetOnce, GeoWatch, SetShuffle},
   gateway::{
     AuthorityClaim, BridgeToGatewayGeoMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData,
     GeoErrorReply as GatewayGeoErrorReply,
@@ -491,13 +491,14 @@ lift!(incoming_call_surfaces_to_webapp, [t1, t3_rfcomm, t3_iap2_ea]);
 
 async fn geo_position_reaches_watching_webapp<T>(tier: &T) -> anyhow::Result<()>
 where
-  T: CommandDriver + GatewayDriver + FrameObserve,
+  T: CommandDriver + GatewayDriver + FrameObserve + WebappProvision,
 {
   let mut frames = tier.frames().await?;
   let gateway = tier.gateway().await?;
   let mut announce = caps();
   announce.available.geo = true;
   gateway.capabilities().announce(announce).await.expect("announce");
+  tier.activate_webapp_declaring(&["geo"]).await?;
   let client = tier.command_client().await?;
 
   client
@@ -539,13 +540,14 @@ lift!(geo_position_reaches_watching_webapp, [t1]);
 
 async fn geo_watch_failure_reaches_watching_webapp<T>(tier: &T) -> anyhow::Result<()>
 where
-  T: CommandDriver + GatewayDriver + FrameObserve,
+  T: CommandDriver + GatewayDriver + FrameObserve + WebappProvision,
 {
   let mut frames = tier.frames().await?;
   let gateway = tier.gateway().await?;
   let mut announce = caps();
   announce.available.geo = true;
   gateway.capabilities().announce(announce).await.expect("announce");
+  tier.activate_webapp_declaring(&["geo"]).await?;
   let client = tier.command_client().await?;
 
   client
@@ -581,13 +583,14 @@ lift!(geo_watch_failure_reaches_watching_webapp, [t1]);
 
 async fn abrupt_webapp_disconnect_releases_geo_watch<T>(tier: &T) -> anyhow::Result<()>
 where
-  T: CommandDriver + GatewayDriver,
+  T: CommandDriver + GatewayDriver + WebappProvision,
 {
   let gateway = tier.gateway().await?;
   let mut events = gateway.events();
   let mut announce = caps();
   announce.available.geo = true;
   gateway.capabilities().announce(announce).await.expect("announce");
+  tier.activate_webapp_declaring(&["geo"]).await?;
 
   let client = tier.command_client().await?;
   client
@@ -610,6 +613,144 @@ where
     .ok_or_else(|| anyhow::anyhow!("watch was never released after the webapp vanished"))?;
   Ok(())
 }
+
+async fn geo_is_refused_for_a_webapp_that_never_declared_it<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: CommandDriver + GatewayDriver + WebappProvision,
+{
+  let gateway = tier.gateway().await?;
+  let mut events = gateway.events();
+  let mut announce = caps();
+  announce.available.geo = true;
+  gateway.capabilities().announce(announce).await.expect("announce");
+  tier.activate_webapp_declaring(&["net.fetch"]).await?;
+
+  let client = tier.command_client().await?;
+  let refused = client
+    .geo()
+    .get_once(GeoGetOnce {
+      accuracy: GeoAccuracy::Fine,
+      max_age_s: None,
+    })
+    .await;
+  match refused {
+    Err(bridgething_client::RequestFailure::Domain(reply)) => anyhow::ensure!(
+      reply.error == GeoError::NotDeclared,
+      "expected notDeclared, got {:?}",
+      reply.error
+    ),
+    other => anyhow::bail!("undeclared geo should be refused, got {other:?}"),
+  }
+  anyhow::ensure!(
+    wait_for_geo(&mut events, |msg| matches!(msg, BridgeToGatewayGeoMsg::GetOnce(_)))
+      .await
+      .is_none(),
+    "an undeclared request still reached the phone"
+  );
+  Ok(())
+}
+
+lift!(geo_is_refused_for_a_webapp_that_never_declared_it, [t1]);
+
+async fn a_request_missing_a_required_field_is_nacked_as_malformed<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: ModernClientDriver,
+{
+  let mut client = tier.modern_client().await?;
+  let request_id = uuid::Uuid::now_v7();
+  client
+    .send_text(format!(
+      r#"{{"id":"{request_id}","meta":{{"kind":"request"}},"data":{{"type":"geo","data":{{"event":"getOnce","data":{{}}}}}}}}"#
+    ))
+    .await?;
+
+  let reply = tokio::time::timeout(SNAPSHOT_BARRIER, async {
+    while let Some(text) = client.recv().await {
+      if text.contains(&request_id.to_string()) {
+        return Some(text);
+      }
+    }
+    None
+  })
+  .await
+  .ok()
+  .flatten()
+  .ok_or_else(|| anyhow::anyhow!("the malformed request was never answered"))?;
+
+  anyhow::ensure!(
+    reply.contains("\"malformed\""),
+    "a validation failure must not read as `unsupported`: {reply}"
+  );
+  anyhow::ensure!(
+    reply.contains("accuracy"),
+    "the nack should name the field that was missing: {reply}"
+  );
+  Ok(())
+}
+
+lift!(a_request_missing_a_required_field_is_nacked_as_malformed, [t1]);
+
+async fn a_tolerant_get_once_is_served_from_the_held_fix<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: CommandDriver + GatewayDriver + WebappProvision,
+{
+  let gateway = tier.gateway().await?;
+  let mut events = gateway.events();
+  let mut announce = caps();
+  announce.available.geo = true;
+  gateway.capabilities().announce(announce).await.expect("announce");
+  tier.activate_webapp_declaring(&["geo"]).await?;
+
+  let client = tier.command_client().await?;
+  client
+    .geo()
+    .watch(GeoWatch {
+      accuracy: GeoAccuracy::Fine,
+      min_interval_ms: 1000,
+    })
+    .await
+    .expect("geo watch");
+  wait_for_geo(&mut events, |msg| matches!(msg, BridgeToGatewayGeoMsg::Watch(_)))
+    .await
+    .ok_or_else(|| anyhow::anyhow!("the watch never reached the companion"))?;
+
+  gateway
+    .geo()
+    .position(Position {
+      lat: 41.5,
+      lon: -8.25,
+      alt_m: None,
+      accuracy_m: 6.0,
+      speed_mps: None,
+      heading_deg: None,
+      ts_unix_s: 1_700_000_000,
+    })
+    .await
+    .expect("position");
+
+  let reply = client
+    .geo()
+    .get_once(GeoGetOnce {
+      accuracy: GeoAccuracy::Fine,
+      max_age_s: Some(300),
+    })
+    .await
+    .expect("geo getOnce");
+  anyhow::ensure!(
+    (reply.position.lat - 41.5).abs() < f64::EPSILON,
+    "getOnce answered with something other than the held fix: {:?}",
+    reply.position
+  );
+  anyhow::ensure!(
+    wait_for_geo(&mut events, |msg| matches!(msg, BridgeToGatewayGeoMsg::GetOnce(_)))
+      .await
+      .is_none(),
+    "a tolerant getOnce woke the phone anyway"
+  );
+  Ok(())
+}
+
+lift!(a_tolerant_get_once_is_served_from_the_held_fix, [t1]);
 
 async fn wait_for_geo<F>(events: &mut tokio::sync::broadcast::Receiver<BridgeToGatewayMsg>, pred: F) -> Option<()>
 where

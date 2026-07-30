@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -9,15 +10,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { useAppActive } from '../lib/app-active';
+
 const DURATION = 2400;
 const PEAK_OPACITY = 0.5;
 
-/**
- * Animated halo used in the "no device connected" state and during the
- * ANCS pairing step. Two rings travel the same scale/opacity curve a
- * half-cycle apart so coverage is always continuous; opacity hits zero
- * at both ends of the cycle so the wrap-around is invisible.
- */
 export function HeroPulse({
   tint = 'primary',
 }: {
@@ -25,8 +22,16 @@ export function HeroPulse({
 }) {
   const phase1 = useSharedValue(0);
   const phase2 = useSharedValue(0);
+  const active = useAppActive();
 
   useEffect(() => {
+    if (!active) {
+      cancelAnimation(phase1);
+      cancelAnimation(phase2);
+      phase1.value = 0;
+      phase2.value = 0;
+      return;
+    }
     phase1.value = withRepeat(
       withTiming(1, { duration: DURATION, easing: Easing.linear }),
       -1,
@@ -40,7 +45,11 @@ export function HeroPulse({
         false,
       ),
     );
-  }, [phase1, phase2]);
+    return () => {
+      cancelAnimation(phase1);
+      cancelAnimation(phase2);
+    };
+  }, [active, phase1, phase2]);
 
   const ring1 = useAnimatedStyle(() => ringStyle(phase1.value));
   const ring2 = useAnimatedStyle(() => ringStyle(phase2.value));
@@ -65,7 +74,6 @@ export function HeroPulse({
 
 function ringStyle(phase: number) {
   'worklet';
-  // sin(pi * phase) gives a smooth 0 -> peak -> 0 envelope so the wrap from 1 back to 0 is invisible.
   const opacity = Math.sin(Math.PI * phase) * PEAK_OPACITY;
   const scale = 0.6 + phase * 1.0;
   return {

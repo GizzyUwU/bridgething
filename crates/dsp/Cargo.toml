@@ -1,0 +1,20 @@
+[package]
+name = "bridgething-dsp"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+
+[dependencies]
+num-complex = "0.4.6"
+realfft = "3.5.0"
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+bridgething-wakeword = { path = "../wakeword" }
+earshot = "1.2.1"
+hound = "3.5.1"
+num-complex = "0.4.6"
+serde_json.workspace = true

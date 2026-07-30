@@ -13,7 +13,7 @@ function handlerKey(method: string): string {
   return rest.charAt(0).toLowerCase() + rest.slice(1);
 }
 
-function makeNative(name: string): FakeNative {
+function makeNative(_name: string): FakeNative {
   const handlers = new Map<string, Callback>();
   const returns = new Map<string, unknown>();
   const calls: string[] = [];

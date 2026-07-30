@@ -48,6 +48,9 @@ pub enum GeoError {
   /// The user denied location to the companion app, or the OS gate
   /// refuses (e.g. iOS Always/WhenInUse not granted).
   PermissionDenied,
+  /// The running webapp's manifest does not list the `geo` permission, so
+  /// the daemon refused before involving the phone.
+  NotDeclared,
   /// Companion is connected but cannot produce a fix (no GPS, airplane
   /// mode, indoors with no fallback).
   Unavailable,

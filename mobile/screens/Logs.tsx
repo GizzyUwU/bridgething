@@ -41,7 +41,7 @@ const SEVERITY: Record<string, number> = {
 
 const TAIL_SLOP_PX = 24;
 
-export function LogsScreen({}: Props) {
+export function LogsScreen(_: Props) {
   const entries = useDiagnostics(s => s.deviceLogs);
   const deviceStreaming = useDiagnostics(s => s.deviceLogStreaming);
   const localStreaming = useDiagnostics(s => s.localLogStreaming);

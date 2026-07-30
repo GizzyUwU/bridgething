@@ -105,6 +105,9 @@ public actor BridgethingCompanion {
     public let webappResources: WebappResourceService
     #if canImport(CoreLocation)
         private let geoController: GeoController
+        // announced `available.geo` has to track real authorization, or the daemon advertises a
+        // surface that answers permissionDenied to everything
+        private var geoAuthorized = true
     #endif
     #if os(iOS)
         private let audioKeepAlive = BackgroundAudioKeepAlive()
@@ -534,6 +537,14 @@ public actor BridgethingCompanion {
         try? await gateway.capabilities.announce(caps)
     }
 
+    #if canImport(CoreLocation)
+        private func noteGeoAuthorization(_ usable: Bool) async {
+            guard geoAuthorized != usable else { return }
+            geoAuthorized = usable
+            await announceCapabilities()
+        }
+    #endif
+
     private func composeCapabilities() -> GatewayCapabilities {
         let glue = libraryGlue()
         let info = GatewayInfo(
@@ -546,8 +557,13 @@ public actor BridgethingCompanion {
             libVersion: BridgethingCompanionVersion.lib,
             libbridgethingVersion: BridgethingCompanionVersion.libbridgething
         )
+        #if canImport(CoreLocation)
+            let geoAvailable = capFlags.geo && geoAuthorized
+        #else
+            let geoAvailable = capFlags.geo
+        #endif
         let avail = SurfaceAvailability(
-            geo: capFlags.geo,
+            geo: geoAvailable,
             notifications: capFlags.notifications,
             netFetch: capFlags.netFetch,
             netWs: capFlags.netWs,
@@ -625,7 +641,9 @@ public actor BridgethingCompanion {
         #if canImport(CoreLocation)
             tasks.append(Task { [weak self] in
                 guard let self else { return }
-                await geoController.start(gateway: gateway)
+                await geoController.start(gateway: gateway) { [weak self] usable in
+                    Task { await self?.noteGeoAuthorization(usable) }
+                }
             })
         #endif
     }

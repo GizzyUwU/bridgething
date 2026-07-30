@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "vite build && cp dist/overlay.js ../../crates/core/src/overlay/overlay.js",
+    "build": "vite build && cp dist/overlay.js ../../crates/core/src/overlay/overlay.js && vite build -c vite.geo.config.ts && cp dist/geo.js ../../crates/core/src/overlay/geo.js",
     "dev": "vite",
     "typecheck": "tsc --noEmit"
   },

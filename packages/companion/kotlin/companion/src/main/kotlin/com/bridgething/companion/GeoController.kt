@@ -152,6 +152,11 @@ public class GeoController(
         return fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED
     }
 
+    // read live on every capability compose, so a grant made in settings takes effect on the next
+    // announce without needing a permission-change callback android does not offer
+    public override val canProvideLocation: Boolean
+        get() = hasLocationPermission()
+
     private fun makePosition(loc: Location): Position {
         val ts = loc.time.coerceAtLeast(0L) / 1000L
         return Position(

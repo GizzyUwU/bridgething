@@ -17,6 +17,23 @@ use crate::{bluetooth::BluetoothMan, net::WireEventBus};
 
 #[cfg(feature = "mic")]
 mod alsa_capture;
+#[cfg(feature = "mic")]
+mod wakeword;
+
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+struct Detection {
+  score: f32,
+}
+
+async fn next_detection(hits: &mut Option<mpsc::Receiver<Detection>>) -> Detection {
+  let Some(hits) = hits else {
+    return std::future::pending().await;
+  };
+  match hits.recv().await {
+    Some(hit) => hit,
+    None => std::future::pending().await,
+  }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CaptureFormat {
@@ -32,7 +49,7 @@ impl Default for CaptureFormat {
       sample_rate_hz: 16_000,
       channels: 1,
       bits_per_sample: 16,
-      frame_samples: 320,
+      frame_samples: 256,
     }
   }
 }
@@ -51,7 +68,10 @@ impl CaptureFormat {
 pub struct MicConfig {
   pub format: CaptureFormat,
   pub device: String,
-  pub capture_channels: u16,
+  #[cfg(feature = "mic")]
+  pub dsp: bridgething_dsp::pipeline::Config,
+  #[cfg(feature = "mic")]
+  pub wakeword_socket: std::path::PathBuf,
 }
 
 impl Default for MicConfig {
@@ -59,7 +79,13 @@ impl Default for MicConfig {
     Self {
       format: CaptureFormat::default(),
       device: "hw:0,0".to_string(),
-      capture_channels: 4,
+      #[cfg(feature = "mic")]
+      dsp: bridgething_dsp::pipeline::Config {
+        adaptation: Some(bridgething_dsp::scene::Config::default()),
+        ..bridgething_dsp::pipeline::Config::default()
+      },
+      #[cfg(feature = "mic")]
+      wakeword_socket: std::path::PathBuf::from("/run/bridgething-wakeword.sock"),
     }
   }
 }
@@ -202,26 +228,79 @@ async fn run_loop(
   bluetooth: BluetoothMan,
   config: MicConfig,
 ) {
-  let (frame_tx, mut frame_rx) = mpsc::channel::<CapturedFrame>(64);
-  let mut session: Option<Session> = None;
+  let (frame_tx, mut frame_rx) = mpsc::channel::<bytes::Bytes>(64);
+  #[cfg(feature = "mic")]
+  let (link, hits, _link_handle) = wakeword::WakeWordLink::spawn(config.wakeword_socket.clone());
+  #[cfg(feature = "mic")]
+  let mut hits = Some(hits);
+  #[cfg(not(feature = "mic"))]
+  let mut hits = None;
+  #[cfg(feature = "mic")]
+  let mut capture = open_capture(&config, &frame_tx);
+  #[cfg(not(feature = "mic"))]
+  let mut capture: Option<Capture> = None;
+  let mut stream: Option<Stream> = None;
 
   loop {
     tokio::select! {
       cmd = rx.recv() => {
         let Some(cmd) = cmd else { break; };
-        handle_cmd(cmd, &state, &bus, &bluetooth, &config, &frame_tx, &mut session).await;
+        handle_cmd(cmd, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream).await;
       }
       Some(frame) = frame_rx.recv() => {
-        forward_frame(frame, &bluetooth, &session).await;
+        #[cfg(feature = "mic")]
+        link.offer(frame.clone());
+        if let Some(open) = stream.as_mut() {
+          forward_frame(frame, open, &bluetooth).await;
+        }
+      }
+      hit = next_detection(&mut hits) => {
+        on_wake_word(hit, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream).await;
       }
       else => break,
     }
   }
 
-  if let Some(s) = session {
-    s.stop();
+  if let Some(c) = capture {
+    c.stop();
   }
   tracing::debug!("mic manager loop exiting");
+}
+
+fn open_capture(config: &MicConfig, frames: &mpsc::Sender<bytes::Bytes>) -> Option<Capture> {
+  match Capture::start(config.clone(), frames.clone()) {
+    Ok(capture) => {
+      tracing::info!(device = config.device, "microphone open");
+      Some(capture)
+    }
+    Err(err) => {
+      tracing::warn!("microphone unavailable: {err}");
+      None
+    }
+  }
+}
+
+async fn on_wake_word(
+  hit: Detection,
+  state: &Arc<RwLock<State>>,
+  bus: &WireEventBus,
+  bluetooth: &BluetoothMan,
+  config: &MicConfig,
+  frames: &mpsc::Sender<bytes::Bytes>,
+  capture: &mut Option<Capture>,
+  stream: &mut Option<Stream>,
+) {
+  if let Some(open) = capture.as_ref() {
+    open.mark_target();
+  }
+  if state.read().await.muted {
+    tracing::debug!("wake word fired while muted; ignoring");
+    return;
+  }
+  match start_stream(state, bus, bluetooth, config, frames, capture, stream).await {
+    Ok(id) => tracing::info!(score = hit.score, stream = %id, "wake word opened the uplink"),
+    Err(err) => tracing::warn!("wake word could not open the uplink: {err}"),
+  }
 }
 
 async fn handle_cmd(
@@ -230,26 +309,30 @@ async fn handle_cmd(
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
   config: &MicConfig,
-  frame_tx: &mpsc::Sender<CapturedFrame>,
-  session: &mut Option<Session>,
+  frame_tx: &mpsc::Sender<bytes::Bytes>,
+  capture: &mut Option<Capture>,
+  stream: &mut Option<Stream>,
 ) {
   match cmd {
     Cmd::Start { reply } => {
-      let outcome = start_session(state, bus, bluetooth, config, frame_tx, session).await;
+      let outcome = start_stream(state, bus, bluetooth, config, frame_tx, capture, stream).await;
       let _ = reply.send(outcome);
     }
     Cmd::Stop { reason, reply } => {
-      stop_session(state, bus, bluetooth, session, reason).await;
+      stop_stream(state, bus, bluetooth, stream, reason).await;
       let _ = reply.send(());
     }
     Cmd::Mute { preserve, reply } => {
-      let was_capturing = {
+      let was_open = {
         let mut guard = state.write().await;
         guard.muted = true;
         guard.capturing
       };
-      if was_capturing && !preserve {
-        stop_session(state, bus, bluetooth, session, VoiceCloseReason::Muted).await;
+      if let Some(open) = capture.take() {
+        open.stop();
+      }
+      if was_open && !preserve {
+        stop_stream(state, bus, bluetooth, stream, VoiceCloseReason::Muted).await;
       } else {
         broadcast_state(bus, state).await;
       }
@@ -260,19 +343,23 @@ async fn handle_cmd(
         let mut guard = state.write().await;
         guard.muted = false;
       }
+      if capture.is_none() {
+        *capture = open_capture(config, frame_tx);
+      }
       broadcast_state(bus, state).await;
       let _ = reply.send(());
     }
   }
 }
 
-async fn start_session(
+async fn start_stream(
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
   config: &MicConfig,
-  frame_tx: &mpsc::Sender<CapturedFrame>,
-  session: &mut Option<Session>,
+  frame_tx: &mpsc::Sender<bytes::Bytes>,
+  capture: &mut Option<Capture>,
+  stream: &mut Option<Stream>,
 ) -> Result<Uuid, MicError> {
   {
     let guard = state.read().await;
@@ -286,15 +373,15 @@ async fn start_session(
     }
   }
 
+  if capture.is_none() {
+    *capture = open_capture(config, frame_tx);
+  }
+  if capture.is_none() {
+    return Err(MicError::Unavailable);
+  }
+
   let stream_id = Uuid::now_v7();
-  let started = match Session::start(stream_id, config.clone(), frame_tx.clone()) {
-    Ok(s) => s,
-    Err(err) => {
-      tracing::warn!("mic capture start failed: {err}");
-      return Err(err);
-    }
-  };
-  *session = Some(started);
+  *stream = Some(Stream { id: stream_id, seq: 0 });
 
   {
     let mut guard = state.write().await;
@@ -313,11 +400,11 @@ async fn start_session(
   Ok(stream_id)
 }
 
-async fn stop_session(
+async fn stop_stream(
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
-  session: &mut Option<Session>,
+  stream: &mut Option<Stream>,
   reason: VoiceCloseReason,
 ) {
   let id = {
@@ -328,9 +415,7 @@ async fn stop_session(
     guard.capturing = false;
     guard.current_stream.take()
   };
-  if let Some(s) = session.take() {
-    s.stop();
-  }
+  stream.take();
   if let Some(stream_id) = id {
     bluetooth
       .gateway_man
@@ -343,19 +428,15 @@ async fn stop_session(
   broadcast_state(bus, state).await;
 }
 
-async fn forward_frame(frame: CapturedFrame, bluetooth: &BluetoothMan, session: &Option<Session>) {
-  let Some(active) = session else {
-    return;
-  };
-  if active.stream_id != frame.stream_id {
-    return;
-  }
+async fn forward_frame(pcm: bytes::Bytes, stream: &mut Stream, bluetooth: &BluetoothMan) {
+  let seq = stream.seq;
+  stream.seq = stream.seq.wrapping_add(1);
   bluetooth
     .gateway_man
     .broadcast_event_bulk(BridgeToGatewayVoiceMsgEvent::Frame(VoiceFrame {
-      stream_id: frame.stream_id,
-      seq: frame.seq,
-      pcm: frame.pcm,
+      stream_id: stream.id,
+      seq,
+      pcm,
     }))
     .await;
 }
@@ -370,33 +451,40 @@ async fn broadcast_state(bus: &WireEventBus, state: &Arc<RwLock<State>>) {
   }
 }
 
-pub(crate) struct CapturedFrame {
-  pub stream_id: Uuid,
-  pub seq: u32,
-  pub pcm: bytes::Bytes,
-}
-
 #[derive(Debug)]
-struct Session {
-  stream_id: Uuid,
+struct Capture {
   #[cfg(feature = "mic")]
   worker: alsa_capture::WorkerHandle,
 }
 
-impl Session {
+impl Capture {
   #[cfg(feature = "mic")]
-  fn start(stream_id: Uuid, config: MicConfig, frames: mpsc::Sender<CapturedFrame>) -> Result<Self, MicError> {
-    let worker = alsa_capture::WorkerHandle::start(stream_id, config, frames)?;
-    Ok(Self { stream_id, worker })
+  fn start(config: MicConfig, frames: mpsc::Sender<bytes::Bytes>) -> Result<Self, MicError> {
+    Ok(Self {
+      worker: alsa_capture::WorkerHandle::start(config, frames)?,
+    })
   }
 
   #[cfg(not(feature = "mic"))]
-  fn start(_stream_id: Uuid, _config: MicConfig, _frames: mpsc::Sender<CapturedFrame>) -> Result<Self, MicError> {
+  fn start(_config: MicConfig, _frames: mpsc::Sender<bytes::Bytes>) -> Result<Self, MicError> {
     Err(MicError::Unavailable)
   }
+
+  #[cfg(feature = "mic")]
+  fn mark_target(&self) {
+    self.worker.mark_target();
+  }
+
+  #[cfg(not(feature = "mic"))]
+  fn mark_target(&self) {}
 
   fn stop(self) {
     #[cfg(feature = "mic")]
     self.worker.stop();
   }
+}
+
+struct Stream {
+  id: Uuid,
+  seq: u32,
 }

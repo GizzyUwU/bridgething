@@ -337,7 +337,7 @@ export type GatewayInfo = {
  */
 export type GeoAccuracy = 'coarse' | 'fine';
 
-export type GeoError = 'permissionDenied' | 'unavailable' | 'unknownToken';
+export type GeoError = 'permissionDenied' | 'notDeclared' | 'unavailable' | 'unknownToken';
 
 export type HardwareError = 'levelOutOfRange' | 'modeMismatch';
 

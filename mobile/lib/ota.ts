@@ -4,11 +4,14 @@ import type {
   BridgethingOtaRun,
   BridgethingOtaStep,
 } from '@bridgething/session-react-native';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import { getSession, registerDomain } from './bridge';
+import { useAppActiveInterval } from './poll';
+
+const NOW_TICK_MS = 500;
 
 type OtaState = {
   poll: BridgethingOtaPollStatus;
@@ -186,11 +189,7 @@ export function useOtaRun(
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(timer);
-  }, [active]);
+  useAppActiveInterval(() => setNow(Date.now()), NOW_TICK_MS, active);
   return active ? now : Date.now();
 }
 

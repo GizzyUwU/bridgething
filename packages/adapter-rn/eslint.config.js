@@ -40,6 +40,6 @@ export default [
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    ignores: ['src/env.d.ts', 'README.md'],
+    ignores: ['lib', 'src/env.d.ts', 'README.md'],
   },
 ];

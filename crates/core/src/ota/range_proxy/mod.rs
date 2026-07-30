@@ -269,7 +269,7 @@ mod tests {
   use tokio_util::bytes::Bytes;
 
   use super::*;
-  use crate::transfer::sinks::TransferEvent;
+  use crate::transfer::sinks::{AckPolicy, TransferEvent};
 
   fn spawn_broker_only(sinks: TransferSinks) -> RangeProxy {
     let (cmd_tx, cmd_rx) = mpsc::channel(16);
@@ -312,7 +312,7 @@ mod tests {
     let proxy = spawn_broker_only(sinks.clone());
     proxy.activate("a".into(), None).await;
     let req_id = Uuid::now_v7();
-    let mut rx = sinks.bind_forward(req_id);
+    let mut rx = sinks.bind_forward(req_id, AckPolicy::OnReceipt);
     proxy.begin_range_active(req_id).await.unwrap();
 
     sinks.fragment(req_id, 0, Bytes::from_static(b"x"));

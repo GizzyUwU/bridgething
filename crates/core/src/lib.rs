@@ -169,6 +169,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let ws_routes = RouteTable::new();
   let stream_routes = RouteTable::new();
   let geo_watchers = state::GeoWatchers::new();
+  let geo_last_fix = state::GeoLastFix::new();
   let tunnel_routes = state::TunnelRoutes::new();
 
   let authority = AuthorityRegistry::new();
@@ -291,6 +292,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     ws_routes,
     stream_routes,
     geo_watchers,
+    geo_last_fix,
     log_tap,
     tunnel_routes,
     transfer_sinks,

@@ -533,7 +533,7 @@ public class BridgethingCompanion(
             libbridgethingVersion = BridgethingCompanionVersion.LIBBRIDGETHING,
         )
         val avail = SurfaceAvailability(
-            geo = capFlags.geo,
+            geo = capFlags.geo && geoController.canProvideLocation,
             notifications = capFlags.notifications,
             netFetch = capFlags.netFetch,
             netWs = capFlags.netWs,

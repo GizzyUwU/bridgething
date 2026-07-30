@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[ $# -eq 0 ] || { echo "usage: bridgething-push-wakeword" >&2; exit 2; }
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOST="${SUPERBIRD_HOST:-bridgething.local}"
+BIN="$REPO_ROOT/target-cross/aarch64-unknown-linux-gnu/release/bridgething-wakeword"
+MODELS="$REPO_ROOT/crates/wakeword/models"
+UNIT="$REPO_ROOT/crates/wakeword/bridgething-wakeword.service"
+
+[ -x "$BIN" ] || { echo "no binary at $BIN; run 'just push-wakeword' so it gets cross-built first" >&2; exit 1; }
+for f in melspectrogram.onnx embedding_model.onnx hey_bridgething.onnx; do
+    [ -f "$MODELS/$f" ] || { echo "missing model: $MODELS/$f" >&2; exit 1; }
+done
+[ -f "$UNIT" ] || { echo "missing unit: $UNIT" >&2; exit 1; }
+
+echo "pushing bridgething-wakeword -> ${HOST}"
+scp -q "$BIN" "root@${HOST}:/tmp/bridgething-wakeword.new"
+scp -q "$MODELS/melspectrogram.onnx" "$MODELS/embedding_model.onnx" "root@${HOST}:/tmp/"
+scp -q "$MODELS/hey_bridgething.onnx" "root@${HOST}:/tmp/"
+scp -q "$MODELS/NOTICE.md" "root@${HOST}:/tmp/wakeword-NOTICE.md"
+scp -q "$UNIT" "root@${HOST}:/tmp/bridgething-wakeword.service"
+
+ssh "root@${HOST}" 'set -e
+    systemctl stop bridgething-wakeword.service 2>/dev/null || true
+    install -d /opt/bridgething/wakeword /var/bridgething/wakeword
+    install -m 0755 /tmp/bridgething-wakeword.new /opt/bridgething/wakeword/bridgething-wakeword
+    install -m 0644 /tmp/melspectrogram.onnx /tmp/embedding_model.onnx /opt/bridgething/wakeword/
+    install -m 0644 /tmp/wakeword-NOTICE.md /opt/bridgething/wakeword/NOTICE.md
+    install -m 0644 /tmp/hey_bridgething.onnx /var/bridgething/wakeword/
+    install -m 0644 /tmp/bridgething-wakeword.service /etc/systemd/system/bridgething-wakeword.service
+    rm -f /tmp/bridgething-wakeword.new /tmp/melspectrogram.onnx /tmp/embedding_model.onnx \
+          /tmp/hey_bridgething.onnx /tmp/wakeword-NOTICE.md /tmp/bridgething-wakeword.service
+    systemctl daemon-reload
+    systemctl enable --now bridgething-wakeword.service'
+
+echo "installed and started. watch it with:"
+echo "  scripts/superbird-ssh 'journalctl -u bridgething-wakeword -f'"

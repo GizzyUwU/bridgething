@@ -165,7 +165,7 @@ async fn the_designated_overlay_replaces_the_builtin_script_body() {
   let planted = plant(&harness, None, true).await;
   let companion = harness.connect_android().await.expect("connect companion");
 
-  let builtin = harness.state().resolve_overlay_script().await.expect("builtin script");
+  let builtin = harness.state().resolve_injected_script().await.expect("builtin script");
   assert!(
     !builtin.contains(CUSTOM_OVERLAY_BODY),
     "builtin overlay must not carry the planted body"
@@ -180,7 +180,7 @@ async fn the_designated_overlay_replaces_the_builtin_script_body() {
     .await
     .expect("set overlay slot");
 
-  let custom = harness.state().resolve_overlay_script().await.expect("custom script");
+  let custom = harness.state().resolve_injected_script().await.expect("custom script");
   assert!(
     custom.ends_with(CUSTOM_OVERLAY_BODY),
     "planted overlay body is injected"
@@ -218,7 +218,7 @@ async fn clearing_the_overlay_slot_restores_the_builtin_script() {
     .await
     .expect("clear overlay slot");
 
-  let script = harness.state().resolve_overlay_script().await.expect("script");
+  let script = harness.state().resolve_injected_script().await.expect("script");
   assert!(
     !script.contains(CUSTOM_OVERLAY_BODY),
     "clearing the slot is the recovery path back to the builtin overlay"
@@ -257,7 +257,7 @@ async fn uninstalling_a_slot_holder_releases_both_slots() {
     builtin_home,
     "home screen falls back to the builtin hub"
   );
-  let script = harness.state().resolve_overlay_script().await.expect("script");
+  let script = harness.state().resolve_injected_script().await.expect("script");
   assert!(
     !script.contains(CUSTOM_OVERLAY_BODY),
     "overlay falls back to the builtin script"

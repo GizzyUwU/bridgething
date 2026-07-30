@@ -3,9 +3,13 @@ import { useEffect, useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
+import { boundedCache } from '../lib/bounded-cache';
 import { getSession } from '../lib/session';
 
 type IconData = { svg?: string; fileUri?: string };
+
+const ICON_CACHE_LIMIT = 96;
+const cache = boundedCache<IconData>(ICON_CACHE_LIMIT);
 
 export function WebappIcon({
   deviceId,
@@ -32,13 +36,20 @@ export function WebappIcon({
       setIcon(null);
       return;
     }
+    const key = `${deviceId}:${id}:${iconHash}`;
+    const cached = cache.get(key);
+    if (cached) {
+      setIcon(cached);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         const result = await session.webappIcon(deviceId, id);
-        if (!cancelled && result) {
-          setIcon({ svg: result.svg, fileUri: result.fileUri });
-        }
+        if (!result) return;
+        const next = { svg: result.svg, fileUri: result.fileUri };
+        cache.set(key, next);
+        if (!cancelled) setIcon(next);
       } catch {
         // icon load failure is non-fatal; the fallback renders.
       }

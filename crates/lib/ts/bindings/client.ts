@@ -911,7 +911,14 @@ export type GeoErrorReply = { error: GeoError };
  * Payload for `geo.getOnce`: fetch a single phone-sourced position
  * fix without registering a standing watch.
  */
-export type GeoGetOnce = { accuracy: GeoAccuracy };
+export type GeoGetOnce = {
+  accuracy: GeoAccuracy;
+  /**
+   * Largest acceptable age, in seconds, for an already-held fix. Absent or
+   * `0` forces a fresh fix from the phone.
+   */
+  maxAgeS?: number | null;
+};
 
 /**
  * Response to `geo.getOnce`.

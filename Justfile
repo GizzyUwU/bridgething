@@ -110,6 +110,10 @@ cross-build: build-image
 cross-build-test: build-image
   docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}},test-tap" {{dev_profile}}
 
+# Cross-check the daemon with the voice stack compiled in; `mic` is out of the shipping feature set
+check-voice: build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo check -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}},mic" --locked
+
 # Release-build the daemon inside the cross image. for any host without an aarch64 toolchain (mac).
 cross-release: build-image
   docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross-release bridgething-build {{release_build}}
@@ -126,6 +130,24 @@ push: cross-build
 # Cross-build the test-tap binary then push to /opt/bridgething/daemon/
 push-test: cross-build-test
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
+
+# Cross-build the wake-word sidecar and push it + its graphs + its unit to the device
+push-wakeword: build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo build --release -p bridgething-wakeword --bin bridgething-wakeword --target {{cross_target}} --locked
+  scripts/bridgething-push-wakeword
+
+# Pack the wake-word runtime tarball the image pins against
+pack-wakeword *args:
+  scripts/bridgething-pack-wakeword {{args}}
+
+# Pack and publish the wake-word runtime + phrase model, printing the manifest fragment
+publish-wakeword *args:
+  scripts/bridgething-publish-wakeword {{args}}
+
+# Cross-build the MFi i2c-3 dev proxy and push it + its unit to the device
+push-mfi-proxy: build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo build --release -p bridgething-mfi-proxy --target {{cross_target}} --locked
+  scripts/bridgething-push-mfi-proxy
 
 # Push a webapp bundle into /var/bridgething/webapps/<name>/
 push-webapp local name="":

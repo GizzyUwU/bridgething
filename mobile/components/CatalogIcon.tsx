@@ -2,15 +2,36 @@ import { useEffect, useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
+import { boundedCache } from '../lib/bounded-cache';
+
 type Resolved =
   | { kind: 'svg'; xml: string }
   | { kind: 'raster' }
   | { kind: 'failed' };
 
-const cache = new Map<string, Resolved>();
-
 const ICON_MAX_BYTES = 64 * 1024;
 const ICON_FETCH_TIMEOUT_MS = 10_000;
+const ICON_CACHE_LIMIT = 96;
+const MAX_INFLIGHT_FETCHES = 4;
+
+const cache = boundedCache<Resolved>(ICON_CACHE_LIMIT);
+
+let inflight = 0;
+const waiting: (() => void)[] = [];
+
+async function acquireFetchSlot(): Promise<void> {
+  if (inflight < MAX_INFLIGHT_FETCHES) {
+    inflight += 1;
+    return;
+  }
+  await new Promise<void>(resolve => waiting.push(resolve));
+  inflight += 1;
+}
+
+function releaseFetchSlot(): void {
+  inflight -= 1;
+  waiting.shift()?.();
+}
 
 function looksLikeSvg(contentType: string | null, body: string): boolean {
   if (contentType && /(^|[/+])svg/i.test(contentType)) return true;
@@ -45,8 +66,14 @@ export function CatalogIcon({
     setResolved(null);
     let cancelled = false;
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), ICON_FETCH_TIMEOUT_MS);
+    let timer: ReturnType<typeof setTimeout> | null = null;
     (async () => {
+      await acquireFetchSlot();
+      if (cancelled) {
+        releaseFetchSlot();
+        return;
+      }
+      timer = setTimeout(() => abort.abort(), ICON_FETCH_TIMEOUT_MS);
       try {
         const res = await fetch(url, { signal: abort.signal });
         if (!res.ok) throw new Error(`icon fetch failed (${res.status})`);
@@ -70,14 +97,17 @@ export function CatalogIcon({
         cache.set(url, next);
         if (!cancelled) setResolved(next);
       } catch {
+        if (cancelled) return;
         cache.set(url, { kind: 'failed' });
-        if (!cancelled) setResolved({ kind: 'failed' });
+        setResolved({ kind: 'failed' });
       } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
+        releaseFetchSlot();
       }
     })();
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [url]);
 

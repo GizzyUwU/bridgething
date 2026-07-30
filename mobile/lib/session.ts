@@ -1,14 +1,10 @@
 import {
   type BridgethingAncsAuthStatus,
-  type BridgethingAuthState,
   type BridgethingDeviceMeta,
   type BridgethingHostInfo,
   type BridgethingNowPlaying,
   type BridgethingProviderInfo,
-  type BridgethingServiceHealth,
   type BridgethingSessionPeer,
-  type BridgethingSessionSnapshot,
-  type SessionEvent,
 } from '@bridgething/session-react-native';
 import { Alert, Platform } from 'react-native';
 import { create } from 'zustand';

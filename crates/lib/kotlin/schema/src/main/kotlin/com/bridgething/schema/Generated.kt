@@ -782,6 +782,10 @@ enum class GeoError(val string: String) {
 	/// refuses (e.g. iOS Always/WhenInUse not granted).
 	@SerialName("permissionDenied")
 	PermissionDenied("permissionDenied"),
+	/// The running webapp's manifest does not list the `geo` permission, so
+	/// the daemon refused before involving the phone.
+	@SerialName("notDeclared")
+	NotDeclared("notDeclared"),
 	/// Companion is connected but cannot produce a fix (no GPS, airplane
 	/// mode, indoors with no fallback).
 	@SerialName("unavailable")

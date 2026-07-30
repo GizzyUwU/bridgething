@@ -41,6 +41,11 @@ pub trait CommandDriver {
 }
 
 #[async_trait]
+pub trait WebappProvision {
+  async fn activate_webapp_declaring(&self, permissions: &[&str]) -> Result<()>;
+}
+
+#[async_trait]
 pub trait Iap2OutboundObserve {
   async fn iap2_outbound(&self) -> Result<Iap2OutboundObserver>;
 }
@@ -70,6 +75,13 @@ impl ModernClientDriver for Harness {
 impl CommandDriver for Harness {
   async fn command_client(&self) -> Result<CommandClient> {
     self.connect_command_client().await
+  }
+}
+
+#[async_trait]
+impl WebappProvision for Harness {
+  async fn activate_webapp_declaring(&self, permissions: &[&str]) -> Result<()> {
+    Harness::activate_webapp_declaring(self, permissions).await.map(|_| ())
   }
 }
 

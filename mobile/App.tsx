@@ -12,7 +12,6 @@ import { Settings as SettingsIcon } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  AppState,
   Platform,
   StatusBar,
   useColorScheme,

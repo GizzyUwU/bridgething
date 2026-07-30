@@ -136,8 +136,12 @@ impl Connection {
     match serde_json::from_str::<PossibleRecvMsg>(text.as_str()) {
       Ok(msg) => self.handle_decoded(msg).await,
       Err(error) => {
+        let reason = match serde_json::from_str::<ClientToBridgeMsg>(text.as_str()) {
+          Err(modern) => modern.to_string(),
+          Ok(_) => error.to_string(),
+        };
         self
-          .nack_undecodable(try_probe_envelope_json(text.as_bytes()), &error.to_string())
+          .nack_undecodable(try_probe_envelope_json(text.as_bytes()), &reason)
           .await
       }
     }
@@ -153,8 +157,12 @@ impl Connection {
     match rmp_serde::from_slice::<PossibleRecvMsg>(&payload) {
       Ok(msg) => self.handle_decoded(msg).await,
       Err(error) => {
+        let reason = match rmp_serde::from_slice::<ClientToBridgeMsg>(&payload) {
+          Err(modern) => modern.to_string(),
+          Ok(_) => error.to_string(),
+        };
         self
-          .nack_undecodable(try_probe_envelope_msgpack(&payload), &error.to_string())
+          .nack_undecodable(try_probe_envelope_msgpack(&payload), &reason)
           .await
       }
     }
@@ -172,7 +180,9 @@ impl Connection {
       let nack = BridgeToClientMsg {
         id: Uuid::now_v7(),
         meta: MsgMeta::Response(ResponseMeta { request_id }),
-        data: BridgeToClientMsgData::Error(WireError::Unsupported),
+        data: BridgeToClientMsgData::Error(WireError::Malformed {
+          reason: error.to_owned(),
+        }),
       };
       self.send(PossibleSendMsg::Modern(nack)).await;
     }

@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
   bluetooth::BluetoothMan,
-  transfer::sinks::{ForwardStream, TransferEvent, TransferSinks},
+  transfer::sinks::{AckPolicy, ForwardStream, TransferEvent, TransferSinks},
 };
 
 const INGEST_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -92,7 +92,7 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
   };
 
   let request_id = Uuid::now_v7();
-  let body_rx = state.sinks.bind_forward(request_id);
+  let body_rx = state.sinks.bind_forward(request_id, AckPolicy::OnReceipt);
   let begin = match state.proxy.begin_range_active(request_id).await {
     Ok(begin) => begin,
     Err(BeginRangeError::NoActiveOta) => {
@@ -487,7 +487,7 @@ mod tests {
   async fn acks_flow_on_receipt_while_reader_stalls() {
     let sinks = TransferSinks::default();
     let request_id = Uuid::now_v7();
-    let body_rx = sinks.bind_forward(request_id);
+    let body_rx = sinks.bind_forward(request_id, AckPolicy::OnReceipt);
 
     let expected: u64 = 64 * 1024;
     let (writer, mut reader) = spool::create(&spool_temp_dir(), "ack-test").await.unwrap();
@@ -559,7 +559,7 @@ mod tests {
   async fn abandon_mid_stream_fails_the_body() {
     let sinks = TransferSinks::default();
     let request_id = Uuid::now_v7();
-    let body_rx = sinks.bind_forward(request_id);
+    let body_rx = sinks.bind_forward(request_id, AckPolicy::OnReceipt);
 
     let (writer, reader) = spool::create(&spool_temp_dir(), "abandon-test").await.unwrap();
     tokio::spawn(ingest_pump(

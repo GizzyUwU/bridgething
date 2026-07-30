@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="${1:-$REPO_ROOT/target-cross/wakeword-runtime.tar.gz}"
+TARGET=aarch64-unknown-linux-gnu
+
+log() { printf '\033[1;36m[pack-wakeword]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[pack-wakeword] error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+command -v docker >/dev/null 2>&1 || die "docker is needed for a reproducible build"
+
+log "cross-building the sidecar"
+docker run --rm \
+  -v "$REPO_ROOT:/work" -w /work \
+  -v bridgething-cargo-registry:/usr/local/cargo/registry \
+  -e CARGO_TARGET_DIR=/work/target-cross \
+  bridgething-build \
+  cargo build --release -p bridgething-wakeword --bin bridgething-wakeword --target "$TARGET" --locked
+
+BIN="$REPO_ROOT/target-cross/$TARGET/release/bridgething-wakeword"
+MODELS="$REPO_ROOT/crates/wakeword/models"
+[ -f "$BIN" ] || die "no binary at $BIN"
+for f in melspectrogram.onnx embedding_model.onnx NOTICE.md; do
+  [ -f "$MODELS/$f" ] || die "missing $MODELS/$f"
+done
+
+log "packing $OUT"
+mkdir -p "$(dirname "$OUT")"
+docker run --rm \
+  -v "$REPO_ROOT:/work" -w /work \
+  bridgething-build sh -c '
+    set -e
+    stage=$(mktemp -d)
+    chmod 0755 "$stage"
+    install -m 0755 "target-cross/'"$TARGET"'/release/bridgething-wakeword" "$stage/bridgething-wakeword"
+    install -m 0644 crates/wakeword/models/melspectrogram.onnx "$stage/melspectrogram.onnx"
+    install -m 0644 crates/wakeword/models/embedding_model.onnx "$stage/embedding_model.onnx"
+    install -m 0644 crates/wakeword/models/NOTICE.md "$stage/NOTICE.md"
+    tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+        -C "$stage" -cf - . | gzip -n -9 > "'"${OUT#"$REPO_ROOT/"}"'"
+    rm -rf "$stage"
+  '
+
+SHA=$(shasum -a 256 "$OUT" | awk '{print $1}')
+SIZE=$(wc -c <"$OUT" | tr -d ' ')
+log "wrote $OUT"
+log "  size   $SIZE"
+log "  sha256 $SHA"
+log "publish it with scripts/bridgething-publish-wakeword"

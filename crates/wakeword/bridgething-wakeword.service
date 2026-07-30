@@ -1,0 +1,21 @@
+[Unit]
+Description=Bridgething wake word detector
+Documentation=https://github.com/JoeyEamigh/bridgething
+ConditionPathExists=/var/bridgething/wakeword/hey_bridgething.onnx
+
+[Service]
+Type=simple
+Environment=RUST_LOG=info
+
+ExecStart=/opt/bridgething/wakeword/bridgething-wakeword \
+    /run/bridgething-wakeword.sock \
+    /opt/bridgething/wakeword \
+    /var/bridgething/wakeword/hey_bridgething.onnx \
+    0.5
+ExecStopPost=-/bin/rm -f /run/bridgething-wakeword.sock
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

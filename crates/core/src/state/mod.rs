@@ -36,7 +36,7 @@ mod webapps;
 
 pub use audio::{AudioError, AudioManager};
 pub use browse_content::BrowseContentCache;
-pub use geo_watchers::{GeoWatchers, WatchAggregate, WatchChange};
+pub use geo_watchers::{GeoLastFix, GeoWatchers, WatchAggregate, WatchChange};
 pub use log_tap::{LogTap, LogTapLayer};
 pub use lyrics::LyricsCache;
 pub use playback_targets::{PlaybackTargetError, PlaybackTargetStore};
@@ -49,6 +49,8 @@ pub use time::TimeManager;
 pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
 pub use webapps::{BROWSER_WEBAPP_ID, HUB_WEBAPP_ID, STOCK_WEBAPP_ID, WebappRegistry};
 pub(crate) use webapps::{extract_zip, sha256_hex};
+
+pub const GEO_PERMISSION: &str = "geo";
 
 pub type State = Arc<AppState>;
 
@@ -77,6 +79,7 @@ pub struct AppState {
   pub ws_routes: RouteTable,
   pub stream_routes: RouteTable,
   pub geo_watchers: GeoWatchers,
+  pub geo_last_fix: GeoLastFix,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
   pub playback_targets: PlaybackTargetStore,
@@ -122,6 +125,7 @@ impl AppState {
       ws_routes,
       stream_routes,
       geo_watchers,
+      geo_last_fix,
       log_tap,
       tunnel_routes,
       playback_targets,
@@ -157,6 +161,7 @@ impl AppState {
       ws_routes,
       stream_routes,
       geo_watchers,
+      geo_last_fix,
       log_tap,
       tunnel_routes,
       playback_targets,
@@ -177,6 +182,16 @@ impl AppState {
 
   pub async fn active_webapp(&self) -> StateResult<Option<Uuid>> {
     self.meta_store.active_webapp(&self.webapps).await
+  }
+
+  pub async fn active_webapp_has_permission(&self, permission: &str) -> bool {
+    let Ok(Some(active_id)) = self.active_webapp().await else {
+      return false;
+    };
+    let Some(bundle) = self.webapps.bundle(active_id).await else {
+      return false;
+    };
+    bundle.manifest.permissions.iter().any(|p| p == permission)
   }
 
   pub async fn launcher_webapp(&self) -> StateResult<Option<Uuid>> {
@@ -224,7 +239,7 @@ impl AppState {
     Ok(())
   }
 
-  pub async fn resolve_overlay_script(&self) -> Option<std::sync::Arc<String>> {
+  pub async fn resolve_injected_script(&self) -> Option<std::sync::Arc<String>> {
     let profile = match self.active_webapp().await.ok().flatten() {
       Some(id) => self.webapps.manifest(id).await.map(|m| m.overlays).unwrap_or_default(),
       None => libbridgething::OverlayProfile::default(),
@@ -244,11 +259,12 @@ impl AppState {
         None
       }
     });
-    crate::overlay::overlay_script(&profile, self.modern_port, custom.as_deref())
+    let geo_permitted = self.active_webapp_has_permission(GEO_PERMISSION).await;
+    crate::overlay::injected_script(&profile, self.modern_port, custom.as_deref(), geo_permitted)
   }
 
   pub async fn sync_overlay(&self, run_immediately: bool) {
-    let script = self.resolve_overlay_script().await.map(chrome::OverlayScript);
+    let script = self.resolve_injected_script().await.map(chrome::OverlayScript);
     if let Err(e) = self
       .chrome
       .send(chrome::ChromeCommand::SetOverlay {
@@ -303,6 +319,7 @@ pub struct StateAssembly {
   pub ws_routes: RouteTable,
   pub stream_routes: RouteTable,
   pub geo_watchers: GeoWatchers,
+  pub geo_last_fix: GeoLastFix,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
   pub playback_targets: PlaybackTargetStore,

@@ -52,8 +52,6 @@ jobs:
           version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
           [[ -n "$version" ]] || { echo "could not read the workspace version from Cargo.toml" >&2; exit 1; }
 
-          # the manifest regen on the site side refuses to build a release it has no notes for, and
-          # by then the binary would already be on R2.
           notes="releases/${version}.md"
           [[ -f "$notes" ]] || { echo "missing daemon release notes: $notes" >&2; exit 1; }
           declared=$(sed -n 's/^version:[[:space:]]*//p' "$notes" | head -n1 | tr -d "\"' ")
@@ -65,7 +63,6 @@ jobs:
             *)   channels="$CHANNEL_INPUT" ;;
           esac
 
-          # a 404 is the answer, not an error, so curl stays quiet about it.
           published() { curl -fs -o /dev/null --max-time 20 -I "${OTA_PUBLIC_BASE}/$1" 2>/dev/null; }
 
           missing=0
@@ -79,8 +76,6 @@ jobs:
             done
           done
 
-          # a hand-started run always proceeds: it may be republishing stock, whose version lives in
-          # another repo and cannot be checked from here.
           run=true
           [[ "${{ github.event_name }}" == "push" && "$missing" == "0" ]] && run=false
 
@@ -130,8 +125,6 @@ jobs:
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone
-          # no_check_bucket: rclone otherwise issues CreateBucket before an upload,
-          # which an R2 object-read-write token denies with a 403.
           cat > ~/.config/rclone/rclone.conf <<EOF
           [r2]
           type = s3
@@ -170,7 +163,6 @@ jobs:
           set -euo pipefail
           webapps='{}'
 
-          # --builtin: these declare a role and are deliberately not catalog apps.
           zip_it() {
             local name="$1" dist="$2" meta
             meta=$(bun run scripts/webapp-zip.ts --dist "$dist" --output "/tmp/$name.zip" --builtin)
@@ -190,8 +182,6 @@ jobs:
           (
             cd .external/superbird-webapp
             bun install --frozen-lockfile
-            # bun exits nonzero when nothing was left to trust, which is the normal outcome once a
-            # dependency set stops shipping lifecycle scripts. any other failure is real.
             if ! trust=$(bun pm trust --all 2>&1); then
               grep -q '0 scripts ran' <<<"$trust" || { printf '%s\n' "$trust" >&2; exit 1; }
             fi
@@ -213,30 +203,38 @@ jobs:
           set -euo pipefail
           command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
           bin=target-cross-release/aarch64-unknown-linux-gnu/release/bridgething
-          bin_size=$(stat -c%s "$bin")
-          bin_sha=$(sha256sum "$bin" | cut -d' ' -f1)
           dispatch=""
 
-          # a key is written once: same version, same bytes, forever. skipping an existing one keeps
-          # a re-run cheap and stops a changed-but-unbumped artifact from replacing what devices
-          # already pinned a digest against.
-          # lsf exits 0 for a key that does not exist and simply prints nothing, so the output is the
-          # only usable signal; testing its exit status silently skips every upload.
           exists() { [ -n "$(rclone lsf "r2:${R2_BUCKET}/$1" 2>/dev/null)" ]; }
 
           for ch in ${CHANNELS}; do
             echo "::group::$ch"
             daemon_key="daemon/${ch}/${VERSION}/bridgething"
+            zst_key="daemon/${ch}/${VERSION}/bridgething.zst"
             patches='{}'
 
+            pub="/tmp/published-${ch}"
             if exists "$daemon_key"; then
-              echo "daemon ${VERSION} already published on ${ch}; leaving it alone"
+              echo "daemon ${VERSION} already published on ${ch}; describing those bytes, not this build"
+              rclone copyto "r2:${R2_BUCKET}/${daemon_key}" "$pub"
+              # recover the patch table this run will not cut rather than replacing a good one below.
+              patches=$(rclone cat "r2:${R2_BUCKET}/daemon/${ch}/${VERSION}/release.json" 2>/dev/null \
+                | jq -c '.daemon_patches // {}' 2>/dev/null || echo '{}')
             else
-              scripts/r2-put "$bin" "$daemon_key" application/octet-stream
+              cp "$bin" "$pub"
+              scripts/r2-put "$pub" "$daemon_key" application/octet-stream
               dispatch="$dispatch $ch"
+            fi
+            bin_size=$(stat -c%s "$pub")
+            bin_sha=$(sha256sum "$pub" | cut -d' ' -f1)
 
-              # devices update by patching the binary they are already running; one older than the
-              # window, or one whose patch does not apply, full-downloads instead.
+            zst="/tmp/bridgething-${ch}.zst"
+            zstd -q -19 --long=27 "$pub" -o "$zst" -f
+            exists "$zst_key" || scripts/r2-put "$zst" "$zst_key" application/octet-stream
+            zst_size=$(stat -c%s "$zst")
+            zst_sha=$(sha256sum "$zst" | cut -d' ' -f1)
+
+            if [ "$patches" = '{}' ]; then
               if rclone cat "r2:${R2_BUCKET}/manifest.json" >/tmp/manifest.json 2>/dev/null; then
                 from_vers=$(jq -r --arg ch "$ch" '.channels[$ch].releases[]? // empty' /tmp/manifest.json \
                   | sed -E 's/\+image\..*$//' | grep -vx "$VERSION" | sort -Vru | head -n "$DAEMON_PATCH_COUNT" || true)
@@ -245,26 +243,35 @@ jobs:
                   rclone copyto "r2:${R2_BUCKET}/daemon/${ch}/${from}/bridgething" "/tmp/old/${ch}-$from" 2>/dev/null \
                     || { echo "no daemon binary on R2 for ${ch}/${from}; skipping its patch"; continue; }
                   patch="/tmp/${ch}-from-${from}.zst"
-                  zstd -q -19 --long=27 --patch-from="/tmp/old/${ch}-$from" "$bin" -o "$patch" -f \
+                  zstd -q -19 --long=27 --patch-from="/tmp/old/${ch}-$from" "$pub" -o "$patch" -f \
                     || { echo "zstd patch ${from} -> ${VERSION} failed; skipping"; continue; }
                   scripts/r2-put "$patch" "daemon/${ch}/${VERSION}/patches/from-${from}.zst" application/octet-stream
                   patches=$(jq -c --arg from "$from" \
                     --argjson size "$(stat -c%s "$patch")" \
                     --arg sha256 "$(sha256sum "$patch" | cut -d' ' -f1)" \
-                    '. + {($from): {size: $size, sha256: $sha256}}' <<<"$patches")
+                    --arg source_sha256 "$(sha256sum "/tmp/old/${ch}-$from" | cut -d' ' -f1)" \
+                    '. + {($from): {size: $size, sha256: $sha256, source_sha256: $source_sha256}}' <<<"$patches")
                 done
               else
                 echo "no manifest on R2 yet; nothing to patch from"
               fi
             fi
 
+            webapps_pub='{}'
             while read -r name version; do
               key="webapps/${ch}/${name}/${version}/${name}.zip"
+              zip="/tmp/${name}.zip"
               if exists "$key"; then
                 echo "${name} ${version} already published on ${ch}; bump its manifest to publish a change"
+                zip="/tmp/published-${ch}-${name}.zip"
+                rclone copyto "r2:${R2_BUCKET}/${key}" "$zip"
               else
-                scripts/r2-put "/tmp/${name}.zip" "$key" application/zip
+                scripts/r2-put "$zip" "$key" application/zip
               fi
+              webapps_pub=$(jq -c --arg name "$name" --arg version "$version" \
+                --argjson size "$(stat -c%s "$zip")" \
+                --arg sha256 "$(sha256sum "$zip" | cut -d' ' -f1)" \
+                '. + {($name): {version: $version, size: $size, sha256: $sha256}}' <<<"$webapps_pub")
             done < <(jq -r 'to_entries[] | "\(.key) \(.value.version)"' <<<"$WEBAPPS")
 
             # rewritten every run so it always describes the full release for this channel.
@@ -274,10 +281,13 @@ jobs:
               --arg released_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               --argjson size "$bin_size" \
               --arg sha256 "$bin_sha" \
-              --argjson webapps "$WEBAPPS" \
+              --argjson zst_size "$zst_size" \
+              --arg zst_sha256 "$zst_sha" \
+              --argjson webapps "$webapps_pub" \
               --argjson patches "$patches" \
               '{kind: "daemon", channel: $channel, version: $version, released_at: $released_at,
-                artifacts: {daemon: {size: $size, sha256: $sha256}},
+                artifacts: {daemon: {size: $size, sha256: $sha256},
+                            daemon_zst: {size: $zst_size, sha256: $zst_sha256}},
                 webapps: $webapps, daemon_patches: $patches}' \
               >/tmp/release-${ch}.json
             scripts/r2-put "/tmp/release-${ch}.json" "daemon/${ch}/${VERSION}/release.json" \

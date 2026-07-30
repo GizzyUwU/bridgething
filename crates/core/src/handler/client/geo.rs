@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use libbridgething::{
   GeoError,
   client::{
@@ -10,7 +12,7 @@ use libbridgething::{
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::state::{WatchAggregate, WatchChange};
+use crate::state::{GEO_PERMISSION, WatchAggregate, WatchChange};
 
 pub struct GeoHandler {
   handle: MsgHandle,
@@ -30,6 +32,9 @@ impl ClientToBridgeGeoMsgDispatch for GeoHandler {
       accuracy,
       min_interval_ms,
     } = params;
+    if !self.declares_geo().await {
+      return self.respond_error::<GeoWatch>(GeoError::NotDeclared).await;
+    }
     if !self.has_geo() {
       return self.respond_error::<GeoWatch>(GeoError::Unavailable).await;
     }
@@ -65,13 +70,31 @@ impl ClientToBridgeGeoMsgDispatch for GeoHandler {
   }
 
   async fn get_once(&self, params: GeoGetOnce) -> HandlerResult {
-    let GeoGetOnce { accuracy } = params;
+    let GeoGetOnce { accuracy, max_age_s } = params;
+    if !self.declares_geo().await {
+      return self.respond_error::<GeoGetOnce>(GeoError::NotDeclared).await;
+    }
     if !self.has_geo() {
       return self.respond_error::<GeoGetOnce>(GeoError::Unavailable).await;
+    }
+    if let Some(max_age_s) = max_age_s
+      && let Some(position) = self
+        .handle
+        .state
+        .geo_last_fix
+        .fresher_than(Duration::from_secs(max_age_s.into()))
+    {
+      tracing::trace!(max_age_s, "geo.getOnce answered from the held fix; phone not woken");
+      self
+        .handle
+        .respond_to::<GeoGetOnce>(GeoGetOnceReply { position })
+        .await?;
+      return Ok(());
     }
     let outbound = gateway::GeoGetOnce { accuracy };
     match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
+        self.handle.state.geo_last_fix.record(reply.position);
         self
           .handle
           .respond_to::<GeoGetOnce>(GeoGetOnceReply {
@@ -86,6 +109,10 @@ impl ClientToBridgeGeoMsgDispatch for GeoHandler {
 }
 
 impl GeoHandler {
+  async fn declares_geo(&self) -> bool {
+    self.handle.state.active_webapp_has_permission(GEO_PERMISSION).await
+  }
+
   fn has_geo(&self) -> bool {
     let snapshot = self.handle.state.capabilities.snapshot();
     snapshot.gateway.is_some() && snapshot.available.geo

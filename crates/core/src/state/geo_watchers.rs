@@ -2,10 +2,39 @@ use std::{
   collections::HashMap,
   net::SocketAddr,
   sync::{Arc, RwLock},
+  time::{Duration, Instant},
 };
 
-use libbridgething::GeoAccuracy;
+use libbridgething::{GeoAccuracy, Position};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Default)]
+pub struct GeoLastFix {
+  inner: Arc<RwLock<Option<(Position, Instant)>>>,
+}
+
+impl GeoLastFix {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  pub fn record(&self, position: Position) {
+    *self.inner.write().expect("geo last fix poisoned") = Some((position, Instant::now()));
+  }
+
+  pub fn fresher_than(&self, max_age: Duration) -> Option<Position> {
+    let (position, at) = (*self.inner.read().expect("geo last fix poisoned"))?;
+    (at.elapsed() <= max_age).then_some(position)
+  }
+
+  #[cfg(test)]
+  fn record_aged(&self, position: Position, age: Duration) {
+    let at = Instant::now()
+      .checked_sub(age)
+      .expect("test age precedes process start");
+    *self.inner.write().expect("geo last fix poisoned") = Some((position, at));
+  }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct Watcher {
@@ -197,6 +226,55 @@ mod tests {
       })
     );
     assert_eq!(w.owners(), vec![bob]);
+  }
+
+  fn fix() -> Position {
+    Position {
+      lat: 52.5,
+      lon: 6.1,
+      alt_m: Some(4.0),
+      accuracy_m: 6.7,
+      speed_mps: None,
+      heading_deg: None,
+      ts_unix_s: 1_785_349_738,
+    }
+  }
+
+  #[test]
+  fn last_fix_is_empty_before_anything_arrives() {
+    let held = GeoLastFix::new();
+    assert_eq!(held.fresher_than(Duration::from_secs(300)), None);
+  }
+
+  #[test]
+  fn last_fix_serves_inside_tolerance() {
+    let held = GeoLastFix::new();
+    held.record(fix());
+    assert_eq!(held.fresher_than(Duration::from_secs(300)), Some(fix()));
+  }
+
+  #[test]
+  fn last_fix_refuses_outside_tolerance() {
+    let held = GeoLastFix::new();
+    held.record_aged(fix(), Duration::from_secs(600));
+    assert_eq!(held.fresher_than(Duration::from_secs(300)), None);
+  }
+
+  #[test]
+  fn zero_tolerance_always_forces_a_fresh_fix() {
+    let held = GeoLastFix::new();
+    held.record(fix());
+    assert_eq!(held.fresher_than(Duration::ZERO), None);
+  }
+
+  #[test]
+  fn a_newer_fix_replaces_a_stale_one() {
+    let held = GeoLastFix::new();
+    held.record_aged(fix(), Duration::from_secs(600));
+    let mut fresh = fix();
+    fresh.lat = 48.0;
+    held.record(fresh);
+    assert_eq!(held.fresher_than(Duration::from_secs(300)), Some(fresh));
   }
 
   #[test]

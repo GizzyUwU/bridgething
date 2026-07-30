@@ -81,7 +81,7 @@ async fn handle_session(
     }
   };
 
-  if !active_webapp_has_proxy_permission(&state).await {
+  if !state.active_webapp_has_permission(PROXY_PERMISSION).await {
     tracing::debug!(%peer, host = %request.host, port = request.port, "SOCKS request denied: active webapp lacks net.proxy permission");
     write_socks_reply(&mut stream, SOCKS_REP_NOT_ALLOWED).await?;
     return Ok(());
@@ -193,16 +193,6 @@ fn tunnel_error_to_socks_rep(err: &RequestError<TunnelErrorReply>) -> u8 {
     },
     RequestError::Protocol(_) | RequestError::ResponseMismatch => SOCKS_REP_FAILURE,
   }
-}
-
-async fn active_webapp_has_proxy_permission(state: &State) -> bool {
-  let Ok(Some(active_id)) = state.active_webapp().await else {
-    return false;
-  };
-  let Some(bundle) = state.webapps.bundle(active_id).await else {
-    return false;
-  };
-  bundle.manifest.permissions.iter().any(|p| p == PROXY_PERMISSION)
 }
 
 async fn bridge(

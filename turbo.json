@@ -15,7 +15,13 @@
     },
     "typecheck": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "ts/**", "scripts/**", "tsconfig*.json", "package.json"],
+      "inputs": [
+        "src/**",
+        "ts/**",
+        "scripts/**",
+        "tsconfig*.json",
+        "package.json"
+      ],
       "outputs": []
     },
     "test": {
@@ -24,7 +30,21 @@
     },
     "lint": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "ts/**", "scripts/**", "eslint.config.*", "tsconfig*.json", "package.json"],
+      "inputs": [
+        "src/**",
+        "ts/**",
+        "scripts/**",
+        "eslint.config.*",
+        "tsconfig*.json",
+        "package.json",
+        "components/**",
+        "screens/**",
+        "lib/**",
+        "__tests__/**",
+        "__mocks__/**",
+        "*.tsx",
+        "*.ts"
+      ],
       "outputs": []
     },
     "dev": {

@@ -20,6 +20,12 @@ import java.util.UUID
 public interface GeoSource {
     public suspend fun start(gateway: BridgethingGateway)
     public suspend fun stop()
+
+    /**
+     * False only when location is definitively unusable, so the announced `available.geo` does not
+     * advertise a surface that refuses everything. Defaults true for sources with nothing to check.
+     */
+    public val canProvideLocation: Boolean get() = true
 }
 
 public interface VolumeSource {

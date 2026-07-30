@@ -1,0 +1,110 @@
+diff --git a/apple/worklets/apple/AnimationFrameQueue.mm b/apple/worklets/apple/AnimationFrameQueue.mm
+index b93cd2c625ef8a03415ce23c6fc584e51d3696a9..85b7e3b2b364b6dcb7aa6de05e49400fdcbb38a5 100644
+--- a/apple/worklets/apple/AnimationFrameQueue.mm
++++ b/apple/worklets/apple/AnimationFrameQueue.mm
+@@ -3,6 +3,7 @@
+ #import <worklets/apple/AssertJavaScriptQueue.h>
+ #import <worklets/apple/AssertTurboModuleManagerQueue.h>
+ #import <worklets/apple/SlowAnimations.h>
++#import <atomic>
+ #import <chrono>
+ 
+ #if TARGET_OS_OSX
+@@ -28,6 +29,8 @@ const auto POOR = CAFrameRateRangeMake(10, 24, 24);
+   std::chrono::duration<double, std::milli> timeDeltas_[TIME_SAMPLES_AMOUNT];
+   int timeDeltaIndex_;
+   CAFrameRateRange currentFrameRate_;
++  /* Read from the JS thread, written from the main thread. */
++  std::atomic<bool> backgrounded_;
+ }
+ 
+ typedef void (^AnimationFrameCallback)(WorkletsDisplayLink *displayLink);
+@@ -57,9 +60,31 @@ typedef void (^AnimationFrameCallback)(WorkletsDisplayLink *displayLink);
+ #endif // TARGET_OS_OSX
+   [displayLink_ setPaused:TRUE];
+   [displayLink_ addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
++  backgrounded_ = false;
++#if !TARGET_OS_OSX
++  // An app that keeps running in the background keeps its main run loop, so an animation that is
++  // still requesting frames would drive the display link at the full refresh rate against a surface
++  // that is not on screen.
++  NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
++  [center addObserver:self
++             selector:@selector(applicationDidEnterBackground)
++                 name:UIApplicationDidEnterBackgroundNotification
++               object:nil];
++  [center addObserver:self
++             selector:@selector(applicationWillEnterForeground)
++                 name:UIApplicationWillEnterForegroundNotification
++               object:nil];
++#endif // !TARGET_OS_OSX
+   return self;
+ }
+ 
++- (void)dealloc
++{
++#if !TARGET_OS_OSX
++  [[NSNotificationCenter defaultCenter] removeObserver:self];
++#endif // !TARGET_OS_OSX
++}
++
+ - (void)requestAnimationFrame:(std::function<void(double)>)callback
+ {
+   {
+@@ -72,13 +97,43 @@ typedef void (^AnimationFrameCallback)(WorkletsDisplayLink *displayLink);
+ - (void)invalidate
+ {
+   AssertTurboModuleManagerQueue();
++#if !TARGET_OS_OSX
++  [[NSNotificationCenter defaultCenter] removeObserver:self];
++#endif // !TARGET_OS_OSX
+   [displayLink_ invalidate];
+ }
+ 
+ #pragma mark-- private
+ 
++#if !TARGET_OS_OSX
++
++- (void)applicationDidEnterBackground
++{
++  backgrounded_.store(true, std::memory_order_relaxed);
++  [displayLink_ setPaused:TRUE];
++}
++
++- (void)applicationWillEnterForeground
++{
++  backgrounded_.store(false, std::memory_order_relaxed);
++  bool pending;
++  {
++    std::lock_guard<std::mutex> lock(callbacksMutex_);
++    pending = !frameCallbacks_.empty();
++  }
++  if (pending) {
++    [self scheduleQueueExecution];
++  }
++}
++
++#endif // !TARGET_OS_OSX
++
+ - (void)scheduleQueueExecution
+ {
++  if (backgrounded_.load(std::memory_order_relaxed)) {
++    // Callbacks stay queued and flush on the way back to the foreground.
++    return;
++  }
+   [displayLink_ setPaused:FALSE];
+ }
+ 
+@@ -86,6 +141,12 @@ typedef void (^AnimationFrameCallback)(WorkletsDisplayLink *displayLink);
+ {
+   RCTAssertMainQueue();
+ 
++  if (backgrounded_.load(std::memory_order_relaxed)) {
++    // Raced the background transition. Leave the callbacks queued.
++    [displayLink_ setPaused:TRUE];
++    return;
++  }
++
+   auto frameCallbacks = [self pullCallbacks];
+   [displayLink_ setPaused:TRUE];
+ 

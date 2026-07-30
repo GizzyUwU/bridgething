@@ -34,6 +34,7 @@ impl GatewayToBridgeGeoMsgEventDispatch for GeoHandler {
   type Output = HandlerResult;
 
   async fn position(&self, params: Position) -> HandlerResult {
+    self.handle.state.geo_last_fix.record(params);
     self
       .fan_out("position", || BridgeToClientGeoMsgEvent::Position(params))
       .await

@@ -19,10 +19,11 @@ pub use device::DeviceHarness;
 use futures::StreamExt;
 pub use seam::{
   CommandDriver, DeviceIap2Source, DeviceTier, FrameObserve, GatewayDriver, HarnessIap2Source, Iap2OutboundObserve,
-  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport,
+  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport, WebappProvision,
 };
 use tokio::{net::TcpStream, sync::broadcast, task::JoinHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
+use uuid::Uuid;
 
 const DUPLEX_BUF: usize = 256 * 1024;
 const FRAME_OBSERVER_CAPACITY: usize = 256;
@@ -76,6 +77,25 @@ impl Harness {
 
   pub fn state_dir(&self) -> &Path {
     self._state_dir.path()
+  }
+
+  pub async fn activate_webapp_declaring(&self, permissions: &[&str]) -> Result<Uuid> {
+    let id = Uuid::now_v7();
+    let dir = self._state_dir.path().join("webapps").join(id.simple().to_string());
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("index.html"), b"<!doctype html><title>harness</title>")?;
+    let declared = permissions
+      .iter()
+      .map(|p| format!("\"{p}\""))
+      .collect::<Vec<_>>()
+      .join(",");
+    std::fs::write(
+      dir.join("manifest.json"),
+      format!(r#"{{"id":"{id}","name":"harness","version":"0.1.0","config":[],"permissions":[{declared}]}}"#),
+    )?;
+    self.state.webapps.rescan().await;
+    self.state.set_active_webapp(id).await?;
+    Ok(id)
   }
 
   pub async fn restart(mut self) -> Result<Self> {

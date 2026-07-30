@@ -38,6 +38,7 @@ pub struct GeoUnwatch {
   pub token: String,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
@@ -54,6 +55,10 @@ pub struct GeoUnwatch {
 /// fix without registering a standing watch.
 pub struct GeoGetOnce {
   pub accuracy: GeoAccuracy,
+  /// Largest acceptable age, in seconds, for an already-held fix. Absent or
+  /// `0` forces a fresh fix from the phone.
+  #[serde(default)]
+  pub max_age_s: Option<u32>,
 }
 
 #[serde_with::skip_serializing_none]

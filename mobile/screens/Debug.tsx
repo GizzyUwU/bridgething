@@ -4,17 +4,20 @@ import type {
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RefreshCw } from 'lucide-react-native';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Press } from '../components/Press';
+import { usePoll } from '../lib/poll';
 import { getSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
+const POLL_MS = 1500;
+
 type Props = NativeStackScreenProps<RootStackParamList, 'Debug'>;
 
-export function DebugScreen({}: Props) {
+export function DebugScreen(_: Props) {
   const [companion, setCompanion] = useState<BridgethingCompanionDebug | null>(
     null,
   );
@@ -32,11 +35,7 @@ export function DebugScreen({}: Props) {
     setSnapshot(s.status === 'fulfilled' ? s.value : null);
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 1500);
-    return () => clearInterval(id);
-  }, [refresh]);
+  usePoll(refresh, POLL_MS);
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">

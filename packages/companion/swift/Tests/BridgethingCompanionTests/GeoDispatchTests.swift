@@ -1,6 +1,7 @@
 import BridgethingGateway
 import BridgethingSchema
 import BridgethingTestKit
+import CoreLocation
 import XCTest
 
 @testable import BridgethingCompanion
@@ -10,14 +11,22 @@ final class GeoDispatchTests: XCTestCase {
     final class FakeGeoProvider: GeoLocationProviding {
         var onPosition: ((Position) -> Void)?
         var onError: ((GeoError) -> Void)?
+        var onAuthorizationChange: ((Bool) -> Void)?
 
         let canned: Position
         var nextError: GeoError?
         var swallowOnce = false
         var cancelOnceCalls = 0
         var failOnStart: GeoError?
+        var canProvideLocation = true
 
         init(canned: Position) { self.canned = canned }
+
+        /// Drive the authorization callback the way CoreLocation's delegate would.
+        func setCanProvideLocation(_ usable: Bool) {
+            canProvideLocation = usable
+            onAuthorizationChange?(usable)
+        }
 
         func configure(accuracy _: GeoAccuracy) {}
         func requestAuthorization() {}
@@ -107,6 +116,58 @@ final class GeoDispatchTests: XCTestCase {
         }
         XCTAssertEqual(position.lat, Self.fix.lat, accuracy: 0.0001)
         await companion.stop()
+    }
+
+    func testLosingAuthorizationReannouncesGeoAsUnavailable() async throws {
+        let provider = FakeGeoProvider(canned: Self.fix)
+        let (companion, driver) = try await boot(provider: provider)
+
+        let first = try await driver.waitOutbound { msg in
+            if case .capabilities(.announce) = msg.data { return true }
+            return false
+        }
+        guard case let .capabilities(.announce(caps)) = first.data else {
+            return XCTFail("expected a capabilities announce, got \(first.data)")
+        }
+        XCTAssertTrue(caps.available.geo, "geo should be advertised while location is usable")
+
+        provider.setCanProvideLocation(false)
+
+        let next = try await driver.waitOutbound { msg in
+            if case let .capabilities(.announce(caps)) = msg.data { return !caps.available.geo }
+            return false
+        }
+        guard case let .capabilities(.announce(revoked)) = next.data else {
+            return XCTFail("expected a re-announce, got \(next.data)")
+        }
+        XCTAssertFalse(revoked.available.geo, "a revoked grant must stop advertising geo")
+        await companion.stop()
+    }
+
+    // MARK: - parked-watch resume predicate
+
+    func testTheCachedFixReplayedWhenArmingTheMonitorDoesNotCountAsMovement() {
+        let parkedAt = CLLocation(latitude: 52.5, longitude: 6.1)
+        // core location replays the last known fix the instant significant-change monitoring is armed;
+        // treating that as movement would restart the watch and loop straight back into a pause
+        XCTAssertFalse(CoreLocationProvider.travelledFarEnough(from: parkedAt, to: parkedAt))
+    }
+
+    func testGpsJitterAtAStandstillDoesNotCountAsMovement() {
+        let parkedAt = CLLocation(latitude: 52.5, longitude: 6.1)
+        let jittered = CLLocation(latitude: 52.500_3, longitude: 6.100_2) // ~35m
+        XCTAssertFalse(CoreLocationProvider.travelledFarEnough(from: parkedAt, to: jittered))
+    }
+
+    func testDrivingOffCountsAsMovement() {
+        let parkedAt = CLLocation(latitude: 52.5, longitude: 6.1)
+        let movedOn = CLLocation(latitude: 52.508, longitude: 6.1) // ~890m, past the monitor's ~500m
+        XCTAssertTrue(CoreLocationProvider.travelledFarEnough(from: parkedAt, to: movedOn))
+    }
+
+    func testWithoutAnAnchorAnyFixHasToCountAsMovement() {
+        let somewhere = CLLocation(latitude: 52.5, longitude: 6.1)
+        XCTAssertTrue(CoreLocationProvider.travelledFarEnough(from: nil, to: somewhere))
     }
 
     func testWatchFailureEmitsErrorEvent() async throws {

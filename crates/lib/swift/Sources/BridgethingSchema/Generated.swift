@@ -1528,6 +1528,9 @@ public enum GeoError: String, Codable, Sendable {
 	/// The user denied location to the companion app, or the OS gate
 	/// refuses (e.g. iOS Always/WhenInUse not granted).
 	case permissionDenied
+	/// The running webapp's manifest does not list the `geo` permission, so
+	/// the daemon refused before involving the phone.
+	case notDeclared
 	/// Companion is connected but cannot produce a fix (no GPS, airplane
 	/// mode, indoors with no fallback).
 	case unavailable

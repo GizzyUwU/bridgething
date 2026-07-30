@@ -1,5 +1,5 @@
 {
-  "version": "0.7.0",
+  "version": "0.8.0",
   "surfaces": [
     {
       "name": "asset",
@@ -2326,6 +2326,10 @@
         {
           "name": "PermissionDenied",
           "description": "The user denied location to the companion app, or the OS gate\nrefuses (e.g. iOS Always/WhenInUse not granted)."
+        },
+        {
+          "name": "NotDeclared",
+          "description": "The running webapp's manifest does not list the `geo` permission, so\nthe daemon refused before involving the phone."
         },
         {
           "name": "Unavailable",

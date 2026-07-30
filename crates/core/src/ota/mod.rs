@@ -36,7 +36,7 @@ use crate::{
   peer::{PeerSnapshot, PeerTracker},
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
-    sinks::{ForwardStream, TransferEvent, TransferSinks},
+    sinks::{AckPolicy, ForwardStream, TransferEvent, TransferSinks},
   },
 };
 
@@ -420,7 +420,7 @@ impl OtaActor {
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
         }
-        let stream_rx = self.sinks.bind_forward(req.transfer.id);
+        let stream_rx = self.sinks.bind_forward(req.transfer.id, AckPolicy::OnDrain);
         self.sinks.seed_forward_ack(req.transfer.id, resume_from_offset as u32);
         self.state = OtaState::Streaming {
           kind,
@@ -497,6 +497,7 @@ impl OtaActor {
       .await;
     match outcome {
       Ok(ChunkOutcome::Continue { received }) => {
+        self.send_ack(peer, transfer_id, received as u32).await;
         let percent = phase_percent(received, expected_size);
         let changed = self.last_streaming_percent != Some(percent);
         let floor_ok = self

@@ -16,7 +16,14 @@ use uuid::Uuid;
 
 pub const MEMORY_SINK_CAP: usize = 256 * 1024;
 pub(crate) const FORWARD_ACK_INTERVAL: u32 = 16 * 1024;
-pub(crate) const FORWARD_SPOOL_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const FORWARD_SPOOL_WARN_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const FORWARD_SPOOL_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AckPolicy {
+  OnReceipt,
+  OnDrain,
+}
 
 #[derive(Debug)]
 pub enum TransferEvent {
@@ -41,6 +48,8 @@ struct ForwardState {
   tx: mpsc::UnboundedSender<TransferEvent>,
   queued: Arc<AtomicUsize>,
   last_ack: u32,
+  policy: AckPolicy,
+  warned: bool,
 }
 
 #[derive(Debug)]
@@ -80,7 +89,7 @@ impl TransferSinks {
       .insert(id, Binding::Memory(MemoryState::default()));
   }
 
-  pub fn bind_forward(&self, id: Uuid) -> ForwardStream {
+  pub fn bind_forward(&self, id: Uuid, policy: AckPolicy) -> ForwardStream {
     let (tx, rx) = mpsc::unbounded_channel::<TransferEvent>();
     let queued = Arc::new(AtomicUsize::new(0));
     self.inner.bindings.lock().unwrap().insert(
@@ -89,6 +98,8 @@ impl TransferSinks {
         tx,
         queued: queued.clone(),
         last_ack: 0,
+        policy,
+        warned: false,
       }),
     );
     ForwardStream { rx, queued }
@@ -133,15 +144,23 @@ impl TransferSinks {
       }
       Some(Binding::Forward(state)) => {
         let len = bytes.len();
-        if state.queued.load(Ordering::Acquire).saturating_add(len) > FORWARD_SPOOL_MAX_BYTES {
-          tracing::warn!(%id, queued = state.queued.load(Ordering::Acquire), "forward spool overrun; abandoning transfer");
+        let queued = state.queued.load(Ordering::Acquire);
+        if queued.saturating_add(len) > FORWARD_SPOOL_MAX_BYTES {
+          tracing::warn!(%id, queued, "forward spool past hard ceiling; abandoning transfer");
           bindings.remove(&id);
           return None;
+        }
+        if queued.saturating_add(len) > FORWARD_SPOOL_WARN_BYTES && !state.warned {
+          state.warned = true;
+          tracing::warn!(%id, queued, "forward spool above soft cap; consumer is behind the sender");
         }
         state.queued.fetch_add(len, Ordering::AcqRel);
         if state.tx.send(TransferEvent::Fragment { offset, bytes }).is_err() {
           tracing::debug!(%id, "transfer consumer gone; unbinding");
           bindings.remove(&id);
+          return None;
+        }
+        if state.policy == AckPolicy::OnDrain {
           return None;
         }
         if received.saturating_sub(state.last_ack) >= FORWARD_ACK_INTERVAL {
@@ -229,7 +248,7 @@ mod tests {
   async fn forward_acks_on_receipt_without_the_consumer_draining() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let _stream = sinks.bind_forward(id);
+    let _stream = sinks.bind_forward(id, AckPolicy::OnReceipt);
 
     let chunk = vec![0u8; FORWARD_ACK_INTERVAL as usize];
     let mut acks = Vec::new();
@@ -249,7 +268,7 @@ mod tests {
   async fn forward_receipt_acks_respect_the_interval() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let _stream = sinks.bind_forward(id);
+    let _stream = sinks.bind_forward(id, AckPolicy::OnReceipt);
 
     let step = (FORWARD_ACK_INTERVAL / 4) as usize;
     let chunk = vec![0u8; step];
@@ -269,7 +288,7 @@ mod tests {
   async fn forward_resume_seeds_the_ack_baseline() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let _stream = sinks.bind_forward(id);
+    let _stream = sinks.bind_forward(id, AckPolicy::OnReceipt);
     let resume = 30 * 1024 * 1024;
     sinks.seed_forward_ack(id, resume);
 
@@ -287,7 +306,7 @@ mod tests {
   async fn forward_spool_is_bounded_in_bytes_not_messages() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let _stream = sinks.bind_forward(id);
+    let _stream = sinks.bind_forward(id, AckPolicy::OnReceipt);
 
     let tiny = vec![0u8; 64];
     let mut offset = 0u32;
@@ -309,7 +328,47 @@ mod tests {
     assert_eq!(
       sinks.fragment(id, offset, frag(&tiny)),
       None,
-      "overrun must have unbound the transfer"
+      "the hard ceiling must have unbound the transfer"
+    );
+  }
+
+  #[tokio::test]
+  async fn forward_soft_cap_keeps_the_transfer_alive() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let _stream = sinks.bind_forward(id, AckPolicy::OnReceipt);
+
+    let chunk = vec![0u8; 64 * 1024];
+    let mut offset = 0u32;
+    while (offset as usize) < FORWARD_SPOOL_WARN_BYTES * 2 {
+      sinks.fragment(id, offset, frag(&chunk));
+      offset += chunk.len() as u32;
+    }
+
+    assert!(
+      sinks.fragment(id, offset, frag(&chunk)).is_some(),
+      "crossing the soft cap must keep acking, not abandon a transfer mid-write"
+    );
+  }
+
+  #[tokio::test]
+  async fn drain_policy_withholds_receipt_acks() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    let mut stream = sinks.bind_forward(id, AckPolicy::OnDrain);
+
+    let chunk = vec![0u8; FORWARD_ACK_INTERVAL as usize * 4];
+    for i in 0..4 {
+      assert_eq!(
+        sinks.fragment(id, i * chunk.len() as u32, frag(&chunk)),
+        None,
+        "a drain-paced sender is acked by its consumer, never on arrival"
+      );
+    }
+
+    assert!(
+      stream.recv().await.is_some(),
+      "fragments are still delivered downstream"
     );
   }
 
@@ -399,7 +458,7 @@ mod tests {
   async fn forward_relays_fragments_and_abandon() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let mut rx = sinks.bind_forward(id);
+    let mut rx = sinks.bind_forward(id, AckPolicy::OnReceipt);
     sinks.fragment(id, 0, frag(b"aa"));
     sinks.abandon(id, "curl gave up".into());
 
@@ -422,7 +481,7 @@ mod tests {
   async fn undrained_consumer_is_not_abandoned() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let _rx = sinks.bind_forward(id);
+    let _rx = sinks.bind_forward(id, AckPolicy::OnReceipt);
     let chunk = vec![0u8; 16 * 1024];
     let mut offset = 0u32;
     for _ in 0..64 {
@@ -440,7 +499,7 @@ mod tests {
   async fn dropped_forward_receiver_unbinds() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
-    let rx = sinks.bind_forward(id);
+    let rx = sinks.bind_forward(id, AckPolicy::OnReceipt);
     drop(rx);
     sinks.fragment(id, 0, frag(b"aa"));
     for _ in 0..100 {
