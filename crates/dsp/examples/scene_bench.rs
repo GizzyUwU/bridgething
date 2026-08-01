@@ -1,13 +1,7 @@
 //! Scores the acoustic front end end to end against rendered multichannel scenes.
 //!
-//! Reads a scene directory written by `nlu/acoustic/scenes.py` and runs every scene through
-//! several front ends before the wake word, so the front end is measured by what it does to
-//! detection rather than by directivity index. The oracle row steers at the scene's true talker
-//! angle and is not a shippable configuration: it is the ceiling any steering estimator could
-//! reach, and the gap between it and broadside is the entire budget available to that work.
-//!
 //! ```text
-//! cargo run --release --example scene_bench -- <scene-dir> <wakeword-models-dir> [noise-prerolls] [recent-tau]
+//! cargo run --release --example scene_bench -- <scene-dir> <phrase-model> [noise-prerolls] [recent-tau] [threshold]
 //! ```
 
 use std::{collections::BTreeMap, env, path::Path};
@@ -23,7 +17,7 @@ use bridgething_wakeword::{WakeWord, features::CHUNK_SAMPLES};
 use serde::Deserialize;
 
 const RATE: f64 = 16_000.0;
-const THRESHOLD: f32 = 0.5;
+const DEFAULT_THRESHOLD: f32 = 0.35;
 const MARGIN: usize = RATE as usize;
 
 #[derive(Deserialize)]
@@ -35,11 +29,21 @@ struct Scene {
   snr_db: Option<f64>,
   speech_start: usize,
   speech_len: usize,
+  #[serde(default)]
+  speech_spans: Vec<[usize; 2]>,
 }
 
 impl Scene {
   fn has_speech(&self) -> bool {
     self.speech_len > 0
+  }
+
+  fn spans(&self) -> Vec<(usize, usize)> {
+    if self.speech_spans.is_empty() {
+      vec![(self.speech_start, self.speech_len)]
+    } else {
+      self.speech_spans.iter().map(|span| (span[0], span[1])).collect()
+    }
   }
 }
 
@@ -110,13 +114,14 @@ fn beamform(interleaved: &[i32], steering_deg: f64, design: Design) -> Vec<f32> 
   out
 }
 
-fn adaptive(steering_deg: f64, trusted: bool, recent_tau_s: f64) -> Beamformer {
+fn adaptive(steering_deg: f64, trusted: bool, recent_tau_s: f64, target_memory: f64) -> Beamformer {
   Beamformer::new(Config {
     steering_deg,
     design: Design::Superdirective { wng_floor_db: -6.0 },
     adaptation: Some(scene::Config {
       degrade_when_unsteered: !trusted,
       recent_tau_s,
+      target_memory,
       ..scene::Config::default()
     }),
     ..Config::default()
@@ -143,7 +148,7 @@ fn beamform_adaptive(
   trusted: bool,
   recent_tau_s: f64,
 ) -> Vec<f32> {
-  let mut beamformer = adaptive(steering_deg, trusted, recent_tau_s);
+  let mut beamformer = adaptive(steering_deg, trusted, recent_tau_s, 0.0);
   preroll(&mut beamformer, interleaved, meta, rounds);
   let mut out = Vec::with_capacity(interleaved.len() / CHANNELS);
   beamformer.process(interleaved, &mut out);
@@ -156,15 +161,23 @@ fn beamform_adaptive_rtf(
   meta: &Scene,
   rounds: usize,
   recent_tau_s: f64,
+  target_memory: f64,
 ) -> Vec<f32> {
-  let mut beamformer = adaptive(steering_deg, false, recent_tau_s);
+  let mut beamformer = adaptive(steering_deg, false, recent_tau_s, target_memory);
   preroll(&mut beamformer, interleaved, meta, rounds);
 
   if meta.has_speech() {
-    let phrase_end = ((meta.speech_start + meta.speech_len) * CHANNELS).min(interleaved.len());
-    let mut discard = Vec::with_capacity(phrase_end / CHANNELS);
-    beamformer.process(&interleaved[..phrase_end], &mut discard);
-    beamformer.mark_target();
+    let mut cursor = 0usize;
+    for (start, len) in meta.spans() {
+      let end = ((start + len) * CHANNELS).min(interleaved.len());
+      if end <= cursor {
+        continue;
+      }
+      let mut discard = Vec::with_capacity((end - cursor) / CHANNELS);
+      beamformer.process(&interleaved[cursor..end], &mut discard);
+      beamformer.mark_target();
+      cursor = end;
+    }
     beamformer.reset_frames();
   }
 
@@ -175,17 +188,28 @@ fn beamform_adaptive_rtf(
 
 fn run_wakeword(detector: &mut WakeWord, mono: &mut [f32], scene: &Scene) -> (bool, usize) {
   HighPass::at_array_knee(RATE).process(mono);
-  detector.reset();
+  detector.reset().expect("the detector should reset");
 
   let window = scene
     .has_speech()
     .then(|| scene.speech_start.saturating_sub(MARGIN)..scene.speech_start + scene.speech_len + MARGIN);
+  let spoken: Vec<std::ops::Range<usize>> = if scene.has_speech() {
+    scene
+      .spans()
+      .into_iter()
+      .map(|(start, len)| start.saturating_sub(MARGIN)..start + len + MARGIN)
+      .collect()
+  } else {
+    Vec::new()
+  };
   let (mut detected, mut false_alarms) = (false, 0usize);
   for (index, chunk) in mono.chunks(CHUNK_SAMPLES).enumerate() {
     let Ok(Some(_)) = detector.push(chunk) else { continue };
-    match &window {
-      Some(range) if range.contains(&(index * CHUNK_SAMPLES)) => detected = true,
-      _ => false_alarms += 1,
+    let at = index * CHUNK_SAMPLES;
+    if window.as_ref().is_some_and(|range| range.contains(&at)) {
+      detected = true;
+    } else if !spoken.iter().any(|range| range.contains(&at)) {
+      false_alarms += 1;
     }
   }
   (detected, false_alarms)
@@ -193,20 +217,24 @@ fn run_wakeword(detector: &mut WakeWord, mono: &mut [f32], scene: &Scene) -> (bo
 
 fn main() {
   let args: Vec<String> = env::args().collect();
-  let (scene_dir, models) = (Path::new(&args[1]), Path::new(&args[2]));
-  let phrase = models.join("hey_bridgething.onnx");
+  let (scene_dir, phrase) = (Path::new(&args[1]), Path::new(&args[2]));
   let rounds: usize = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
   let tau: f64 = args
     .get(4)
     .and_then(|v| v.parse().ok())
     .unwrap_or_else(|| scene::Config::default().recent_tau_s);
+  let threshold: f32 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_THRESHOLD);
+  let only: Vec<String> = args
+    .get(6)
+    .map(|csv| csv.split(',').map(|v| v.trim().to_lowercase()).collect())
+    .unwrap_or_default();
 
   let manifest: Vec<Scene> =
     serde_json::from_slice(&std::fs::read(scene_dir.join("manifest.json")).expect("manifest.json"))
       .expect("manifest parses");
 
   #[allow(clippy::type_complexity)]
-  let front_ends: [(&str, Box<dyn Fn(&[i32], &Scene) -> Vec<f32>>); 6] = [
+  let front_ends: [(&str, Box<dyn Fn(&[i32], &Scene) -> Vec<f32>>); 8] = [
     (
       "channel average",
       Box::new(|scene: &[i32], _: &Scene| channel_average(scene)),
@@ -231,11 +259,19 @@ fn main() {
     ),
     (
       "adaptive noise + measured rtf",
-      Box::new(move |scene: &[i32], meta: &Scene| beamform_adaptive_rtf(scene, 0.0, meta, rounds, tau)),
+      Box::new(move |scene: &[i32], meta: &Scene| beamform_adaptive_rtf(scene, 0.0, meta, rounds, tau, 0.0)),
+    ),
+    (
+      "measured rtf, target memory 0.5",
+      Box::new(move |scene: &[i32], meta: &Scene| beamform_adaptive_rtf(scene, 0.0, meta, rounds, tau, 0.5)),
+    ),
+    (
+      "measured rtf, target memory 0.8",
+      Box::new(move |scene: &[i32], meta: &Scene| beamform_adaptive_rtf(scene, 0.0, meta, rounds, tau, 0.8)),
     ),
   ];
 
-  let mut detector = WakeWord::new(models, &phrase, THRESHOLD).expect("wake word loads");
+  let mut detector = WakeWord::new(phrase, threshold).expect("wake word loads");
   let mut overall: BTreeMap<&str, Tally> = BTreeMap::new();
   let mut per_archetype: BTreeMap<(&str, String), Tally> = BTreeMap::new();
 
@@ -243,10 +279,14 @@ fn main() {
     let Some(scene) = read_scene(&scene_dir.join(&meta.audio)) else {
       continue;
     };
-    for (label, front_end) in &front_ends {
+    for (label, front_end) in front_ends
+      .iter()
+      .filter(|(label, _)| only.is_empty() || only.iter().any(|want| label.to_lowercase().contains(want)))
+    {
       let mut mono = front_end(&scene, meta);
       let quiet = if meta.has_speech() {
-        mono.len().saturating_sub(meta.speech_len + 2 * MARGIN)
+        let spoken: usize = meta.spans().iter().map(|(_, len)| len + 2 * MARGIN).sum();
+        mono.len().saturating_sub(spoken)
       } else {
         mono.len()
       };
@@ -273,7 +313,7 @@ fn main() {
   let with_speech = manifest.iter().filter(|s| s.has_speech()).count();
   println!(
     "{} scenes ({with_speech} carrying a wake word), median snr {median_snr:.1} dB, \
-     {:.1} loudspeakers per scene, threshold {THRESHOLD}, {rounds} noise pre-roll(s), \
+     {:.1} loudspeakers per scene, threshold {threshold}, {rounds} noise pre-roll(s), \
      recent tau {tau}\n",
     manifest.len(),
     speakers as f64 / manifest.len().max(1) as f64

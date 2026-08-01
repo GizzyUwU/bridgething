@@ -350,6 +350,9 @@ impl<'a> TunnelSurface<'a> {
   pub async fn data(&self, payload: TunnelData) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeTunnelMsgEvent::Data(payload)).await
   }
+  pub async fn ack(&self, payload: TunnelAck) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTunnelMsgEvent::Ack(payload)).await
+  }
   pub async fn closed(&self, payload: TunnelClosed) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeTunnelMsgEvent::Closed(payload)).await
   }

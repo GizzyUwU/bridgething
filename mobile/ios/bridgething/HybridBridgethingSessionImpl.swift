@@ -173,7 +173,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             adapter: adapter,
             lyricsResolver: Self.lyricsResolver,
             host: host,
-            capabilities: Self.loadCompanionCapabilityFlags()
+            capabilities: Self.loadCompanionCapabilityFlags(),
+            voice: Self.makeVoiceDispatcher()
         )
         stateLock.lock(); self.companion = companion; stateLock.unlock()
 
@@ -428,19 +429,49 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    public func persistedLogSize() async -> Double { 0 }
-
-    public func logArchives() async -> [BridgethingLogArchive] { [] }
-
-    public func exportLogs(archiveId: String?) async throws -> String {
-        throw SessionError.unsupportedOnPlatform
+    public func persistedLogSize() async -> Double {
+        await onDisk { Double(LogStore.shared.retainedBytes()) }
     }
 
-    public func shareLogs(archiveId: String?) async -> Bool { false }
+    public func logArchives() async -> [BridgethingLogArchive] {
+        await onDisk {
+            LogStore.shared.archives().map {
+                BridgethingLogArchive(
+                    id: $0.id,
+                    startedAt: Double($0.startedAtMs),
+                    bytes: Double($0.bytes),
+                    pinned: $0.pinned,
+                    current: $0.current
+                )
+            }
+        }
+    }
 
-    public func deleteLogArchive(archiveId: String) async {}
+    public func exportLogs(archiveId: String?) async throws -> String {
+        try await Task.detached(priority: .utility) {
+            try LogExport.writeBundle(archiveId: archiveId).path
+        }.value
+    }
 
-    public func clearPersistedLogs() async {}
+    public func shareLogs(archiveId: String?) async -> Bool {
+        let file = await Task.detached(priority: .utility) {
+            try? LogExport.writeBundle(archiveId: archiveId)
+        }.value
+        guard let file else { return false }
+        return await MainActor.run { LogExport.share(file) }
+    }
+
+    public func deleteLogArchive(archiveId: String) async {
+        await onDisk { LogStore.shared.delete(id: archiveId) }
+    }
+
+    public func clearPersistedLogs() async {
+        await onDisk { LogStore.shared.clear() }
+    }
+
+    private func onDisk<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await Task.detached(priority: .utility, operation: work).value
+    }
 
     public func companionDebug() async -> BridgethingCompanionDebug {
         let companion = stateLock.withLock { self.companion }
@@ -874,6 +905,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private static func loadCompanionCapabilityFlags() -> CompanionCapabilityFlags {
         toCompanionFlags(loadCapabilityFlags())
+    }
+
+    /// No intent model ships yet, so the deterministic fast path is the whole
+    /// resolver and catalog lookups have nothing to decorate.
+    private static func makeVoiceDispatcher() -> (any VoiceCapturing)? {
+        guard #available(iOS 26.0, *) else { return nil }
+        return VoiceDispatcher(recognizer: NluSpeechRecognizer(), controller: VoiceController())
     }
 
     private static func toCompanionFlags(_ f: BridgethingCapabilityFlags) -> CompanionCapabilityFlags {
@@ -1512,6 +1550,7 @@ private func toRNOtaKind(_ k: OtaKind) -> BridgethingOtaKind {
     case .daemon: .daemon
     case .builtinWebapp: .builtinwebapp
     case .installedWebapp: .installedwebapp
+    case .wakewordModel: .wakewordmodel
     }
 }
 

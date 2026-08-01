@@ -1964,6 +1964,23 @@ public struct TunnelSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Tunnel::Ack` messages.
+  public var ack: AsyncStream<(deviceId: String, msg: TunnelAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .tunnel(let outer) = message.data,
+             case .ack(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Cross-peer stream of `Tunnel::Close` messages.
   public var close: AsyncStream<(deviceId: String, msg: TunnelClosed)> {
     AsyncStream { continuation in
@@ -2006,6 +2023,20 @@ public struct TunnelSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .tunnel(.data(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Tunnel::Ack` to every connected peer (broadcast).
+  public func ack(_ payload: TunnelAck, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .tunnel(.ack(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -4611,6 +4642,24 @@ public struct TunnelSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Tunnel::Ack` from this peer.
+  public var ack: AsyncStream<TunnelAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .tunnel(let outer) = message.data,
+             case .ack(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of `Tunnel::Close` from this peer.
   public var close: AsyncStream<TunnelClosed> {
     AsyncStream { continuation in
@@ -4651,6 +4700,12 @@ public struct TunnelSurfaceForDevice: Sendable {
   /// Send `Tunnel::Data` to this peer.
   public func data(_ payload: TunnelData, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .tunnel(.data(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Tunnel::Ack` to this peer.
+  public func ack(_ payload: TunnelAck, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .tunnel(.ack(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

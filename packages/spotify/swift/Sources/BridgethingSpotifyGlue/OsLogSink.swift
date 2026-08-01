@@ -14,7 +14,17 @@ import Spotify
             default: logger.notice("\(line, privacy: .public)")
             }
 
+            LogStore.shared.record(level: Self.storeLevel(level), label: target, message: message)
             LocalLogRelay.shared.push(level: level, target: target, message: message)
+        }
+
+        private static func storeLevel(_ level: String) -> LogStore.Level {
+            switch level {
+            case "ERROR": .error
+            case "WARN": .warn
+            case "INFO": .info
+            default: .debug
+            }
         }
     }
 #endif

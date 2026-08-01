@@ -20,7 +20,6 @@ import java.util.UUID
 import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.seconds
 
-/** tunnel dispatch: open/data/close cycle against a real localhost TCP echo server. */
 class TunnelDispatchTest {
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -95,6 +94,40 @@ class TunnelDispatchTest {
             val td = ((echoed.data as GatewayToBridgeMsgData.Tunnel).data as GatewayToBridgeTunnelMsg.Data).data
             assertEquals(id, td.tunnelId)
             assertArrayEquals(payload, td.bytes)
+
+            driver.send(BridgeToGatewayMsgData.Tunnel(BridgeToGatewayTunnelMsg.Close(TunnelClosed(tunnelId = id, reason = null))))
+            companion.stop()
+        }
+    }
+
+    @Test
+    fun `short writes are still acked so the window recovers`() = runBlocking {
+        EchoServer().use { echo ->
+            val (companion, driver) = boot(this)
+            val id = UUID.randomUUID()
+
+            val openResp = withTimeout(5.seconds) {
+                driver.request(
+                    BridgeToGatewayMsgData.Tunnel(
+                        BridgeToGatewayTunnelMsg.Open(TunnelOpen(tunnelId = id, host = "127.0.0.1", port = echo.port.toUShort())),
+                    ),
+                    5.seconds,
+                )
+            }
+            val openOuter = openResp.data as GatewayToBridgeMsgData.Tunnel
+            assertTrue(openOuter.data is GatewayToBridgeTunnelMsg.OpenReply, "expected OpenReply, got ${openOuter.data}")
+
+            val payload = ByteArray(1024) { 0x7a }
+            driver.send(BridgeToGatewayMsgData.Tunnel(BridgeToGatewayTunnelMsg.Data(TunnelData(tunnelId = id, bytes = payload))))
+
+            val acked = withTimeout(5.seconds) {
+                driver.waitOutbound { msg ->
+                    (msg.data as? GatewayToBridgeMsgData.Tunnel)?.data is GatewayToBridgeTunnelMsg.Ack
+                }
+            }
+            val ack = ((acked.data as GatewayToBridgeMsgData.Tunnel).data as GatewayToBridgeTunnelMsg.Ack).data
+            assertEquals(id, ack.tunnelId)
+            assertEquals(payload.size.toUInt(), ack.consumed)
 
             driver.send(BridgeToGatewayMsgData.Tunnel(BridgeToGatewayTunnelMsg.Close(TunnelClosed(tunnelId = id, reason = null))))
             companion.stop()

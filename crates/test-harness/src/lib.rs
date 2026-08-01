@@ -188,6 +188,10 @@ impl Harness {
     self.server_addrs.modern
   }
 
+  pub fn proxy_addr(&self) -> std::net::SocketAddr {
+    self.server_addrs.proxy.expect("SOCKS proxy bound")
+  }
+
   pub async fn open_stock_chrome(&self) -> Result<ChromeView> {
     ChromeView::launch(self.server_addrs.modern, self.server_addrs.stock.port()).await
   }

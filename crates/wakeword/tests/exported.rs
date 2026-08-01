@@ -11,17 +11,13 @@ fn models() -> PathBuf {
 
 #[test]
 fn our_own_exported_model_loads_and_scores() {
-  let phrase = models().join("hey_bridgething.onnx");
+  let phrase = models().join("hey_bridgething.btww");
   if !phrase.exists() {
     eprintln!("no trained model vendored yet, skipping");
     return;
   }
-  assert!(
-    !models().join("hey_bridgething.onnx.data").exists(),
-    "model has external weights; export with external_data=False or the device gets a graph and no weights"
-  );
 
-  let mut detector = WakeWord::new(&models(), &phrase, 0.5).expect("our exported model should load");
+  let mut detector = WakeWord::new(&phrase, 0.5).expect("our exported model should load");
   let audio: Vec<f32> = (0..SAMPLE_RATE * 3)
     .map(|n| {
       let t = n as f64 / SAMPLE_RATE as f64;

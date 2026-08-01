@@ -17,6 +17,7 @@ bridgething-swupdate-sys = { version = "*", path = "crates/swupdate-sys" }
 bridgething-gateway = { version = "*", path = "crates/gateway-rs" }
 bridgething-client = { version = "*", path = "crates/client-rs" }
 bridgething-dsp = { version = "*", path = "crates/dsp" }
+bridgething-wakeword = { version = "*", path = "crates/wakeword" }
 
 serde = { version = "1.0.228" }
 serde_json = { version = "1.0.149" }

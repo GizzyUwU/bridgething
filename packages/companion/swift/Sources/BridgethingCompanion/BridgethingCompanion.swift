@@ -13,6 +13,15 @@ private let osLog = Logger(label: "com.bridgething.companion.core")
 
 public enum CompanionLogLevel: String, Sendable {
     case debug, info, warn, error
+
+    var storeLevel: LogStore.Level {
+        switch self {
+        case .debug: .debug
+        case .info: .info
+        case .warn: .warn
+        case .error: .error
+        }
+    }
 }
 
 public enum BridgethingCompanionVersion {
@@ -105,8 +114,6 @@ public actor BridgethingCompanion {
     public let webappResources: WebappResourceService
     #if canImport(CoreLocation)
         private let geoController: GeoController
-        // announced `available.geo` has to track real authorization, or the daemon advertises a
-        // surface that answers permissionDenied to everything
         private var geoAuthorized = true
     #endif
     #if os(iOS)
@@ -387,6 +394,7 @@ public actor BridgethingCompanion {
         case .error: .error
         }
         let message = "[\(entry.target)] \(entry.message)"
+        LogStore.shared.record(level: level.storeLevel, label: "daemon", message: message)
         DeviceLogRing.shared.push(level: level.rawValue, message: message)
         logObserver?(level, message)
     }
@@ -589,7 +597,7 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in
             guard let self else { return }
             for await (_, ack) in gateway.transfer.ack {
-                await transferAcks.note(transferId: ack.transferId, received: ack.received)
+                await transferAcks.note(transferId: ack.transferId, received: UInt64(ack.received))
             }
         })
         #if os(iOS)

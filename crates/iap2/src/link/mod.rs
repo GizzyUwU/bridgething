@@ -3,7 +3,7 @@ mod established;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use established::EstablishedState;
+use established::{EstablishedState, METER_INTERVAL};
 use tokio::{
   io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
   sync::mpsc,
@@ -350,6 +350,10 @@ impl Link {
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
   {
+    let mut meter_tick = tokio::time::interval(METER_INTERVAL);
+    meter_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    meter_tick.tick().await;
+
     loop {
       while let Some(pkt) = codec.decode(buf)? {
         if pkt.header.control.contains(ControlBits::RST) {
@@ -389,6 +393,9 @@ impl Link {
       let retransmit_deadline = state.next_retransmit_deadline();
 
       tokio::select! {
+        _ = meter_tick.tick() => {
+          state.report_meter();
+        }
         read = reader.read_buf(buf) => {
           let n = read?;
           if n == 0 {

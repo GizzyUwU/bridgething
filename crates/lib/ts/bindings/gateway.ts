@@ -32,6 +32,7 @@ import type {
   NetFetchRequest,
   NetFetchResponse,
   NluResolvedIntent,
+  NluStage,
   Notification,
   NotificationsError,
   OtaError,
@@ -59,9 +60,11 @@ import type {
   StreamEnd,
   StreamError,
   TimeInfo,
+  TunnelAck,
   TunnelClosed,
   TunnelData,
   TunnelError,
+  VoiceCaptureReason,
   VoiceDispatchErrorCode,
   VoiceDispatchTarget,
   WebappError,
@@ -209,6 +212,7 @@ export type BridgeToGatewayTransferMsg =
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
   | { event: 'data'; data: TunnelData }
+  | { event: 'ack'; data: TunnelAck }
   | { event: 'close'; data: TunnelClosed };
 
 export type BridgeToGatewayVoiceMsg =
@@ -391,6 +395,7 @@ export type GatewayToBridgeTunnelMsg =
   | { event: 'openReply'; data: TunnelOpenReply }
   | { event: 'errorReply'; data: TunnelErrorReply }
   | { event: 'data'; data: TunnelData }
+  | { event: 'ack'; data: TunnelAck }
   | { event: 'closed'; data: TunnelClosed };
 
 export type GatewayToBridgeVoiceMsg =
@@ -630,11 +635,9 @@ export type TunnelOpen = { tunnelId: string; host: string; port: number };
 
 export type TunnelOpenReply = Record<symbol, never>;
 
-export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
-
 export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
 
-export type VoiceDispatch = { resolved: NluResolvedIntent };
+export type VoiceDispatch = { resolved: NluResolvedIntent; stage: NluStage | null };
 
 export type VoiceDispatchFailed = { code: VoiceDispatchErrorCode; intent: string; msg: string };
 

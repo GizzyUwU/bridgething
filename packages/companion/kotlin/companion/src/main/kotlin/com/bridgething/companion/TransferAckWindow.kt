@@ -11,26 +11,26 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 internal class TransferAckWindow {
     private val mutex = Mutex()
-    private val received = mutableMapOf<UUID, UInt>()
+    private val received = mutableMapOf<UUID, Long>()
     private val version = MutableStateFlow(0L)
 
-    suspend fun note(transferId: UUID, receivedBytes: UInt) {
+    suspend fun note(transferId: UUID, receivedBytes: Long) {
         mutex.withLock {
-            val prior = received[transferId] ?: 0u
+            val prior = received[transferId] ?: 0L
             if (receivedBytes <= prior) return
             received[transferId] = receivedBytes
         }
         version.update { it + 1 }
     }
 
-    suspend fun receivedBytes(transferId: UUID): UInt = mutex.withLock { received[transferId] ?: 0u }
+    suspend fun receivedBytes(transferId: UUID): Long = mutex.withLock { received[transferId] ?: 0L }
 
     suspend fun finish(transferId: UUID) {
         mutex.withLock { received.remove(transferId) }
         version.update { it + 1 }
     }
 
-    suspend fun waitForProgress(transferId: UUID, prior: UInt, timeoutMs: Long): Boolean =
+    suspend fun waitForProgress(transferId: UUID, prior: Long, timeoutMs: Long): Boolean =
         withTimeoutOrNull(timeoutMs) {
             version.first { receivedBytes(transferId) > prior }
             true
@@ -38,9 +38,9 @@ internal class TransferAckWindow {
 
     suspend fun awaitWindow(transferId: UUID, offset: Long, windowBytes: Long, timeoutMs: Long) {
         while (true) {
-            val acked = receivedBytes(transferId).toLong()
+            val acked = receivedBytes(transferId)
             if (offset < acked + windowBytes) return
-            if (!waitForProgress(transferId, acked.toUInt(), timeoutMs)) {
+            if (!waitForProgress(transferId, acked, timeoutMs)) {
                 finish(transferId)
                 throw IOException("transfer stalled: fragment acks stopped at $offset")
             }

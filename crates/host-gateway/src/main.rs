@@ -9,6 +9,7 @@ mod conn;
 mod install;
 mod ota;
 mod transfer;
+mod tunnel;
 mod webapp;
 
 use std::path::PathBuf;
@@ -62,6 +63,9 @@ enum Command {
   /// Connect, exchange Version, then print every inbound frame until
   /// killed. Outbound traffic is just the initial Version reply.
   Connect,
+  /// Answer the device's tunnel requests by dialing the real host from here,
+  /// giving a net.proxy webapp network access without a phone attached.
+  ServeTunnels,
   /// Open `OtaBegin` for an image-kind update, stream the `.swu` as
   /// `TransferFragment` events on the Background lane, then watch
   /// progress until the daemon hits `Reboot` (or fails). The canonical
@@ -147,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
 
   match cli.cmd {
     Command::Connect => conn::run_connect(&cli.url, chaos).await,
+    Command::ServeTunnels => tunnel::run_serve(&cli.url, chaos).await,
     Command::PushUpdate {
       swu,
       update_url_base,

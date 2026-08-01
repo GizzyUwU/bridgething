@@ -1,5 +1,6 @@
 mod actor;
 pub mod outbound;
+pub mod pacer;
 pub mod sinks;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};

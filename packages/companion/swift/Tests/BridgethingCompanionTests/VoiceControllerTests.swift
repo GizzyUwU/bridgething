@@ -21,6 +21,21 @@ struct VoiceControllerTests {
         #expect(resolution.resolved.intent == "NO_INTENT")
     }
 
+    @Test("with no model configured the fast path still resolves")
+    func noModelKeepsFastPath() async throws {
+        let resolution = try await VoiceController().resolve(transcript: "turn it up")
+        #expect(resolution.stage == .fastPath)
+        #expect(resolution.resolved.intent == "SET_VOLUME")
+    }
+
+    @Test("with no model configured a fast-path miss says so rather than guessing")
+    func noModelRejectsTheTail() async throws {
+        let resolution = try await VoiceController().resolve(transcript: "play the new mitski album")
+        #expect(resolution.stage == .noModel)
+        #expect(resolution.resolved.intent == "NO_INTENT")
+        #expect(resolution.resolved.transcript == "play the new mitski album")
+    }
+
     @Test("an accepted intent carries the decoded slots through to the wire")
     func acceptedIntentKeepsSlots() async throws {
         let client = FakeNluInference(

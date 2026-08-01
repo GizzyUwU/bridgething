@@ -5,30 +5,6 @@ PODS:
   - AppAuth/Core (2.0.0)
   - AppAuth/ExternalUserAgent (2.0.0):
     - AppAuth/Core
-  - BridgethingAdapter (0.1.0):
-    - hermes-engine
-    - NitroModules
-    - RCTRequired
-    - RCTTypeSafety
-    - React-callinvoker
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - BridgethingSession (0.1.0):
     - hermes-engine
     - NitroModules
@@ -2230,7 +2206,6 @@ PODS:
   - Yoga (0.0.0)
 
 DEPENDENCIES:
-  - "BridgethingAdapter (from `../node_modules/@bridgething/adapter-react-native`)"
   - "BridgethingSession (from `../node_modules/@bridgething/session-react-native`)"
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
@@ -2325,8 +2300,6 @@ SPEC REPOS:
     - MMKVCore
 
 EXTERNAL SOURCES:
-  BridgethingAdapter:
-    :path: "../node_modules/@bridgething/adapter-react-native"
   BridgethingSession:
     :path: "../node_modules/@bridgething/session-react-native"
   FBLazyVector:
@@ -2503,7 +2476,6 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
-  BridgethingAdapter: 07ea8dee30d38621c83dc6f81dd362d2738107da
   BridgethingSession: 53bd4de31582efdba58a3c50d5bf0213e74fcdef
   FBLazyVector: 26fd21c75314e101f280d401e97f27d54f3f7064
   hermes-engine: 310bb55373cd68e85e542c33eaac5ace10d642a5

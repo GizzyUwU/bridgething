@@ -153,6 +153,29 @@ pub struct NluResolvedIntent {
 }
 
 #[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum VoiceCaptureReason {
+  #[default]
+  PushToTalk,
+  Assistant,
+  WakeWord,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluStage {
+  FastPath,
+  Model,
+  RejectedNoIntent,
+  RejectedClarify,
+  NoModel,
+}
+
+#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -165,15 +188,13 @@ pub enum VoiceDispatchErrorCode {
   Internal,
 }
 
-/// Where the daemon actually routed a successful dispatch. Carried back
-/// to the companion so it can render the right confirmation UI.
+/// Where the daemon actually routed a successful dispatch
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum VoiceDispatchTarget {
-  /// Transport / playback effect, routed through the daemon's transport
-  /// controller or a player command to the companion.
+  /// Transport / playback effect
   Playback,
   /// A daemon-local device setting (brightness, discoverable, power).
   Device,

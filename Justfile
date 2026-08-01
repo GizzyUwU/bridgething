@@ -8,9 +8,7 @@ cross_release_dir := justfile_directory() / 'target-cross-release'
 device_features := 'superbird'
 dev_profile := '--config profile.release.lto=false --config profile.release.codegen-units=32'
 release_build := 'cargo build --release --locked -p bridgething --target ' + cross_target + ' --no-default-features --features ' + device_features
-device_host := env_var_or_default('SUPERBIRD_HOST', 'bridgething.local')
 device_bt_mac := env_var_or_default('SUPERBIRD_BT_MAC', '30:E3:D6:03:96:1E')
-ssh_args := '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR'
 
 # --- Local dev ---
 
@@ -103,16 +101,13 @@ submodules:
 build-image: submodules
   docker build -t bridgething-build -f scripts/cross-aarch64.Dockerfile .
 
-# Cross-build the daemon for the Car Thing.
-cross-build: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features {{device_features}} {{dev_profile}}
+# Cross-build the daemon. `extra` appends to the shipping feature set: `mic` for voice, `test-tap` for the test binary.
+cross-build extra="": build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}}{{ if extra == '' { '' } else { ',' + extra } }}" {{dev_profile}}
 
-cross-build-test: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross -e RUSTFLAGS='--remap-path-prefix=/work=/bridgething --remap-path-prefix=/usr/local/cargo=/cargo' bridgething-build cargo build --release -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}},test-tap" {{dev_profile}}
-
-# Cross-check the daemon with the voice stack compiled in; `mic` is out of the shipping feature set
-check-voice: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo check -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}},mic" --locked
+# Cross-check the daemon, `extra` as above.
+check extra="": build-image
+  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo check -p bridgething --target {{cross_target}} --no-default-features --features "{{device_features}}{{ if extra == '' { '' } else { ',' + extra } }}" --locked
 
 # Release-build the daemon inside the cross image. for any host without an aarch64 toolchain (mac).
 cross-release: build-image
@@ -123,24 +118,16 @@ cross-release: build-image
 cross-release-native:
   CARGO_TARGET_DIR={{cross_release_dir}} {{release_build}}
 
-# Cross-build then push the daemon to /opt/bridgething/daemon/
-push: cross-build
-  scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
-
-# Cross-build the test-tap binary then push to /opt/bridgething/daemon/
-push-test: cross-build-test
+# Cross-build then push the daemon to /opt/bridgething/daemon/. `just push mic` gets the voice stack.
+push extra="": (cross-build extra)
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
 
 # Cross-build the wake-word sidecar and push it + its graphs + its unit to the device
-push-wakeword: build-image
-  docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross bridgething-build cargo build --release -p bridgething-wakeword --bin bridgething-wakeword --target {{cross_target}} --locked
+# Swap the wake-word phrase model on the connected device and restart the daemon
+push-wakeword:
   scripts/bridgething-push-wakeword
 
-# Pack the wake-word runtime tarball the image pins against
-pack-wakeword *args:
-  scripts/bridgething-pack-wakeword {{args}}
-
-# Pack and publish the wake-word runtime + phrase model, printing the manifest fragment
+# Publish the wake-word phrase model, printing the manifest fragment
 publish-wakeword *args:
   scripts/bridgething-publish-wakeword {{args}}
 
@@ -153,17 +140,21 @@ push-mfi-proxy: build-image
 push-webapp local name="":
   scripts/bridgething-push-webapp {{local}} {{name}}
 
-# SSH into the device. Splits args - watch out for quoting
+# SSH into the device. Forwards the command as one string, so `;` and `&&` reach the device.
 ssh *args:
-  ssh {{ssh_args}} root@{{device_host}} {{args}}
+  @bash -c 'source scripts/device.sh && device_ssh "$1"' -- {{quote(args)}}
 
 # Tail bridgething.service journal.
 logs:
-  ssh {{ssh_args}} root@{{device_host}} journalctl -fu bridgething.service
+  @bash -c 'source scripts/device.sh && device_ssh journalctl -fu bridgething.service'
 
-# set the device's bridgething instance to trace
+# Set the device's bridgething to trace. rootfs is read-only so the drop-in is reboot-scoped.
 trace-dropin:
-  ssh {{ssh_args}} root@{{device_host}} 'mkdir -p /etc/systemd/system/bridgething.service.d && echo -e "[Service]\nEnvironment=RUST_LOG=bridgething=trace,bridgething::ws::connection::send=debug,bridgething::net=debug,libbridgething=trace,bridgething_iap2=trace,bridgething_mfi=trace" > /etc/systemd/system/bridgething.service.d/zz-trace.conf && systemctl daemon-reload && systemctl restart bridgething.service'
+  @bash -c 'source scripts/device.sh && device_ssh "mkdir -p /run/systemd/system/bridgething.service.d && printf \"[Service]\nEnvironment=RUST_LOG=bridgething=trace,bridgething::ws::connection::send=debug,bridgething::net=debug,libbridgething=trace,bridgething_iap2=trace,bridgething_mfi=trace\n\" > /run/systemd/system/bridgething.service.d/zz-trace.conf && systemctl daemon-reload && systemctl restart bridgething.service"'
+
+# Drop the trace override and restart on the normal log level.
+trace-off:
+  @bash -c 'source scripts/device.sh && device_ssh "rm -rf /run/systemd/system/bridgething.service.d && systemctl daemon-reload && systemctl restart bridgething.service"'
 
 # Tunnel chromium's CDP socket from the device's 127.0.0.1:9222 to the host.
 cdp port="9222":
@@ -176,15 +167,15 @@ iter: push logs
 
 # Stop bridgething + ALS (via systemd Conflicts=) and start the i2c-3 proxy.
 mfi-proxy-up:
-  ssh {{ssh_args}} root@{{device_host}} 'systemctl start bridgething-mfi-proxy.service'
+  @bash -c 'source scripts/device.sh && device_ssh "systemctl start bridgething-mfi-proxy.service"'
 
 # Stop the proxy and bring bridgething + ALS back up.
 mfi-proxy-down:
-  ssh {{ssh_args}} root@{{device_host}} 'systemctl stop bridgething-mfi-proxy.service; systemctl start bridgething-als.service bridgething.service'
+  @bash -c 'source scripts/device.sh && device_ssh "systemctl stop bridgething-mfi-proxy.service; systemctl start bridgething-als.service bridgething.service"'
 
 # Tail the proxy's journal.
 mfi-proxy-logs:
-  ssh {{ssh_args}} root@{{device_host}} journalctl -fu bridgething-mfi-proxy.service
+  @bash -c 'source scripts/device.sh && device_ssh journalctl -fu bridgething-mfi-proxy.service'
 
 # --- Misc ---
 

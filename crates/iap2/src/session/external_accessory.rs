@@ -248,11 +248,28 @@ impl EaFlow {
     }
   }
 
-  pub(super) async fn teardown(&mut self, session_events_tx: &mpsc::Sender<SessionEvent>) {
+  pub(super) async fn teardown(
+    &mut self,
+    link_command_tx: Option<&mpsc::Sender<Iap2Command>>,
+    session_events_tx: &mpsc::Sender<SessionEvent>,
+  ) {
     for (stream_id, _inbound) in self.streams.drain() {
-      tracing::info!(stream_id, "iap2 ea: stream closed by link restart");
+      if let Some(tx) = link_command_tx
+        && let Err(err) = send_csm(
+          StatusExternalAccessoryProtocolSession {
+            session_id: stream_id,
+            status: EaSessionStatus::Close,
+          },
+          tx,
+        )
+        .await
+      {
+        tracing::warn!(stream_id, ?err, "iap2 ea: close status send failed");
+      }
+      tracing::info!(stream_id, "iap2 ea: stream torn down");
       emit(session_events_tx, SessionEvent::EaStreamClosed { stream_id }).await;
     }
+    self.app_launch = AppLaunchState::Armed;
   }
 
   pub(super) async fn dispatch_link_data(&mut self, payload: Bytes, session_events_tx: &mpsc::Sender<SessionEvent>) {

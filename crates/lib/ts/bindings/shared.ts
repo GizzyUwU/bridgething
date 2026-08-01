@@ -580,6 +580,12 @@ export type NluSlots = {
   uri: string | null;
 };
 
+/**
+ * Which arm of the companion's resolver produced an intent. Carried so a
+ * surface can tell a deterministic match from a model prediction.
+ */
+export type NluStage = 'fastPath' | 'model' | 'rejectedNoIntent' | 'rejectedClarify' | 'noModel';
+
 export type NluSystemAction = 'reboot' | 'powerOff';
 
 export type NluView = 'library' | 'presets' | 'songs' | 'savedEpisodes' | 'newEpisodes' | 'queue' | 'thisArtist';
@@ -703,10 +709,9 @@ export type OtaFinished = { kind: OtaKind; updateId: string };
  * Companions key reboot expectations off this: image means the device
  * power-cycles; daemon and builtin-webapp mean the daemon process
  * restarts and the gateway link drops and reconnects; installed-webapp
- * applies in place with no restart, and the terminal signal is the
- * `WebappInstalled` event (or an `OtaError`).
+ * and wakeword-model apply in place with no restart.
  */
-export type OtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp';
+export type OtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp' | 'wakewordModel';
 
 /**
  * Stage of the OTA orchestrator. The phase set is shared between
@@ -773,6 +778,10 @@ export type OverlayProfile = {
    * Transient volume level indicator.
    */
   volume: boolean;
+  /**
+   * Voice turn indicator: listening, recognizing, and the outcome.
+   */
+  voice: boolean;
 };
 
 export type Peer = {
@@ -1269,6 +1278,8 @@ export type Track = {
 
 export type TtlRetention = { seconds: number };
 
+export type TunnelAck = { tunnelId: string; consumed: number };
+
 export type TunnelClosed = { tunnelId: string; reason: string | null };
 
 export type TunnelData = { tunnelId: string; bytes: Uint8Array };
@@ -1277,6 +1288,11 @@ export type TunnelError =
   | { type: 'connectFailed'; data: { reason: string } }
   | { type: 'permissionDenied' }
   | { type: 'unavailable' };
+
+/**
+ * What opened a capture session.
+ */
+export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
 
 /**
  * One TTS voice the companion's audio backend can speak as. `id` is

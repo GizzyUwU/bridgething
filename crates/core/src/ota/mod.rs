@@ -4,6 +4,7 @@ mod range_proxy;
 mod slots;
 mod staging;
 mod swupdate;
+mod wakeword_swap;
 mod webapp_swap;
 
 use std::{
@@ -41,6 +42,8 @@ use crate::{
 };
 
 pub type OtaEventTx = mpsc::Sender<BridgeToGatewaySystemMsgEvent>;
+
+pub type WakewordReload = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 pub type InstalledWebappApply = Arc<
   dyn Fn(PathBuf, Option<String>) -> Pin<Box<dyn Future<Output = Result<WebappInfo, WebappError>> + Send>>
@@ -97,6 +100,7 @@ impl OtaOrchestrator {
     range_proxy: RangeProxy,
     peers: PeerTracker,
     installed_apply: InstalledWebappApply,
+    wakeword_reload: WakewordReload,
     sinks: TransferSinks,
     assets: AssetCache,
   ) -> (Self, JoinHandle<()>) {
@@ -111,6 +115,7 @@ impl OtaOrchestrator {
       peers,
       peer_watch,
       installed_apply,
+      wakeword_reload,
       sinks,
       assets,
       self_tx: cmd_tx.clone(),
@@ -198,6 +203,7 @@ struct OtaActor {
   peers: PeerTracker,
   peer_watch: watch::Receiver<crate::peer::PeerSnapshot>,
   installed_apply: InstalledWebappApply,
+  wakeword_reload: WakewordReload,
   sinks: TransferSinks,
   assets: AssetCache,
   self_tx: mpsc::Sender<Command>,
@@ -213,6 +219,7 @@ impl OtaActor {
   async fn run(mut self) {
     tracing::info!("ota orchestrator started");
     staging::sweep_orphans().await;
+    wakeword_swap::sweep_orphans().await;
     loop {
       enum Step {
         Cmd(Option<Command>),
@@ -373,6 +380,13 @@ impl OtaActor {
       return;
     }
 
+    if matches!(req.kind, OtaKind::WakewordModel) && wakeword_swap::target().is_none() {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "this build has nowhere to install a wake word model".into(),
+      }));
+      return;
+    }
+
     if req.provenance.is_some() && !matches!(req.kind, OtaKind::InstalledWebapp) {
       let _ = ack.send(Err(OtaBeginRejected {
         reason: "provenance is only recorded for installed-webapp updates".into(),
@@ -391,7 +405,7 @@ impl OtaActor {
 
     let kind = req.kind;
     let target_dir = match kind {
-      OtaKind::Image | OtaKind::InstalledWebapp => None,
+      OtaKind::Image | OtaKind::InstalledWebapp | OtaKind::WakewordModel => None,
       OtaKind::Daemon | OtaKind::BuiltinWebapp => {
         if crate::paths::is_on_device() {
           Some(crate::paths::bandaid_transfers_dir())
@@ -567,7 +581,7 @@ impl OtaActor {
           tracing::info!("cancel during image write; signalling libswupdate");
           let _ = cancel_tx.send(true);
         }
-        OtaKind::Daemon | OtaKind::BuiltinWebapp | OtaKind::InstalledWebapp => {
+        OtaKind::Daemon | OtaKind::BuiltinWebapp | OtaKind::InstalledWebapp | OtaKind::WakewordModel => {
           tracing::info!(?kind, "cancel during swap/install; not interruptible, ignoring");
         }
       },
@@ -647,6 +661,36 @@ impl OtaActor {
           let _ = self_tx.send(Command::StageFinished { result, peer }).await;
         });
       }
+      OtaKind::WakewordModel => {
+        let reload = self.wakeword_reload.clone();
+        let transfers = self.transfers.clone();
+        tokio::spawn(async move {
+          emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
+          let result = match wakeword_swap::target() {
+            Some(dest) => wakeword_swap::apply(&payload, &dest).await.map(|()| dest),
+            None => Err(wakeword_swap::ApplyError::NoTarget),
+          };
+          let _ = transfers.abandon(update_id.clone()).await;
+          let _ = tokio::fs::remove_file(&payload).await;
+          match result {
+            Ok(path) => {
+              (reload)().await;
+              tracing::info!(%update_id, model = %path.display(), "wake word model applied and reloaded");
+              emit_finished(&events_tx, OtaKind::WakewordModel, update_id.clone()).await;
+            }
+            Err(err) => {
+              tracing::warn!(%update_id, ?err, "wake word model apply failed; the live model is untouched");
+              emit_error(
+                &events_tx,
+                OtaErrorCode::WriteFailed,
+                format!("wake word model apply failed: {err}"),
+              )
+              .await;
+            }
+          }
+          let _ = self_tx.send(Command::WriteFinished).await;
+        });
+      }
       OtaKind::InstalledWebapp => {
         let apply = self.installed_apply.clone();
         let transfers = self.transfers.clone();
@@ -724,7 +768,7 @@ impl OtaActor {
     batch.sort_by_key(|p| match p.kind {
       OtaKind::BuiltinWebapp => 0,
       OtaKind::Daemon => 1,
-      OtaKind::Image | OtaKind::InstalledWebapp => 2,
+      OtaKind::Image | OtaKind::InstalledWebapp | OtaKind::WakewordModel => 2,
     });
 
     let mut committed: Vec<&StagedPiece> = Vec::new();
@@ -900,7 +944,7 @@ async fn run_stage(
       code: OtaErrorCode::WriteFailed,
       msg: format!("builtin-webapp stage failed: {err}"),
     })?,
-    OtaKind::Image | OtaKind::InstalledWebapp => {
+    OtaKind::Image | OtaKind::InstalledWebapp | OtaKind::WakewordModel => {
       return Err(WriteError {
         code: OtaErrorCode::Internal,
         msg: "run_stage called for a non-bandaid kind".into(),
@@ -1081,6 +1125,7 @@ mod tests {
         }
       })
     });
+    let wakeword_reload: WakewordReload = Arc::new(|| Box::pin(async {}));
     let sinks = TransferSinks::default();
     let asset_db = crate::db::open(None).await.unwrap();
     let (assets, _asset_handle) = AssetCache::init(asset_db, root.join("assets")).await.unwrap().spawn();
@@ -1102,6 +1147,7 @@ mod tests {
       range_proxy::noop_proxy(),
       peers,
       installed_apply,
+      wakeword_reload,
       sinks.clone(),
       assets,
     );

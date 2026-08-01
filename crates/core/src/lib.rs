@@ -40,11 +40,13 @@ use capabilities::CapabilitiesRegistry;
 #[cfg(feature = "test-tap")]
 pub use handler::client::{ClientMode, PossibleSendMsg};
 use handler::{ClientHandler, GatewayHandler};
-use libbridgething::{BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
+use libbridgething::{
+  BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_SOCKS_PROXY_PORT, BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT,
+};
 use mic::{MicConfig, MicManager};
 #[cfg(feature = "test-tap")]
 pub use net::TappedFrame;
-use ota::{InstalledWebappApply, OtaOrchestrator, OtaTerminators, RangeProxy};
+use ota::{InstalledWebappApply, OtaOrchestrator, OtaTerminators, RangeProxy, WakewordReload};
 use peer::PeerTracker;
 use player::Player;
 // don't pub anything else from core so that dead code lints still work
@@ -74,6 +76,7 @@ pub struct ServerAddrs {
   pub stock: SocketAddr,
   pub modern: SocketAddr,
   pub frame_tap: SocketAddr,
+  pub proxy: Option<SocketAddr>,
 }
 
 impl Daemon {
@@ -189,6 +192,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     playback_targets.clone(),
     ws_routes.clone(),
     stream_routes.clone(),
+    tunnel_routes.clone(),
     log_tap.clone(),
   );
 
@@ -250,6 +254,18 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     })
   };
 
+  let wakeword_reload: WakewordReload = {
+    let mic = mic.clone();
+    std::sync::Arc::new(move || {
+      let mic = mic.clone();
+      Box::pin(async move {
+        if let Err(err) = mic.reload_wakeword().await {
+          tracing::warn!("could not reload the wake word after an update: {err}");
+        }
+      })
+    })
+  };
+
   let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
   let (ota, _ota_handle) = OtaOrchestrator::spawn(
     transfers.clone(),
@@ -262,6 +278,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     range_proxy_handle.proxy.clone(),
     peers.clone(),
     installed_apply,
+    wakeword_reload,
     transfer_sinks.clone(),
     assets.clone(),
   );
@@ -317,12 +334,17 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   );
 
   notifier.status("starting servers...");
+  let proxy_listener = proxy::bind(config.proxy_bind).await;
   #[cfg(feature = "test-tap")]
   let server_addrs = ServerAddrs {
     stock: listeners.stock_addr(),
     modern: listeners.modern_addr(),
     frame_tap: listeners.frame_tap_addr(),
+    proxy: proxy_listener.as_ref().and_then(|l| l.local_addr().ok()),
   };
+  if let Some(listener) = proxy_listener {
+    proxy::spawn(listener, state.clone(), bluetooth.clone());
+  }
   let server = net::Server::serve(state.clone(), listeners);
 
   if let Err(err) = state.chrome.send(chrome::ChromeCommand::NoteServing).await {
@@ -339,13 +361,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota, transport);
 
   let _input = input::InputManager::spawn(state.clone());
-
-  if let Err(err) = proxy::spawn(state.clone(), bluetooth.clone()).await {
-    tracing::warn!(
-      ?err,
-      "SOCKS proxy failed to bind; chromium net.proxy webapps will not work"
-    );
-  }
 
   notifier.status("initializing bluetooth stack...");
   #[cfg(feature = "test-tap")]
@@ -376,6 +391,8 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let state_out = state.clone();
   let handle_signals = config.handle_signals;
+
+  let iap2_shutdown = bluetooth.iap2.shutdown.clone();
 
   let loop_fut = Box::pin(async move {
     let _asset_invalidator = _asset_invalidator;
@@ -415,6 +432,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     }
 
     tracing::info!("shutting down...");
+    iap2_shutdown.shutdown().await;
     state.chrome.shutdown().await;
     server.shutdown().await;
     range_proxy_handle.cancel.cancel();
@@ -451,6 +469,7 @@ pub struct DaemonConfig {
   pub network_bind: SocketAddr,
   pub stock_bind: SocketAddr,
   pub modern_bind: SocketAddr,
+  pub proxy_bind: SocketAddr,
   #[cfg(feature = "test-tap")]
   pub frame_tap_bind: SocketAddr,
   pub handle_signals: bool,
@@ -468,6 +487,7 @@ impl DaemonConfig {
       network_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_NETWORK_GATEWAY_PORT)),
       stock_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_STOCK_WS_PORT)),
       modern_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_WS_MODERN_PORT)),
+      proxy_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_SOCKS_PROXY_PORT)),
       #[cfg(feature = "test-tap")]
       frame_tap_bind: SocketAddr::from(([0, 0, 0, 0], FRAME_TAP_PORT)),
       handle_signals: true,
@@ -486,6 +506,7 @@ impl DaemonConfig {
       network_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       stock_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       modern_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+      proxy_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       frame_tap_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       handle_signals: false,
       install_logger: false,

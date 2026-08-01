@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{TunnelClosed, TunnelData};
+use crate::{TunnelAck, TunnelClosed, TunnelData};
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -40,6 +40,8 @@ pub enum BridgeToGatewayTunnelMsg {
   Open(TunnelOpen),
   #[bridge_command]
   Data(TunnelData),
+  #[bridge_command]
+  Ack(TunnelAck),
   #[bridge_command]
   Close(TunnelClosed),
 }

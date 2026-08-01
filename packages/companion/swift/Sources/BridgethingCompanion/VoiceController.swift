@@ -17,6 +17,17 @@ public actor VoiceController {
         case model
         case rejectedNoIntent
         case rejectedClarify
+        case noModel
+
+        var wire: NluStage {
+            switch self {
+            case .fastPath: return .fastPath
+            case .model: return .model
+            case .rejectedNoIntent: return .rejectedNoIntent
+            case .rejectedClarify: return .rejectedClarify
+            case .noModel: return .noModel
+            }
+        }
     }
 
     public struct Resolution: Sendable {
@@ -39,10 +50,10 @@ public actor VoiceController {
         }
     }
 
-    private let client: any NluInferring
+    private let client: (any NluInferring)?
     private let config: Config
 
-    public init(client: any NluInferring, config: Config = Config()) {
+    public init(client: (any NluInferring)? = nil, config: Config = Config()) {
         self.client = client
         self.config = config
     }
@@ -59,6 +70,13 @@ public actor VoiceController {
         if config.useFastPath, let hit = NluFastPath.match(trimmed) {
             let pred = NluPrediction(intent: hit.intent, slots: hit.slots, transcript: transcript)
             return Resolution(resolved: pred.toWire(), stage: .fastPath)
+        }
+
+        guard let client else {
+            return Resolution(
+                resolved: NluPrediction(intent: NluIntentCatalog.noIntent, transcript: transcript).toWire(),
+                stage: .noModel
+            )
         }
 
         let output: NluInferenceOutput

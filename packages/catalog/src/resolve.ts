@@ -142,16 +142,22 @@ export function updates(args: {
 }
 
 export function recommendedSources(args: {
+  directory: Catalog | null;
   orderedCatalogs: SourceCatalog[];
   subscribed: string[];
 }): RecommendedSource[] {
   const subscribed = new Set(args.subscribed);
   const byUrl = new Map<string, RecommendedSource>();
 
+  for (const candidate of args.directory?.recommended_sources ?? []) {
+    if (subscribed.has(candidate.url) || byUrl.has(candidate.url)) continue;
+    byUrl.set(candidate.url, candidate);
+  }
+
   for (const { catalog } of args.orderedCatalogs) {
     for (const candidate of catalog.recommended_sources) {
       if (subscribed.has(candidate.url) || byUrl.has(candidate.url)) continue;
-      byUrl.set(candidate.url, candidate);
+      byUrl.set(candidate.url, { ...candidate, attested: false });
     }
   }
 

@@ -5,10 +5,10 @@ struct TransferStalled: Error, LocalizedError {
 }
 
 actor TransferAckWindow {
-    private var received: [UUID: UInt32] = [:]
+    private var received: [UUID: UInt64] = [:]
     private var waiters: [UUID: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)]] = [:]
 
-    func note(transferId: UUID, received bytes: UInt32) {
+    func note(transferId: UUID, received bytes: UInt64) {
         let prior = received[transferId] ?? 0
         guard bytes > prior else { return }
         received[transferId] = bytes
@@ -17,7 +17,7 @@ actor TransferAckWindow {
         }
     }
 
-    func receivedBytes(_ transferId: UUID) -> UInt32 {
+    func receivedBytes(_ transferId: UUID) -> UInt64 {
         received[transferId] ?? 0
     }
 
@@ -30,13 +30,13 @@ actor TransferAckWindow {
 
     func awaitWindow(
         _ transferId: UUID,
-        offset: UInt32,
-        windowBytes: UInt32,
+        offset: UInt64,
+        windowBytes: UInt64,
         timeoutSeconds: Double
     ) async throws {
         while true {
             let acked = received[transferId] ?? 0
-            if UInt64(offset) < UInt64(acked) + UInt64(windowBytes) { return }
+            if offset < acked + windowBytes { return }
             guard await waitForProgress(transferId, beyond: acked, timeoutSeconds: timeoutSeconds) else {
                 finish(transferId)
                 throw TransferStalled()
@@ -44,7 +44,7 @@ actor TransferAckWindow {
         }
     }
 
-    func waitForProgress(_ transferId: UUID, beyond prior: UInt32, timeoutSeconds: Double) async -> Bool {
+    func waitForProgress(_ transferId: UUID, beyond prior: UInt64, timeoutSeconds: Double) async -> Bool {
         if (received[transferId] ?? 0) > prior { return true }
         let waiterId = UUID()
         let timeout = Task { [weak self] in

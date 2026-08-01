@@ -4,9 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHANNEL=stable
 DRY=0
-RUNTIME_VERSION=""
 MODEL_VERSION=""
-TRAINED_AGAINST=""
 
 log()  { printf '\033[1;36m[publish-wakeword]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[publish-wakeword]\033[0m %s\n' "$*" >&2; }
@@ -14,13 +12,14 @@ die()  { printf '\033[1;31m[publish-wakeword] error:\033[0m %s\n' "$*" >&2; exit
 
 usage() {
   cat >&2 <<EOF
-usage: bridgething-publish-wakeword --runtime <ver> --model <ver> [options]
+usage: bridgething-publish-wakeword --model <ver> [options]
 
-  --runtime <ver>         runtime version to publish (sidecar binary + feature graphs)
-  --model <ver>           phrase model version to publish
-  --trained-against <ver> runtime the model was trained on (default: --runtime)
-  --channel <ch>          default: stable
-  --dry-run               pack, digest and print the fragment; upload nothing
+  --model <ver>   phrase model version to publish
+  --channel <ch>  default: stable
+  --dry-run       digest and print the fragment; upload nothing
+
+The detector and the embedding stack ride in the daemon, so the phrase model is
+the only wake-word artifact that ships on its own.
 
 Publishing needs rclone configured with an 'r2' remote, plus R2_BUCKET and PUBLIC_BASE.
 EOF
@@ -29,9 +28,7 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --runtime) RUNTIME_VERSION="${2:?}"; shift 2 ;;
     --model) MODEL_VERSION="${2:?}"; shift 2 ;;
-    --trained-against) TRAINED_AGAINST="${2:?}"; shift 2 ;;
     --channel) CHANNEL="${2:?}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage ;;
@@ -39,73 +36,49 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$RUNTIME_VERSION" ] || usage
 [ -n "$MODEL_VERSION" ] || usage
-TRAINED_AGAINST="${TRAINED_AGAINST:-$RUNTIME_VERSION}"
 
-RUNTIME_KEY="wakeword/${CHANNEL}/runtime/${RUNTIME_VERSION}/wakeword-runtime.tar.gz"
-MODEL_KEY="wakeword/${CHANNEL}/model/${MODEL_VERSION}/hey_bridgething.onnx"
+MODEL_KEY="wakeword/${CHANNEL}/model/${MODEL_VERSION}/hey_bridgething.btww"
+MODEL="$REPO_ROOT/crates/wakeword/models/hey_bridgething.btww"
 
-TARBALL="$REPO_ROOT/target-cross/wakeword-runtime.tar.gz"
-MODEL="$REPO_ROOT/crates/wakeword/models/hey_bridgething.onnx"
-
-log "packing the runtime"
-"$REPO_ROOT/scripts/bridgething-pack-wakeword" "$TARBALL" >/dev/null
+log "converting the graphs"
+"$REPO_ROOT/scripts/bridgething-convert-wakeword" >/dev/null
 [ -f "$MODEL" ] || die "no phrase model at $MODEL"
 
 digest() { shasum -a 256 "$1" | awk '{print $1}'; }
 bytes()  { wc -c <"$1" | tr -d ' '; }
 
-RUNTIME_SHA=$(digest "$TARBALL"); RUNTIME_SIZE=$(bytes "$TARBALL")
-MODEL_SHA=$(digest "$MODEL");     MODEL_SIZE=$(bytes "$MODEL")
-
-log "runtime ${RUNTIME_VERSION}  ${RUNTIME_SIZE} bytes  ${RUNTIME_SHA:0:12}"
-log "model   ${MODEL_VERSION}  ${MODEL_SIZE} bytes  ${MODEL_SHA:0:12}"
+MODEL_SHA=$(digest "$MODEL"); MODEL_SIZE=$(bytes "$MODEL")
+log "model ${MODEL_VERSION}  ${MODEL_SIZE} bytes  ${MODEL_SHA:0:12}"
 
 if [ "$DRY" = 0 ]; then
   command -v rclone >/dev/null 2>&1 || die "rclone is not installed"
   : "${R2_BUCKET:?R2_BUCKET is required}"
   : "${PUBLIC_BASE:?PUBLIC_BASE is required}"
 
-  publish() {
-    local src="$1" key="$2" ctype="$3" sha="$4"
-    if [ -n "$(rclone lsf "r2:${R2_BUCKET}/${key}" 2>/dev/null)" ]; then
-      local live
-      live=$(rclone cat "r2:${R2_BUCKET}/${key}" 2>/dev/null | shasum -a 256 | awk '{print $1}')
-      if [ "$live" = "$sha" ]; then
-        log "already published, identical bytes: ${key}"
-        return 0
-      fi
-      die "${key} already exists serving ${live:0:12}, and this build is ${sha:0:12}.
+  if [ -n "$(rclone lsf "r2:${R2_BUCKET}/${MODEL_KEY}" 2>/dev/null)" ]; then
+    live=$(rclone cat "r2:${R2_BUCKET}/${MODEL_KEY}" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+    if [ "$live" = "$MODEL_SHA" ]; then
+      log "already published, identical bytes: ${MODEL_KEY}"
+    else
+      die "${MODEL_KEY} already exists serving ${live:0:12}, and this build is ${MODEL_SHA:0:12}.
      bump the version rather than redefining a published one; every image pinned to
-     ${key##*/} would otherwise silently change meaning."
+     ${MODEL_KEY##*/} would otherwise silently change meaning."
     fi
-    "$REPO_ROOT/scripts/r2-put" "$src" "$key" "$ctype"
-  }
-
-  publish "$TARBALL" "$RUNTIME_KEY" application/gzip "$RUNTIME_SHA"
-  publish "$MODEL" "$MODEL_KEY" application/octet-stream "$MODEL_SHA"
+  else
+    "$REPO_ROOT/scripts/r2-put" "$MODEL" "$MODEL_KEY" application/octet-stream
+  fi
 else
   warn "dry run: nothing uploaded"
 fi
 
-[ "$TRAINED_AGAINST" = "$RUNTIME_VERSION" ] \
-  || warn "model ${MODEL_VERSION} is recorded as trained against runtime ${TRAINED_AGAINST}, not ${RUNTIME_VERSION}"
-
 cat <<EOF
 {
-  "wakeword": {
-    "runtime": "${RUNTIME_VERSION}",
-    "model": "${MODEL_VERSION}",
-    "model_trained_against": { "${MODEL_VERSION}": "${TRAINED_AGAINST}" }
-  },
+  "wakeword": { "model": "${MODEL_VERSION}" },
   "artifacts": {
-    "wakeword": {
-      "runtime": { "size": ${RUNTIME_SIZE}, "sha256": "${RUNTIME_SHA}" },
-      "model": { "size": ${MODEL_SIZE}, "sha256": "${MODEL_SHA}" }
-    }
+    "wakeword": { "model": { "size": ${MODEL_SIZE}, "sha256": "${MODEL_SHA}" } }
   }
 }
 EOF
 
-log "pin the image to it with: just pin-wakeword ${RUNTIME_VERSION} ${MODEL_VERSION}"
+log "pin the image to it with: just pin-wakeword ${MODEL_VERSION}"

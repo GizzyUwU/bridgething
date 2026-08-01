@@ -68,6 +68,8 @@
 	<string>bridgething shows and controls Apple Music playback on your Car Thing.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>bridgething uses Bluetooth to connect to your Car Thing.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>bridgething turns what you say to your Car Thing into playback commands. Recognition runs on your phone.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>bridgething forwards your location to Car Thing webapps that ask for it. Background access lets it answer while your phone is locked in your pocket.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

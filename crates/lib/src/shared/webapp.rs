@@ -101,6 +101,9 @@ pub struct OverlayProfile {
   /// Transient volume level indicator.
   #[serde(default = "overlay_surface_default")]
   pub volume: bool,
+  /// Voice turn indicator: listening, recognizing, and the outcome.
+  #[serde(default = "overlay_surface_default")]
+  pub voice: bool,
 }
 
 fn overlay_surface_default() -> bool {
@@ -115,20 +118,20 @@ impl Default for OverlayProfile {
       pairing: true,
       connection: true,
       volume: true,
+      voice: true,
     }
   }
 }
 
 impl OverlayProfile {
   pub fn any_enabled(&self) -> bool {
-    self.notifications || self.call || self.pairing || self.connection || self.volume
+    self.notifications || self.call || self.pairing || self.connection || self.volume || self.voice
   }
 }
 
 /// Art render sizes a webapp declares so the companion warms exactly the
 /// pixels it renders: hero (now-playing / detail views) and thumb (queue /
-/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
-/// which is also the stock webapp's profile.
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

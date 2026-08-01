@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "component": "TransferPacer",
+  "phase": "capture",
+  "description": "Cross-language conformance traces for the adaptive transfer pacer. PHASE 1: every implementation EMITS its own trace to pacer-trace.<impl>.json and nothing is asserted. Diff those files; each difference is a spec question nobody has answered. Once reconciled, freeze the agreed answers and flip every runner to assert.",
+  "contract": {
+    "construction": "the pacer is constructed at t_ms = 0 with acked = 0",
+    "step": "set the virtual clock to t_ms; if `observe` is present call observe(acked = observe); then record window_bytes and rate",
+    "rate_micros": "round(rate_per_sec * 1e6) as an integer, or null when the pacer has no rate sample yet. integers so float formatting never differs across languages.",
+    "clock": "virtual. t_ms is non-decreasing. seconds are t_ms / 1000."
+  },
+  "cases": [
+    {
+      "name": "unmeasured-opens-at-the-floor",
+      "description": "no observation has happened, so there is no rate sample and the window sits at the minimum.",
+      "steps": [{ "t_ms": 0 }]
+    },
+    {
+      "name": "non-advancing-acks-are-ignored",
+      "description": "observe() is a no-op when acked does not exceed what is already acked. no sample is recorded and lastProgress must not move, so the later real ack measures from t=0 rather than from the ignored ones.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 100, "observe": 0 },
+        { "t_ms": 200, "observe": 0 },
+        { "t_ms": 1000, "observe": 32768 }
+      ]
+    },
+    {
+      "name": "a-slow-link-stays-at-the-floor",
+      "description": "16 KiB/s sustained. budget is 9830.4 bytes, well under the floor, so the window clamps up.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 1000, "observe": 16384 },
+        { "t_ms": 2000, "observe": 32768 },
+        { "t_ms": 3000, "observe": 49152 },
+        { "t_ms": 4000, "observe": 65536 }
+      ]
+    },
+    {
+      "name": "a-fast-link-rides-the-cap",
+      "description": "1 MB/s sustained. budget is 600000 bytes, well over the ceiling, so the window clamps down.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 1000, "observe": 1000000 },
+        { "t_ms": 2000, "observe": 2000000 }
+      ]
+    },
+    {
+      "name": "mid-range-window-on-a-round-rate",
+      "description": "rate is exactly 150000 B/s. 0.6 is not representable in binary, so the exact product is 89999.999999999996, and the obvious guess is that a truncating implementation reports 89999 while a rounding one reports 90000. It does not: that product is within half an ulp of 90000, so the double IS 90000.0 and all three agree. Kept because the guess is wrong and the case is what proves it -- round rates are exactly where a truncation bug does NOT show up.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 1000, "observe": 150000 }
+      ]
+    },
+    {
+      "name": "mid-range-window-on-a-fractional-rate",
+      "description": "rate is 150001 B/s, so the budget carries a genuine fractional part (~90000.6) rather than a representation artifact. same round-vs-truncate fork, different cause.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 1000, "observe": 150001 }
+      ]
+    },
+    {
+      "name": "rate-is-the-max-of-the-window-not-the-mean",
+      "description": "one fast burst then sustained slow traffic. while the burst sample is still inside the 8-sample window the reported rate stays at the burst, not at an average.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 100, "observe": 100000 },
+        { "t_ms": 1100, "observe": 100100 },
+        { "t_ms": 2100, "observe": 100200 },
+        { "t_ms": 3100, "observe": 100300 }
+      ]
+    },
+    {
+      "name": "the-sample-window-evicts-the-oldest",
+      "description": "one fast burst then eight slow samples. the burst must survive exactly eight subsequent samples and drop out on the ninth, taking the window back to the floor. this pins the eviction boundary, not just that eviction happens.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 100, "observe": 100000 },
+        { "t_ms": 1100, "observe": 100100 },
+        { "t_ms": 2100, "observe": 100200 },
+        { "t_ms": 3100, "observe": 100300 },
+        { "t_ms": 4100, "observe": 100400 },
+        { "t_ms": 5100, "observe": 100500 },
+        { "t_ms": 6100, "observe": 100600 },
+        { "t_ms": 7100, "observe": 100700 },
+        { "t_ms": 8100, "observe": 100800 },
+        { "t_ms": 9100, "observe": 100900 }
+      ]
+    },
+    {
+      "name": "a-zero-length-interval-clamps-to-one-millisecond",
+      "description": "two acks landing on the same clock reading. the elapsed floor of 1 ms is what stops the rate going infinite; without it the window would pin to the cap forever on any burst.",
+      "steps": [
+        { "t_ms": 0 },
+        { "t_ms": 0, "observe": 50000 },
+        { "t_ms": 0, "observe": 100000 },
+        { "t_ms": 5000, "observe": 100100 }
+      ]
+    }
+  ]
+}

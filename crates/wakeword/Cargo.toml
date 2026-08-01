@@ -7,12 +7,14 @@ license.workspace = true
 authors.workspace = true
 homepage.workspace = true
 
-[[bin]]
-name = "bridgething-wakeword"
-path = "src/bin/sidecar.rs"
-
 [dependencies]
+realfft = "3.5.0"
 thiserror.workspace = true
 tracing.workspace = true
+wide = "1.6.0"
+
+# the converter and the tests that pin the runtime against the graphs it replaces; nothing that
+# ships reads ONNX, which is what keeps 17.7 MiB of runtime off the device
+[dev-dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tract-onnx = "0.23.4"

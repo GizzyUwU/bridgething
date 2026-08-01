@@ -57,14 +57,15 @@ impl DeviceEaFlow {
     )
   }
 
-  pub(crate) fn handle_status(&mut self, status: StatusExternalAccessoryProtocolSession) {
+  pub(crate) fn handle_status(&mut self, status: StatusExternalAccessoryProtocolSession) -> bool {
     match status.status {
       EaSessionStatus::Ok => {
         tracing::debug!(stream_id = status.session_id, "emulator ea: stream confirmed");
+        false
       }
       EaSessionStatus::Close => {
-        tracing::warn!(stream_id = status.session_id, "emulator ea: accessory refused stream");
-        self.streams.remove(&status.session_id);
+        tracing::info!(stream_id = status.session_id, "emulator ea: accessory closed stream");
+        self.streams.remove(&status.session_id).is_some()
       }
     }
   }

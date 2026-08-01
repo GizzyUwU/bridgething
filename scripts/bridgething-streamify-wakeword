@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+import sys
+
+import numpy as np
+import onnx
+from onnx import TensorProto, helper, shape_inference
+
+EMBEDDING_DIM = 96
+STRIDE = 8
+
+
+def time_kernel(node):
+  kernel = stride = 1
+  for attr in node.attribute:
+    if attr.name == "kernel_shape":
+      kernel = attr.ints[0]
+    if attr.name == "strides":
+      stride = attr.ints[0]
+  return kernel, stride
+
+
+def untangle_reshapes(graph):
+  nodes = list(graph.node)
+  first, last = nodes[0], nodes[-1]
+  if first.op_type != "Reshape" or last.op_type != "Reshape":
+    raise SystemExit(f"expected the graph to be bracketed by Reshapes, got {first.op_type}/{last.op_type}")
+  del graph.node[:]
+  graph.node.append(helper.make_node("Transpose", [first.input[0]], [first.output[0]], name=first.name, perm=[0, 3, 1, 2]))
+  graph.node.extend(nodes[1:-1])
+  graph.node.append(helper.make_node("Transpose", [last.input[0]], [last.output[0]], name=last.name, perm=[0, 2, 3, 1]))
+
+
+def channel_shapes(source):
+  probe = shape_inference.infer_shapes(onnx.load(source))
+  return {
+    v.name: [d.dim_value for d in v.type.tensor_type.shape.dim]
+    for v in list(probe.graph.value_info) + list(probe.graph.input) + list(probe.graph.output)
+  }
+
+
+def streamify(source, dest, hop):
+  shapes = channel_shapes(source)
+  model = onnx.load(source)
+  graph = model.graph
+  untangle_reshapes(graph)
+
+  graph.input[0].type.tensor_type.shape.dim[0].dim_value = 1
+  graph.input[0].type.tensor_type.shape.dim[1].dim_value = hop
+  del graph.value_info[:]
+  del graph.output[0].type.tensor_type.shape.dim[:]
+  for size in (1, hop // STRIDE, 1, EMBEDDING_DIM):
+    graph.output[0].type.tensor_type.shape.dim.add().dim_value = size
+
+  nodes = list(graph.node)
+  del graph.node[:]
+  caches = []
+  offset, block = 0, hop
+
+  for node in nodes:
+    kernel, stride = time_kernel(node) if node.op_type in ("Conv", "MaxPool") else (1, 1)
+    if (kernel, stride) == (1, 1):
+      graph.node.append(node)
+      continue
+
+    context = (kernel - stride) + (offset % stride)
+    offset = (offset - (offset % stride) - (kernel - stride)) // stride
+    block //= stride
+    if context == 0:
+      graph.node.append(node)
+      continue
+
+    source_name = node.input[0]
+    index = len(caches)
+    cache_in, cache_out = f"cache_in_{index}", f"cache_out_{index}"
+    joined = f"{source_name}__ctx{index}"
+    shape = list(shapes[source_name])
+    shape[0], shape[2] = 1, context
+    caches.append((cache_in, shape, node.op_type))
+
+    graph.input.append(helper.make_tensor_value_info(cache_in, TensorProto.FLOAT, shape))
+    graph.output.append(helper.make_tensor_value_info(cache_out, TensorProto.FLOAT, shape))
+    graph.node.append(helper.make_node("Concat", [cache_in, source_name], [joined], axis=2, name=f"ctx_concat_{index}"))
+    for suffix, value in (("starts", [-context]), ("ends", [np.iinfo(np.int64).max]), ("axes", [2])):
+      graph.initializer.append(helper.make_tensor(f"ctx_{suffix}_{index}", TensorProto.INT64, [1], value))
+    graph.node.append(
+      helper.make_node(
+        "Slice",
+        [joined, f"ctx_starts_{index}", f"ctx_ends_{index}", f"ctx_axes_{index}"],
+        [cache_out],
+        name=f"ctx_slice_{index}",
+      )
+    )
+
+    streamed = helper.make_node(node.op_type, [joined] + list(node.input[1:]), list(node.output), name=node.name)
+    streamed.attribute.extend(node.attribute)
+    graph.node.append(streamed)
+
+  if block != hop // STRIDE:
+    raise SystemExit(f"expected {hop // STRIDE} embeddings per call, got {block}")
+
+  model = shape_inference.infer_shapes(model)
+  onnx.checker.check_model(model)
+  onnx.save(model, dest)
+  return caches, offset
+
+
+def verify(source, dest, lag, hop):
+  import onnxruntime as ort
+
+  options = ort.SessionOptions()
+  options.log_severity_level = 3
+
+  windowed = ort.InferenceSession(source, options, providers=["CPUExecutionProvider"])
+  streaming = ort.InferenceSession(dest, options, providers=["CPUExecutionProvider"])
+
+  frames = 76 + STRIDE * 39 + hop
+  mel = np.random.default_rng(7).normal(2.0, 1.2, size=(1, frames, 32, 1)).astype(np.float32)
+  window = windowed.get_inputs()[0].name
+  reference = np.concatenate(
+    [windowed.run(None, {window: mel[:, i : i + 76]})[0].reshape(-1, EMBEDDING_DIM) for i in range(0, frames - 75, STRIDE)]
+  )
+
+  names = [i.name for i in streaming.get_inputs()]
+  outputs = [o.name for o in streaming.get_outputs()]
+  state = {i.name: np.zeros(i.shape, np.float32) for i in streaming.get_inputs()[1:]}
+  got = []
+  for start in range(0, frames - hop + 1, hop):
+    result = streaming.run(outputs, {names[0]: mel[:, start : start + hop], **state})
+    state = {n.replace("cache_out", "cache_in"): c for n, c in zip(outputs[1:], result[1:])}
+    got.append(result[0].reshape(-1, EMBEDDING_DIM))
+  got = np.concatenate(got)
+
+  count = min(len(reference), len(got) - lag)
+  if not np.array_equal(reference[:count], got[lag : lag + count]):
+    raise SystemExit(f"streaming output differs from the windowed model over {count} frames")
+  return count
+
+
+def main():
+  if len(sys.argv) not in (3, 4):
+    raise SystemExit("usage: bridgething-streamify-wakeword <embedding_model.onnx> <embedding_stream.onnx> [mel-frames-per-call]")
+  source, dest = sys.argv[1], sys.argv[2]
+  hop = int(sys.argv[3]) if len(sys.argv) == 4 else STRIDE
+  if hop % STRIDE:
+    raise SystemExit(f"mel frames per call must be a multiple of {STRIDE}")
+
+  caches, offset = streamify(source, dest, hop)
+  print(f"wrote {dest}")
+  print(f"  {len(caches)} caches, {sum(int(np.prod(s)) for _, s, _ in caches)} floats of state")
+  for name, shape, op in caches:
+    print(f"    {name:<12} {str(shape):<16} {op}")
+  print(f"  each call takes {hop} mel frames and emits {hop // STRIDE}, starting at window {offset:+d}")
+
+  matched = verify(source, dest, -offset, hop)
+  print(f"  verified bit-identical over {matched} embeddings")
+
+
+if __name__ == "__main__":
+  main()

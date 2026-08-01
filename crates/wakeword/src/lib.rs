@@ -1,9 +1,14 @@
+pub mod blob;
+pub mod classifier;
+pub mod embedding;
 pub mod features;
+pub mod lane;
+pub mod melspec;
 
 use std::path::Path;
 
-use features::{EMBEDDING_DIM, Features};
-use tract_onnx::prelude::*;
+use classifier::Classifier;
+use features::{EMBEDDING_DIM, Features, SAMPLES_PER_EMBEDDING};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -13,10 +18,6 @@ pub enum Error {
   Infer(String),
 }
 
-type Runnable = std::sync::Arc<TypedRunnableModel>;
-
-pub const CLASSIFIER_FRAMES: usize = 16;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Detection {
   pub score: f32,
@@ -25,7 +26,9 @@ pub struct Detection {
 
 pub struct WakeWord {
   features: Features,
-  classifier: Runnable,
+  classifier: Classifier,
+  window: Vec<f32>,
+  scores: Vec<f32>,
   threshold: f32,
   refractory_chunks: usize,
   quiet_for: usize,
@@ -33,23 +36,24 @@ pub struct WakeWord {
 }
 
 impl WakeWord {
-  pub fn new(models: &Path, phrase_model: &Path, threshold: f32) -> Result<Self, Error> {
-    let classifier = tract_onnx::onnx()
-      .model_for_path(phrase_model)
-      .map_err(|e| Error::Model(phrase_model.display().to_string(), e.to_string()))?
-      .with_input_fact(0, f32::fact([1, CLASSIFIER_FRAMES, EMBEDDING_DIM]).into())
-      .map_err(|e| Error::Model(phrase_model.display().to_string(), e.to_string()))?
-      .into_optimized()
-      .map_err(|e| Error::Model(phrase_model.display().to_string(), e.to_string()))?
-      .into_runnable()
-      .map_err(|e| Error::Model(phrase_model.display().to_string(), e.to_string()))?;
+  pub fn new(phrase_model: &Path, threshold: f32) -> Result<Self, Error> {
+    let features = Features::embedded()?;
+    let classifier = Classifier::load(phrase_model)?;
+    if classifier.embedding_dim() != EMBEDDING_DIM {
+      return Err(Error::Model(
+        phrase_model.display().to_string(),
+        format!(
+          "takes {}-wide embeddings, and the stack emits {EMBEDDING_DIM}",
+          classifier.embedding_dim()
+        ),
+      ));
+    }
 
     Ok(Self {
-      features: Features::new(
-        &models.join("melspectrogram.onnx"),
-        &models.join("embedding_model.onnx"),
-      )?,
+      features,
       classifier,
+      window: Vec::new(),
+      scores: Vec::new(),
       threshold,
       refractory_chunks: 25,
       quiet_for: 0,
@@ -66,12 +70,22 @@ impl WakeWord {
   }
 
   pub fn push(&mut self, samples: &[f32]) -> Result<Option<Detection>, Error> {
-    let produced = self.features.push(samples)?;
-    self.consumed += samples.len() as u64;
+    let mut hit = None;
+    for slice in samples.chunks(self.features.call_samples()) {
+      let produced = self.features.push(slice)?;
+      self.consumed += slice.len() as u64;
+      let found = self.detect(produced)?;
+      hit = hit.or(found);
+    }
+    Ok(hit)
+  }
+
+  fn detect(&mut self, produced: usize) -> Result<Option<Detection>, Error> {
+    let backs: Vec<usize> = (0..produced).rev().collect();
+    let scores = self.score_windows(&backs)?;
 
     let mut hit = None;
-    for _ in 0..produced {
-      let score = self.score()?;
+    for (&back, &score) in backs.iter().zip(&scores) {
       if self.quiet_for > 0 {
         self.quiet_for -= 1;
         continue;
@@ -80,32 +94,46 @@ impl WakeWord {
         self.quiet_for = self.refractory_chunks;
         hit = Some(Detection {
           score,
-          at_sample: self.consumed,
+          at_sample: self.consumed - (back * SAMPLES_PER_EMBEDDING) as u64,
         });
       }
     }
     Ok(hit)
   }
 
-  pub fn score(&self) -> Result<f32, Error> {
-    let Some(tail) = self.features.tail(CLASSIFIER_FRAMES) else {
-      return Ok(0.0);
-    };
-    let input =
-      Tensor::from_shape(&[1, CLASSIFIER_FRAMES, EMBEDDING_DIM], tail).map_err(|e| Error::Infer(e.to_string()))?;
-    let output = self
-      .classifier
-      .run(tvec!(input.into()))
-      .map_err(|e| Error::Infer(e.to_string()))?;
-    let scores = output[0]
-      .view()
-      .as_slice::<f32>()
-      .map_err(|e| Error::Infer(e.to_string()))?;
-    Ok(scores.first().copied().unwrap_or(0.0))
+  pub fn score(&mut self) -> Result<f32, Error> {
+    self.score_at(0)
   }
 
-  pub fn reset(&mut self) {
-    self.features.reset();
+  pub fn embedding_count(&self) -> usize {
+    self.features.embedding_count()
+  }
+
+  pub fn score_at(&mut self, back: usize) -> Result<f32, Error> {
+    Ok(self.score_windows(&[back])?[0])
+  }
+
+  fn score_windows(&mut self, backs: &[usize]) -> Result<Vec<f32>, Error> {
+    let frames = self.classifier.window_frames();
+    self.window.clear();
+    let mut present = 0;
+    for &back in backs {
+      if let Some(window) = self.features.window(frames, back) {
+        self.window.extend_from_slice(window);
+        present += 1;
+      }
+    }
+
+    self.scores.clear();
+    self.scores.resize(backs.len() - present, 0.0);
+    if present > 0 {
+      self.classifier.score(&self.window, present, &mut self.scores)?;
+    }
+    Ok(self.scores.clone())
+  }
+
+  pub fn reset(&mut self) -> Result<(), Error> {
     self.quiet_for = 0;
+    self.features.reset()
   }
 }

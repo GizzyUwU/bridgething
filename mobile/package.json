@@ -13,7 +13,6 @@
     "ui": "bunx @react-native-reusables/cli@latest"
   },
   "dependencies": {
-    "@bridgething/adapter-react-native": "workspace:*",
     "@bridgething/catalog": "workspace:*",
     "@bridgething/gateway": "workspace:*",
     "@bridgething/lib": "workspace:*",

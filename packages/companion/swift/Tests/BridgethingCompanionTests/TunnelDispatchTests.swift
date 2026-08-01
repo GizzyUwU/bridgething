@@ -59,6 +59,41 @@ import XCTest
             await companion.stop()
         }
 
+        func testShortWritesAreStillAckedSoTheWindowRecovers() async throws {
+            let echo = try EchoServer()
+            let port = try await echo.start()
+            defer { echo.stop() }
+
+            let (companion, driver) = try await boot()
+            let id = UUID()
+
+            let openResp = try await driver.request(
+                .tunnel(.open(TunnelOpen(tunnelId: id, host: "127.0.0.1", port: port))),
+                timeout: .seconds(5)
+            )
+            guard case .tunnel(.openReply) = openResp.data else {
+                await companion.stop()
+                return XCTFail("expected tunnel openReply, got \(openResp.data)")
+            }
+
+            let payload = Data(repeating: 0x7a, count: 1024)
+            try await driver.send(.tunnel(.data(TunnelData(tunnelId: id, bytes: payload))))
+
+            let acked = try await driver.waitOutbound(timeout: .seconds(5)) { msg in
+                if case .tunnel(.ack) = msg.data { return true }
+                return false
+            }
+            guard case let .tunnel(.ack(ack)) = acked.data else {
+                await companion.stop()
+                return XCTFail("expected a tunnel ack, got \(acked.data)")
+            }
+            XCTAssertEqual(ack.tunnelId, id)
+            XCTAssertEqual(ack.consumed, UInt32(payload.count))
+
+            try await driver.send(.tunnel(.close(TunnelClosed(tunnelId: id, reason: nil))))
+            await companion.stop()
+        }
+
         func testTunnelOpenToClosedPortReturnsError() async throws {
             let (companion, driver) = try await boot()
             let resp = try await driver.request(
@@ -93,7 +128,6 @@ import XCTest
             }
         }
 
-        /// polls listener.port rather than bridging the callback-only state handler into async code.
         func start() async throws -> UInt16 {
             listener.start(queue: queue)
             for _ in 0 ..< 300 {

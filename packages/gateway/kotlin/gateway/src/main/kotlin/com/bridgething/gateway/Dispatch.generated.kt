@@ -1480,6 +1480,15 @@ public class TunnelSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Tunnel::Ack` messages. */
+  public val ack: Flow<Pair<String, TunnelAck>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Ack ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Cross-peer stream of `Tunnel::Close` messages. */
   public val close: Flow<Pair<String, TunnelClosed>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1499,6 +1508,23 @@ public class TunnelSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Tunnel::Ack` to every connected peer (broadcast). */
+  public suspend fun ack(payload: TunnelAck, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Ack(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -3485,6 +3511,16 @@ public class TunnelSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Tunnel::Ack` from this peer. */
+  public val ack: Flow<TunnelAck> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Ack ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Stream of `Tunnel::Close` from this peer. */
   public val close: Flow<TunnelClosed> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -3501,6 +3537,16 @@ public class TunnelSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Tunnel::Ack` to this peer. */
+  public suspend fun ack(payload: TunnelAck, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Ack(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }

@@ -86,6 +86,7 @@ export function registerSessionDomain(): void {
               Date.now(),
             ),
           }));
+          void resyncOnReconnect();
           return;
         case 'peerLinkFailed':
           set(s => ({
@@ -163,6 +164,19 @@ export function registerSessionDomain(): void {
       });
     },
   });
+}
+
+let resyncInFlight: Promise<void> | null = null;
+
+function resyncOnReconnect(): Promise<void> {
+  resyncInFlight ??= reconcileAll()
+    .catch((err: unknown) => {
+      console.warn('[bridgething] reconcile on peer connect failed', err);
+    })
+    .finally(() => {
+      resyncInFlight = null;
+    });
+  return resyncInFlight;
 }
 
 export async function bootstrapSession(): Promise<void> {

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use libbridgething::{
-  client::{BridgeToClientVoiceMsg, VoiceState},
+  VoiceCaptureReason, VoiceDispatchErrorCode,
+  client::{BridgeToClientVoiceMsg, VoiceActivity, VoiceActivityError, VoicePhase, VoiceState},
   gateway::{
     BridgeToGatewayVoiceMsgEvent, VoiceCloseReason, VoiceFormat, VoiceFrame, VoiceStreamClose, VoiceStreamOpen,
   },
@@ -20,7 +21,19 @@ mod alsa_capture;
 #[cfg(feature = "mic")]
 mod wakeword;
 
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+const UPLINK_BACKLOG: usize = 256;
+
+#[cfg(feature = "mic")]
+type Link = Option<wakeword::WakeWordLink>;
+#[cfg(not(feature = "mic"))]
+type Link = ();
+
+const RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+#[cfg(feature = "mic")]
+const WAKEWORD_THRESHOLD: f32 = 0.35;
+
+#[derive(Debug, Clone, Copy)]
 struct Detection {
   score: f32,
 }
@@ -68,10 +81,13 @@ impl CaptureFormat {
 pub struct MicConfig {
   pub format: CaptureFormat,
   pub device: String,
+  pub max_uplink: std::time::Duration,
   #[cfg(feature = "mic")]
   pub dsp: bridgething_dsp::pipeline::Config,
   #[cfg(feature = "mic")]
-  pub wakeword_socket: std::path::PathBuf,
+  pub wakeword_models: Vec<std::path::PathBuf>,
+  #[cfg(feature = "mic")]
+  pub wakeword_threshold: f32,
 }
 
 impl Default for MicConfig {
@@ -79,13 +95,16 @@ impl Default for MicConfig {
     Self {
       format: CaptureFormat::default(),
       device: "hw:0,0".to_string(),
+      max_uplink: std::time::Duration::from_secs(30),
       #[cfg(feature = "mic")]
       dsp: bridgething_dsp::pipeline::Config {
         adaptation: Some(bridgething_dsp::scene::Config::default()),
         ..bridgething_dsp::pipeline::Config::default()
       },
       #[cfg(feature = "mic")]
-      wakeword_socket: std::path::PathBuf::from("/run/bridgething-wakeword.sock"),
+      wakeword_models: crate::paths::wakeword_models(),
+      #[cfg(feature = "mic")]
+      wakeword_threshold: WAKEWORD_THRESHOLD,
     }
   }
 }
@@ -104,7 +123,10 @@ pub enum MicError {
 struct State {
   muted: bool,
   capturing: bool,
+  phase: VoicePhase,
   current_stream: Option<Uuid>,
+  reason: Option<VoiceCaptureReason>,
+  score: Option<f32>,
 }
 
 impl State {
@@ -112,6 +134,22 @@ impl State {
     VoiceState {
       muted: self.muted,
       capturing: self.capturing,
+      phase: self.phase,
+    }
+  }
+
+  fn clear_turn(&mut self) {
+    self.current_stream = None;
+    self.reason = None;
+    self.score = None;
+  }
+
+  fn activity(&self, phase: VoicePhase) -> VoiceActivity {
+    VoiceActivity {
+      stream_id: self.current_stream,
+      reason: self.reason,
+      score: self.score,
+      ..VoiceActivity::new(phase)
     }
   }
 }
@@ -119,7 +157,15 @@ impl State {
 #[derive(Debug)]
 enum Cmd {
   Start {
+    reason: VoiceCaptureReason,
     reply: oneshot::Sender<Result<Uuid, MicError>>,
+  },
+  Finish {
+    activity: Box<VoiceActivity>,
+    reply: oneshot::Sender<()>,
+  },
+  ReloadWakeWord {
+    reply: oneshot::Sender<()>,
   },
   Stop {
     reason: VoiceCloseReason,
@@ -163,13 +209,43 @@ impl MicManager {
   }
 
   pub async fn push_to_talk(&self) -> Result<Uuid, MicError> {
+    self.open(VoiceCaptureReason::PushToTalk).await
+  }
+
+  pub async fn open(&self, reason: VoiceCaptureReason) -> Result<Uuid, MicError> {
     let (reply_tx, reply_rx) = oneshot::channel();
     self
       .tx
-      .send(Cmd::Start { reply: reply_tx })
+      .send(Cmd::Start {
+        reason,
+        reply: reply_tx,
+      })
       .await
       .map_err(|_| MicError::Closed)?;
     reply_rx.await.map_err(|_| MicError::Closed)?
+  }
+
+  pub async fn reload_wakeword(&self) -> Result<(), MicError> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    self
+      .tx
+      .send(Cmd::ReloadWakeWord { reply: reply_tx })
+      .await
+      .map_err(|_| MicError::Closed)?;
+    reply_rx.await.map_err(|_| MicError::Closed)
+  }
+
+  pub async fn finish(&self, activity: VoiceActivity) -> Result<(), MicError> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    self
+      .tx
+      .send(Cmd::Finish {
+        activity: Box::new(activity),
+        reply: reply_tx,
+      })
+      .await
+      .map_err(|_| MicError::Closed)?;
+    reply_rx.await.map_err(|_| MicError::Closed)
   }
 
   pub async fn cancel(&self) -> Result<(), MicError> {
@@ -230,32 +306,63 @@ async fn run_loop(
 ) {
   let (frame_tx, mut frame_rx) = mpsc::channel::<bytes::Bytes>(64);
   #[cfg(feature = "mic")]
-  let (link, hits, _link_handle) = wakeword::WakeWordLink::spawn(config.wakeword_socket.clone());
-  #[cfg(feature = "mic")]
-  let mut hits = Some(hits);
+  let (mut link, mut hits) = match wakeword::WakeWordLink::spawn(&config.wakeword_models, config.wakeword_threshold) {
+    Some((link, hits)) => (Some(link), Some(hits)),
+    None => (None, None),
+  };
   #[cfg(not(feature = "mic"))]
-  let mut hits = None;
+  let (mut link, mut hits): (Link, Option<mpsc::Receiver<Detection>>) = ((), None);
   #[cfg(feature = "mic")]
   let mut capture = open_capture(&config, &frame_tx);
   #[cfg(not(feature = "mic"))]
   let mut capture: Option<Capture> = None;
   let mut stream: Option<Stream> = None;
 
+  let mut resolve_by: Option<tokio::time::Instant> = None;
+
   loop {
     tokio::select! {
       cmd = rx.recv() => {
         let Some(cmd) = cmd else { break; };
-        handle_cmd(cmd, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream).await;
+        handle_cmd(cmd, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream, &mut resolve_by, &mut link, &mut hits).await;
       }
       Some(frame) = frame_rx.recv() => {
         #[cfg(feature = "mic")]
-        link.offer(frame.clone());
-        if let Some(open) = stream.as_mut() {
-          forward_frame(frame, open, &bluetooth).await;
+        if let Some(link) = link.as_ref() {
+          link.offer(frame.clone());
+        }
+        if let Some(open) = stream.as_mut()
+          && !open.forward(frame)
+        {
+          tracing::error!("gateway fell a full uplink buffer behind; ending the stream rather than holing it");
+          stop_stream(&state, &bus, &bluetooth, &mut stream, VoiceCloseReason::Error, &mut resolve_by).await;
         }
       }
       hit = next_detection(&mut hits) => {
         on_wake_word(hit, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream).await;
+      }
+      () = past_cap(stream.as_ref()) => {
+        tracing::warn!(cap = ?config.max_uplink, "uplink hit the cap with no close from the gateway");
+        stop_stream(&state, &bus, &bluetooth, &mut stream, VoiceCloseReason::Cancelled, &mut resolve_by).await;
+      }
+      () = past_deadline(resolve_by) => {
+        tracing::warn!(wait = ?RESOLVE_TIMEOUT, "companion never answered a closed turn");
+        resolve_by = None;
+        let activity = {
+          let mut guard = state.write().await;
+          guard.phase = VoicePhase::Idle;
+          let activity = VoiceActivity {
+            error: Some(VoiceActivityError {
+              code: VoiceDispatchErrorCode::Internal,
+              msg: "companion did not answer before the resolve timeout".into(),
+            }),
+            ..guard.activity(VoicePhase::Failed)
+          };
+          guard.clear_turn();
+          activity
+        };
+        broadcast_activity(&bus, activity).await;
+        broadcast_state(&bus, &state).await;
       }
       else => break,
     }
@@ -297,7 +404,19 @@ async fn on_wake_word(
     tracing::debug!("wake word fired while muted; ignoring");
     return;
   }
-  match start_stream(state, bus, bluetooth, config, frames, capture, stream).await {
+  match start_stream(
+    state,
+    bus,
+    bluetooth,
+    config,
+    frames,
+    capture,
+    stream,
+    VoiceCaptureReason::WakeWord,
+    Some(hit.score),
+  )
+  .await
+  {
     Ok(id) => tracing::info!(score = hit.score, stream = %id, "wake word opened the uplink"),
     Err(err) => tracing::warn!("wake word could not open the uplink: {err}"),
   }
@@ -312,14 +431,49 @@ async fn handle_cmd(
   frame_tx: &mpsc::Sender<bytes::Bytes>,
   capture: &mut Option<Capture>,
   stream: &mut Option<Stream>,
+  resolve_by: &mut Option<tokio::time::Instant>,
+  link: &mut Link,
+  hits: &mut Option<mpsc::Receiver<Detection>>,
 ) {
   match cmd {
-    Cmd::Start { reply } => {
-      let outcome = start_stream(state, bus, bluetooth, config, frame_tx, capture, stream).await;
+    Cmd::Start { reason, reply } => {
+      let outcome = start_stream(state, bus, bluetooth, config, frame_tx, capture, stream, reason, None).await;
       let _ = reply.send(outcome);
     }
     Cmd::Stop { reason, reply } => {
-      stop_stream(state, bus, bluetooth, stream, reason).await;
+      stop_stream(state, bus, bluetooth, stream, reason, resolve_by).await;
+      let _ = reply.send(());
+    }
+    Cmd::Finish { activity, reply } => {
+      *resolve_by = None;
+      let filled = {
+        let mut guard = state.write().await;
+        guard.phase = VoicePhase::Idle;
+        let filled = VoiceActivity {
+          stream_id: activity.stream_id.or(guard.current_stream),
+          reason: activity.reason.or(guard.reason),
+          score: activity.score.or(guard.score),
+          ..*activity
+        };
+        guard.clear_turn();
+        filled
+      };
+      broadcast_activity(bus, filled).await;
+      broadcast_state(bus, state).await;
+      let _ = reply.send(());
+    }
+    Cmd::ReloadWakeWord { reply } => {
+      #[cfg(feature = "mic")]
+      {
+        (*link, *hits) = match wakeword::WakeWordLink::spawn(&config.wakeword_models, config.wakeword_threshold) {
+          Some((next, rx)) => (Some(next), Some(rx)),
+          None => (None, None),
+        };
+      }
+      #[cfg(not(feature = "mic"))]
+      {
+        let _ = (link, hits);
+      }
       let _ = reply.send(());
     }
     Cmd::Mute { preserve, reply } => {
@@ -332,7 +486,7 @@ async fn handle_cmd(
         open.stop();
       }
       if was_open && !preserve {
-        stop_stream(state, bus, bluetooth, stream, VoiceCloseReason::Muted).await;
+        stop_stream(state, bus, bluetooth, stream, VoiceCloseReason::Muted, resolve_by).await;
       } else {
         broadcast_state(bus, state).await;
       }
@@ -360,6 +514,8 @@ async fn start_stream(
   frame_tx: &mpsc::Sender<bytes::Bytes>,
   capture: &mut Option<Capture>,
   stream: &mut Option<Stream>,
+  reason: VoiceCaptureReason,
+  score: Option<f32>,
 ) -> Result<Uuid, MicError> {
   {
     let guard = state.read().await;
@@ -381,13 +537,17 @@ async fn start_stream(
   }
 
   let stream_id = Uuid::now_v7();
-  *stream = Some(Stream { id: stream_id, seq: 0 });
+  *stream = Some(Stream::open(stream_id, config.max_uplink, bluetooth.clone()));
 
-  {
+  let activity = {
     let mut guard = state.write().await;
     guard.capturing = true;
+    guard.phase = VoicePhase::Listening;
     guard.current_stream = Some(stream_id);
-  }
+    guard.reason = Some(reason);
+    guard.score = score;
+    guard.activity(VoicePhase::Listening)
+  };
 
   bluetooth
     .gateway_man
@@ -396,6 +556,7 @@ async fn start_stream(
       format: config.format.wire(),
     }))
     .await;
+  broadcast_activity(bus, activity).await;
   broadcast_state(bus, state).await;
   Ok(stream_id)
 }
@@ -406,15 +567,34 @@ async fn stop_stream(
   bluetooth: &BluetoothMan,
   stream: &mut Option<Stream>,
   reason: VoiceCloseReason,
+  resolve_by: &mut Option<tokio::time::Instant>,
 ) {
-  let id = {
+  let next = match reason {
+    VoiceCloseReason::EndOfSpeech => VoicePhase::Thinking,
+    VoiceCloseReason::Error => VoicePhase::Failed,
+    VoiceCloseReason::Cancelled | VoiceCloseReason::Muted => VoicePhase::Idle,
+  };
+
+  let (id, activity) = {
     let mut guard = state.write().await;
     if !guard.capturing {
       return;
     }
     guard.capturing = false;
-    guard.current_stream.take()
+    guard.phase = if next == VoicePhase::Thinking {
+      VoicePhase::Thinking
+    } else {
+      VoicePhase::Idle
+    };
+    let activity = guard.activity(next);
+    let id = guard.current_stream;
+    if next != VoicePhase::Thinking {
+      guard.clear_turn();
+    }
+    (id, activity)
   };
+
+  *resolve_by = (next == VoicePhase::Thinking).then(|| tokio::time::Instant::now() + RESOLVE_TIMEOUT);
   stream.take();
   if let Some(stream_id) = id {
     bluetooth
@@ -425,20 +605,22 @@ async fn stop_stream(
       }))
       .await;
   }
+  broadcast_activity(bus, activity).await;
   broadcast_state(bus, state).await;
 }
 
-async fn forward_frame(pcm: bytes::Bytes, stream: &mut Stream, bluetooth: &BluetoothMan) {
-  let seq = stream.seq;
-  stream.seq = stream.seq.wrapping_add(1);
-  bluetooth
-    .gateway_man
-    .broadcast_event_bulk(BridgeToGatewayVoiceMsgEvent::Frame(VoiceFrame {
-      stream_id: stream.id,
-      seq,
-      pcm,
-    }))
-    .await;
+async fn past_cap(stream: Option<&Stream>) {
+  match stream {
+    Some(open) => tokio::time::sleep_until(open.deadline).await,
+    None => std::future::pending().await,
+  }
+}
+
+async fn past_deadline(at: Option<tokio::time::Instant>) {
+  match at {
+    Some(at) => tokio::time::sleep_until(at).await,
+    None => std::future::pending().await,
+  }
 }
 
 async fn broadcast_state(bus: &WireEventBus, state: &Arc<RwLock<State>>) {
@@ -448,6 +630,15 @@ async fn broadcast_state(bus: &WireEventBus, state: &Arc<RwLock<State>>) {
     .await
   {
     tracing::trace!("mic state broadcast had {} ws error(s)", errors.len());
+  }
+}
+
+async fn broadcast_activity(bus: &WireEventBus, activity: VoiceActivity) {
+  if let Err(errors) = bus
+    .broadcast(BridgeToClientVoiceMsg::Activity(activity), MsgMeta::Event)
+    .await
+  {
+    tracing::trace!("voice activity broadcast had {} ws error(s)", errors.len());
   }
 }
 
@@ -487,4 +678,89 @@ impl Capture {
 struct Stream {
   id: Uuid,
   seq: u32,
+  deadline: tokio::time::Instant,
+  frames: mpsc::Sender<VoiceFrame>,
+  _uplink: JoinHandle<()>,
+}
+
+impl Stream {
+  fn open(id: Uuid, cap: std::time::Duration, bluetooth: BluetoothMan) -> Self {
+    let (frames, rx) = mpsc::channel(UPLINK_BACKLOG);
+    Self {
+      id,
+      seq: 0,
+      deadline: tokio::time::Instant::now() + cap,
+      frames,
+      _uplink: tokio::spawn(run_uplink(rx, bluetooth)),
+    }
+  }
+
+  fn forward(&mut self, pcm: bytes::Bytes) -> bool {
+    let seq = self.seq;
+    self.seq = self.seq.wrapping_add(1);
+    self
+      .frames
+      .try_send(VoiceFrame {
+        stream_id: self.id,
+        seq,
+        pcm,
+      })
+      .is_ok()
+  }
+}
+
+async fn run_uplink(mut frames: mpsc::Receiver<VoiceFrame>, bluetooth: BluetoothMan) {
+  while let Some(frame) = frames.recv().await {
+    bluetooth
+      .gateway_man
+      .broadcast(BridgeToGatewayVoiceMsgEvent::Frame(frame))
+      .await;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn wake_turn() -> State {
+    State {
+      capturing: true,
+      phase: VoicePhase::Listening,
+      current_stream: Some(Uuid::now_v7()),
+      reason: Some(VoiceCaptureReason::WakeWord),
+      score: Some(0.94),
+      ..State::default()
+    }
+  }
+
+  #[test]
+  fn a_listening_activity_carries_the_turn_context() {
+    let state = wake_turn();
+    let activity = state.activity(VoicePhase::Listening);
+    assert_eq!(activity.reason, Some(VoiceCaptureReason::WakeWord));
+    assert_eq!(activity.score, Some(0.94));
+    assert_eq!(activity.stream_id, state.current_stream);
+  }
+
+  #[test]
+  fn a_settled_turn_leaves_nothing_for_the_next_one_to_inherit() {
+    let mut state = wake_turn();
+    state.clear_turn();
+    let next = state.activity(VoicePhase::Listening);
+    assert_eq!(
+      next.score, None,
+      "a push-to-talk turn must not report the last wake word's score"
+    );
+    assert_eq!(next.reason, None);
+    assert_eq!(next.stream_id, None);
+  }
+
+  #[test]
+  fn the_snapshot_reports_phase_alongside_mute_and_capture() {
+    let state = wake_turn();
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.phase, VoicePhase::Listening);
+    assert!(snapshot.capturing);
+    assert!(!snapshot.muted);
+  }
 }

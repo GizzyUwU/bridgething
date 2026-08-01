@@ -7,85 +7,36 @@ import java.io.Writer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 
-/**
- * Persistent on-disk log storage, laid out as two nested rotating buffers.
- *
- * Outer ring: one directory per app launch, newest [LAUNCH_LIMIT] kept, older
- * pruned at [install] time. Inner ring: within a launch, lines append to a
- * numbered segment file; once a segment reaches [SEGMENT_BYTES] a new one opens
- * and any segment older than the newest [SEGMENTS_PER_LAUNCH] is deleted. So a
- * launch costs at most `SEGMENT_BYTES * SEGMENTS_PER_LAUNCH` on disk and always
- * retains at least the most recent [SEGMENT_BYTES] of output.
- *
- * The segment ring is why the size cap does not simply stop logging when hit:
- * the interesting lines are usually the last ones written, not the first.
- *
- * A segment that takes an error or fatal line is pinned: a sibling `.keep`
- * marker exempts it from both rings, so the launch that went wrong outlives
- * the healthy ones around it and survives until [clear]. [PINNED_BYTES_LIMIT]
- * is the only thing that reclaims pinned segments without asking.
- *
- * Writes are handed to a dedicated thread over a bounded queue and never block
- * the caller - log lines arrive on arbitrary threads (the Rust tracing sink, BT
- * callbacks, the logcat reader) and none of them may pay for disk IO.
- */
 public object LogStore {
     private const val LAUNCH_LIMIT = 3
     private const val SEGMENTS_PER_LAUNCH = 2
     private const val SEGMENT_BYTES = 512L * 1024
     private const val QUEUE_CAPACITY = 4096
 
-    /**
-     * Backstop on pinned segments. They are exempt from both rings and only
-     * [clear] removes them, so a process stuck in an error loop would otherwise
-     * pin every segment it writes and fill the device. Past this the oldest
-     * pinned launch is dropped anyway.
-     */
     private const val PINNED_BYTES_LIMIT = 32L * 1024 * 1024
-
-    /** Sibling marker file that exempts a segment from rotation. */
     private const val PIN_SUFFIX = ".keep"
-
-    /**
-     * logcat threadtime line: `MM-DD HH:MM:SS.mmm  PID  TID <level> TAG: msg`.
-     * Only the E (error) and F (fatal) levels pin a segment.
-     */
     private val ERROR_LINE =
         Regex("""^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+[EF]\s""")
-
     private val queue = ArrayBlockingQueue<String>(QUEUE_CAPACITY)
+    private val ID = Regex("""^\d+$""")
 
     @Volatile private var root: File? = null
     @Volatile private var launchDir: File? = null
     @Volatile private var writer: Thread? = null
-
-    /**
-     * Bumped whenever segments are deleted out from under the writer. It keeps
-     * its file handle open across writes, so without this it would go on
-     * appending to an unlinked inode until the next rotation.
-     */
     @Volatile private var sinkGeneration = 0
-
-    /** Launch directories are named for their start time, so ids are always digits. */
-    private val ID = Regex("""^\d+$""")
-
-    /** Lines dropped because the queue was full; surfaced in the export header. */
     @Volatile private var dropped: Long = 0
 
-    /**
-     * Prepares storage and starts the writer thread. Idempotent - a second call
-     * is a no-op, so it is safe to call from both Application.onCreate and any
-     * later lazy entry point.
-     */
-    @Synchronized
     public fun install(context: Context) {
+        install(File(context.applicationContext.filesDir, "logs"))
+    }
+
+    @Synchronized
+    public fun install(dir: File) {
         if (writer != null) return
 
-        val dir = File(context.applicationContext.filesDir, "logs")
         dir.mkdirs()
         root = dir
 
-        // launch dirs sort lexicographically because epoch millis is fixed-width
         val launch = File(dir, System.currentTimeMillis().toString())
         launch.mkdirs()
         launchDir = launch
@@ -98,15 +49,32 @@ public object LogStore {
         }
     }
 
-    /** Queues a line for persistence. Drops rather than blocks when the writer falls behind. */
     public fun write(line: String) {
         if (writer == null) return
         if (!queue.offer(line)) dropped += 1
     }
 
+    public enum class Level(internal val letter: Char) {
+        VERBOSE('V'),
+        DEBUG('D'),
+        INFO('I'),
+        WARN('W'),
+        ERROR('E'),
+        FATAL('F'),
+    }
+
+    public fun record(level: Level, tag: String, message: String) {
+        if (writer == null) return
+        val prefix = "${stamp()} ${android.os.Process.myPid()} ${android.os.Process.myTid()} ${level.letter} $tag: "
+        for (part in message.split('\n')) write(prefix + part)
+    }
+
+    private val STAMP = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+
+    private fun stamp(): String = synchronized(STAMP) { STAMP.format(java.util.Date()) }
+
     // ---- export ----------------------------------------------------------
 
-    /** One retained launch, as surfaced to the UI. */
     public data class LogArchive(
         val id: String,
         val startedAtMs: Long,
@@ -115,7 +83,6 @@ public object LogStore {
         val current: Boolean,
     )
 
-    /** Retained launches, newest first. */
     public fun archives(): List<LogArchive> =
         launchDirs()
             .map { dir ->
@@ -129,7 +96,6 @@ public object LogStore {
             }
             .sortedByDescending { it.startedAtMs }
 
-    /** Drops a single launch. Truncates in place when it is the live one. */
     @Synchronized
     public fun delete(id: String) {
         val base = root ?: return
@@ -145,11 +111,6 @@ public object LogStore {
         }
     }
 
-    /**
-     * Concatenates retained launches, oldest first, into [target]. Passing an
-     * [id] narrows the bundle to that one launch.
-     * Returns [target] so callers can chain into a share intent.
-     */
     public fun exportTo(target: File, id: String? = null): File {
         flush()
         target.parentFile?.mkdirs()
@@ -175,13 +136,8 @@ public object LogStore {
         return target
     }
 
-    /** Total bytes currently retained across all launches. */
     public fun retainedBytes(): Long = launchDirs().sumOf { dir -> segments(dir).sumOf { it.length() } }
 
-    /**
-     * Drops every retained launch except the live one, which is truncated.
-     * This is the only thing that removes pinned error segments.
-     */
     @Synchronized
     public fun clear() {
         flush()
@@ -196,12 +152,9 @@ public object LogStore {
         dropped = 0
     }
 
-    /** Blocks briefly until the writer has drained the queue. Best effort. */
     public fun flush() {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
         while (queue.isNotEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
-        // the queue empties just before the writer flushes its buffer; give it
-        // that window so an export does not clip the last few lines
         Thread.sleep(50)
     }
 
@@ -218,18 +171,20 @@ public object LogStore {
                     sink = null
                     generation = sinkGeneration
                 }
-                val active = sink ?: openSink().also { sink = it }
-                active.write(first)
-                // drain whatever else piled up before touching the disk again
-                while (true) {
-                    val next = queue.poll() ?: break
-                    active.write(next)
+                var line: String? = first
+                while (line != null) {
+                    val active = sink ?: openSink().also { sink = it }
+                    active.write(line)
+                    if (active.bytes >= SEGMENT_BYTES) {
+                        if (active.sawError) active.pin()
+                        active.close()
+                        sink = null
+                    }
+                    line = queue.poll()
                 }
-                if (active.sawError) active.pin()
-                active.flush()
-                if (active.bytes >= SEGMENT_BYTES) {
-                    active.close()
-                    sink = null
+                sink?.let {
+                    if (it.sawError) it.pin()
+                    it.flush()
                 }
             }
         } catch (_: InterruptedException) {
@@ -241,11 +196,9 @@ public object LogStore {
         }
     }
 
-    /** Opens the next segment in the live launch dir and retires anything beyond the ring. */
     private fun openSink(): Sink {
         val dir = launchDir ?: throw IOException("log store not installed")
         val existing = segments(dir)
-        // resume the newest segment when it still has room, else start a fresh one
         val newest = existing.lastOrNull()
         val target = if (newest != null && newest.length() < SEGMENT_BYTES) {
             newest
@@ -261,7 +214,6 @@ public object LogStore {
         var bytes: Long = file.length()
             private set
 
-        /** Set once this segment has taken an error line; cleared by [pin]. */
         var sawError: Boolean = false
             private set
 
@@ -275,12 +227,10 @@ public object LogStore {
         fun write(line: String) {
             out.write(line)
             out.write("\n")
-            // +1 for the newline; close enough for a rotation trigger without re-stat'ing
             bytes += line.length.toLong() + 1
             if (!pinned && ERROR_LINE.containsMatchIn(line)) sawError = true
         }
 
-        /** Drops the marker that exempts this segment from rotation. Idempotent. */
         fun pin() {
             sawError = false
             if (pinned) return
@@ -307,7 +257,6 @@ public object LogStore {
 
     private fun segmentIndex(file: File): Int = file.name.removeSuffix(".log").toIntOrNull() ?: -1
 
-    /** Marker path that pins [segment] against rotation. */
     private fun pinMarker(segment: File): File =
         File(segment.parentFile, segment.name.removeSuffix(".log") + PIN_SUFFIX)
 
@@ -315,10 +264,6 @@ public object LogStore {
 
     private fun pinnedSegments(dir: File): List<File> = segments(dir).filter { isPinned(it) }
 
-    /**
-     * Applies the launch ring to unpinned launches only, then enforces
-     * [PINNED_BYTES_LIMIT] over what the pins held back.
-     */
     private fun pruneLaunches(dir: File) {
         val dirs = dir.listFiles { f: File -> f.isDirectory }?.sortedBy { it.name } ?: return
         val (pinned, rotating) = dirs.partition { pinnedSegments(it).isNotEmpty() }
@@ -326,7 +271,6 @@ public object LogStore {
         val excess = rotating.size - LAUNCH_LIMIT
         for (i in 0 until excess) rotating[i].deleteRecursively()
 
-        // oldest first, so the cap sheds the least interesting errors
         var total = pinned.sumOf { d -> pinnedSegments(d).sumOf { it.length() } }
         for (d in pinned) {
             if (total <= PINNED_BYTES_LIMIT) break
@@ -336,7 +280,6 @@ public object LogStore {
         }
     }
 
-    /** The segment ring applies only to unpinned segments; pinned ones accumulate beside them. */
     private fun pruneSegments(dir: File, keepAlso: File) {
         val all = (segments(dir) + keepAlso).distinctBy { it.name }.sortedBy { segmentIndex(it) }
         val rotating = all.filterNot { isPinned(it) }

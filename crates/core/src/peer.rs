@@ -20,7 +20,7 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   player::Player,
-  state::{AudioManager, LogTap, PlaybackTargetStore, RouteTable, log_tap::LogOwner},
+  state::{AudioManager, LogTap, PlaybackTargetStore, RouteTable, TunnelRoutes, log_tap::LogOwner},
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -103,6 +103,7 @@ impl PeerTracker {
     playback_targets: PlaybackTargetStore,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
+    tunnel_routes: TunnelRoutes,
     log_tap: LogTap,
   ) -> Self {
     let (cmd_tx, cmd_rx) = mpsc::channel(PEER_CMD_CAPACITY);
@@ -118,6 +119,7 @@ impl PeerTracker {
       playback_targets,
       ws_routes,
       stream_routes,
+      tunnel_routes,
       log_tap,
     ));
     Self { cmd_tx, snapshot_rx }
@@ -230,6 +232,7 @@ struct PeerActor {
   playback_targets: PlaybackTargetStore,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
+  tunnel_routes: TunnelRoutes,
   log_tap: LogTap,
   snapshot_tx: watch::Sender<PeerSnapshot>,
   cmd_tx: mpsc::Sender<PeerCommand>,
@@ -251,6 +254,7 @@ async fn run_actor(
   playback_targets: PlaybackTargetStore,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
+  tunnel_routes: TunnelRoutes,
   log_tap: LogTap,
 ) {
   let mut actor = PeerActor {
@@ -263,6 +267,7 @@ async fn run_actor(
     playback_targets,
     ws_routes,
     stream_routes,
+    tunnel_routes,
     log_tap,
     snapshot_tx,
     cmd_tx,
@@ -705,6 +710,11 @@ impl PeerActor {
       if let Err(err) = self.bus.send_event(owner, event).await {
         tracing::trace!(?err, "stream cleanup send failed");
       }
+    }
+
+    let tunnels = self.tunnel_routes.kill_all();
+    if tunnels > 0 {
+      tracing::debug!(count = tunnels, "closing SOCKS tunnels on companion disconnect");
     }
   }
 }

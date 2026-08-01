@@ -1742,8 +1742,7 @@ data class OtaAssetRangeReply (
 /// Companions key reboot expectations off this: image means the device
 /// power-cycles; daemon and builtin-webapp mean the daemon process
 /// restarts and the gateway link drops and reconnects; installed-webapp
-/// applies in place with no restart, and the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// and wakeword-model apply in place with no restart.
 @Serializable
 enum class OtaKind(val string: String) {
 	@SerialName("image")
@@ -1754,6 +1753,10 @@ enum class OtaKind(val string: String) {
 	BuiltinWebapp("builtinWebapp"),
 	@SerialName("installedWebapp")
 	InstalledWebapp("installedWebapp"),
+	/// Wake word phrase classifier. Applies in place and the detector reloads
+	/// without a restart; the embedding stack rides in the daemon binary.
+	@SerialName("wakewordModel")
+	WakewordModel("wakewordModel"),
 }
 
 @Serializable
@@ -1905,7 +1908,9 @@ data class OverlayProfile (
 	/// no useful link.
 	val connection: Boolean = true,
 	/// Transient volume level indicator.
-	val volume: Boolean = true
+	val volume: Boolean = true,
+	/// Voice turn indicator: listening, recognizing, and the outcome.
+	val voice: Boolean = true
 )
 
 @Serializable
@@ -2696,6 +2701,12 @@ data class TtsStarted (
 )
 
 @Serializable
+data class TunnelAck (
+	@Serializable(with = MsgpackUuidSerializer::class) val tunnelId: UUID,
+	val consumed: UInt
+)
+
+@Serializable
 data class TunnelClosed (
 	@Serializable(with = MsgpackUuidSerializer::class) val tunnelId: UUID,
 	val reason: String? = null
@@ -2744,9 +2755,28 @@ data class TunnelOpen (
 @Serializable
 object TunnelOpenReply
 
+/// Which arm of the companion's resolver produced an intent. Carried so a
+/// surface can tell a deterministic match from a model prediction.
+@Serializable
+enum class NluStage(val string: String) {
+	@SerialName("fastPath")
+	FastPath("fastPath"),
+	@SerialName("model")
+	Model("model"),
+	@SerialName("rejectedNoIntent")
+	RejectedNoIntent("rejectedNoIntent"),
+	@SerialName("rejectedClarify")
+	RejectedClarify("rejectedClarify"),
+	/// The fast path missed and no model is configured, so nothing could
+	/// classify the utterance. Distinct from a model that ran and rejected.
+	@SerialName("noModel")
+	NoModel("noModel"),
+}
+
 @Serializable
 data class VoiceDispatch (
-	val resolved: NluResolvedIntent
+	val resolved: NluResolvedIntent,
+	val stage: NluStage? = null
 )
 
 @Serializable
@@ -2815,6 +2845,7 @@ data class VoiceFrame (
 	val pcm: ByteArray
 )
 
+/// What opened a capture session.
 @Serializable
 enum class VoiceCaptureReason(val string: String) {
 	@SerialName("pushToTalk")
@@ -3045,7 +3076,7 @@ data class WebappManifest (
 	val permissions: List<String> = emptyList(),
 	val rendersVoiceDisplay: Boolean = false,
 	val art: ArtProfile? = null,
-	val overlays: OverlayProfile = OverlayProfile(notifications = true, call = true, pairing = true, connection = true, volume = true)
+	val overlays: OverlayProfile = OverlayProfile(notifications = true, call = true, pairing = true, connection = true, volume = true, voice = true)
 )
 
 @Serializable
@@ -3420,6 +3451,9 @@ sealed class BridgeToGatewayTunnelMsg {
 	@SerialName("data")
 	data class Data(val data: TunnelData): BridgeToGatewayTunnelMsg()
 	@Serializable
+	@SerialName("ack")
+	data class Ack(val data: TunnelAck): BridgeToGatewayTunnelMsg()
+	@Serializable
 	@SerialName("close")
 	data class Close(val data: TunnelClosed): BridgeToGatewayTunnelMsg()
 }
@@ -3789,6 +3823,9 @@ sealed class GatewayToBridgeTunnelMsg {
 	@Serializable
 	@SerialName("data")
 	data class Data(val data: TunnelData): GatewayToBridgeTunnelMsg()
+	@Serializable
+	@SerialName("ack")
+	data class Ack(val data: TunnelAck): GatewayToBridgeTunnelMsg()
 	@Serializable
 	@SerialName("closed")
 	data class Closed(val data: TunnelClosed): GatewayToBridgeTunnelMsg()

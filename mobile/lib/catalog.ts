@@ -233,15 +233,15 @@ export function useQuickAddSources(): RecommendedSource[] {
   const directory = useCatalogStore(s => s.directory);
   const sources = useCatalogStore(s => s.sources);
 
-  return useMemo(() => {
-    const ordered: SourceCatalog[] = directory
-      ? [{ url: SOURCE_DIRECTORY_URL, catalog: directory }, ...catalogs]
-      : catalogs;
-    return resolveRecommended({
-      orderedCatalogs: ordered,
-      subscribed: sources,
-    });
-  }, [catalogs, directory, sources]);
+  return useMemo(
+    () =>
+      resolveRecommended({
+        directory,
+        orderedCatalogs: catalogs,
+        subscribed: sources,
+      }),
+    [catalogs, directory, sources],
+  );
 }
 
 export async function installApp(

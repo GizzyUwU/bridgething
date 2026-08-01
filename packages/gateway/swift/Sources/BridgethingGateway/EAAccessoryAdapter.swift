@@ -7,32 +7,6 @@
 
   private let eaLog = Logger(label: "ea")
 
-  /// `Adapter` implementation that talks to the bridgething daemon over an
-  /// MFi-paired iAP2 session, exposed to apps as an `EAAccessory`. Filters the
-  /// list of connected accessories by a declared protocol string and opens an
-  /// `EASession` on each match.
-  ///
-  /// Lifecycle on iOS:
-  /// 1. Pair the Car Thing once via Settings -> Bluetooth (one-time MFi auth).
-  /// 2. Declare the protocol string under `UISupportedExternalAccessoryProtocols`
-  ///    in the consuming app's Info.plist.
-  /// 3. For backgrounded operation also add `external-accessory` to
-  ///    `UIBackgroundModes`. App Store distribution gates `external-accessory`
-  ///    background mode through review; sideloaded apps still get it.
-  ///
-  /// iOS reports `.EAAccessoryDidConnect` (and lists the accessory in
-  /// `connectedAccessories` at cold launch) before the MFi session is actually
-  /// ready, so `EASession(accessory:forProtocol:)` returns nil for a few seconds.
-  /// Opens therefore retry with backoff, and the peer is reported connected only
-  /// once both streams reach `.openCompleted` (not when the session object is
-  /// created). Exhausting the fast retries yields `.linkFailed` once, then a slow
-  /// background retry keeps running for as long as the accessory stays listed in
-  /// `connectedAccessories` (recreating an `EASession` races the previous one's async
-  /// release, so a single fast burst is not enough on a mid-session drop). Once the
-  /// accessory delists, the retry stops and recovery is `.EAAccessoryDidConnect` alone.
-  /// Dedicated thread whose run loop carries all EA stream I/O. Keeping the
-  /// streams off the main run loop decouples link throughput and latency from
-  /// UI work on the main thread.
   private final class EAIOThread {
     private let thread: Thread
     private let cfLoop: CFRunLoop
@@ -193,7 +167,6 @@
       eventContinuation.yield(.bytes(deviceId: deviceId, bytes))
     }
 
-    /// Both streams reached `.openCompleted`; the link is usable.
     fileprivate func linkUp(_ state: SessionState) {
       let id = state.deviceId
       guard sessions[id] === state else { return }
@@ -204,7 +177,6 @@
       eventContinuation.yield(.connected(Device(id: id, name: state.accessory.name)))
     }
 
-    /// A stream errored or closed before the link came up; tear down and retry.
     fileprivate func linkOpenFailed(_ state: SessionState, reason: String) {
       let id = state.deviceId
       eaLog.warning("ea open failed for \(id) (attempt \(state.attempt + 1)): \(reason)")
@@ -306,6 +278,8 @@
     private var isLinkedUp = false
     private var openFailed = false
 
+    private var readBuffer = [UInt8](repeating: 0, count: 64 * 1024)
+
     var deviceId: String {
       let serial = accessory.serialNumber
       return serial.isEmpty ? "ea-\(accessory.connectionID)" : serial
@@ -372,7 +346,6 @@
       Task { @MainActor in owner?.linkDropped(self, reason: reason) }
     }
 
-    // ios accepts roughly one write() per ~0.5s space-available cycle regardless of size
     private let coalesceCapBytes = 32 * 1024
 
     private func drainOutput() {
@@ -421,9 +394,9 @@
         }
       case .hasBytesAvailable:
         guard let input = aStream as? InputStream else { return }
-        var buffer = [UInt8](repeating: 0, count: 4096)
+        var drained = Data()
         while input.hasBytesAvailable {
-          let n = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
+          let n = readBuffer.withUnsafeMutableBufferPointer { ptr -> Int in
             guard let base = ptr.baseAddress else { return 0 }
             return input.read(base, maxLength: ptr.count)
           }
@@ -433,7 +406,10 @@
             return
           }
           if n <= 0 { break }
-          owner?.handleInbound(deviceId: deviceId, bytes: Data(buffer.prefix(n)))
+          drained.append(contentsOf: readBuffer[0 ..< n])
+        }
+        if !drained.isEmpty {
+          owner?.handleInbound(deviceId: deviceId, bytes: drained)
         }
       case .hasSpaceAvailable:
         drainOutput()

@@ -6,6 +6,7 @@ use crate::{frame::LINK_FRAME_OVERHEAD, link::Iap2Command};
 pub(crate) const EA_LINK_SESSION_ID: u8 = 3;
 const EA_STREAM_ID_PREFIX_LEN: usize = 2;
 const LANE_CAPACITY: usize = 16;
+const LANE_STARVATION_GUARD: u32 = 8;
 
 type FramedBytes = (u16, Bytes);
 
@@ -140,19 +141,38 @@ async fn chunker_task(
     }
   }
 
+  fn pick_lane(lanes: &[LaneBuf; 3], skipped: &[u32; 3]) -> Option<usize> {
+    lanes
+      .iter()
+      .enumerate()
+      .find(|(i, l)| !l.queue.is_empty() && skipped[*i] >= LANE_STARVATION_GUARD)
+      .map(|(i, _)| i)
+      .or_else(|| lanes.iter().position(|l| !l.queue.is_empty()))
+  }
+
   let lane = |rx| LaneBuf {
     rx,
     queue: std::collections::VecDeque::new(),
   };
   let mut lanes = [lane(normal_rx), lane(bulk_rx), lane(background_rx)];
+  let mut skipped = [0u32; 3];
 
   loop {
     for lane in &mut lanes {
       lane.drain_ready();
     }
 
-    if let Some(lane) = lanes.iter_mut().find(|l| !l.queue.is_empty()) {
-      let Some((stream_id, payload)) = lane.next_packet(max_chunk_payload) else {
+    if let Some(idx) = pick_lane(&lanes, &skipped) {
+      for (i, lane) in lanes.iter().enumerate() {
+        if lane.queue.is_empty() {
+          skipped[i] = 0;
+        } else if i != idx {
+          skipped[i] += 1;
+        }
+      }
+      skipped[idx] = 0;
+
+      let Some((stream_id, payload)) = lanes[idx].next_packet(max_chunk_payload) else {
         continue;
       };
       if !send_packet(&link_tx, stream_id, payload).await {
@@ -350,6 +370,40 @@ mod tests {
     assert_eq!(
       collected_background,
       vec![0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7]
+    );
+  }
+
+  #[tokio::test]
+  async fn a_saturated_normal_lane_cannot_hold_the_link_forever() {
+    let (link_tx, mut link_rx) = mpsc::channel(4096);
+    let (n_tx, n_rx) = mpsc::channel(512);
+    let (b_tx, b_rx) = mpsc::channel(8);
+    let (_g_tx, g_rx) = mpsc::channel(8);
+    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+
+    let feeder = tokio::spawn(async move {
+      for _ in 0..2000 {
+        if n_tx.send((0x0100, Bytes::from_static(&[0xA0; 4]))).await.is_err() {
+          return;
+        }
+      }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    let _ = drain_chunks(&mut link_rx);
+    b_tx.send((0x0200, Bytes::from_static(&[0xB0; 4]))).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    let chunks = drain_chunks(&mut link_rx);
+    feeder.abort();
+
+    let bulk_at = chunks
+      .iter()
+      .position(|p| u16::from_be_bytes([p[0], p[1]]) == 0x0200)
+      .expect("bulk must get a turn while normal is saturated");
+    assert!(
+      bulk_at <= LANE_STARVATION_GUARD as usize + 4,
+      "bulk waited {bulk_at} packets after becoming available, past the starvation guard"
     );
   }
 

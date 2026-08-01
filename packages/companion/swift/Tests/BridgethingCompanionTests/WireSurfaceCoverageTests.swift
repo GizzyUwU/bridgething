@@ -97,7 +97,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "phone.hold", "phone.unhold", "phone.initiate", "phone.swap", "phone.merge",
         "phone.mute", "phone.dtmf",
         // tunnel
-        "tunnel.data", "tunnel.close",
+        "tunnel.data", "tunnel.ack", "tunnel.close",
         // transfer
         "transfer.ack", "transfer.fragment", "transfer.abandon",
         // system OTA

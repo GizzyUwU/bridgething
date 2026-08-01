@@ -1385,11 +1385,11 @@ public actor OtaService {
                 try fileHandle.seek(toOffset: UInt64(part.start))
                 var produced: UInt32 = 0
                 while produced < part.length {
-                    pacer.observe(ackedBytes: UInt64(await transferAcks.receivedBytes(handle.requestId)))
+                    pacer.observe(ackedBytes: await transferAcks.receivedBytes(handle.requestId))
                     try await transferAcks.awaitWindow(
                         handle.requestId,
-                        offset: streamOffset,
-                        windowBytes: UInt32(pacer.windowBytes),
+                        offset: UInt64(streamOffset),
+                        windowBytes: pacer.windowBytes,
                         timeoutSeconds: Self.otaRangeAckTimeoutSeconds
                     )
                     let want = Int(min(UInt32(pacer.fragmentBytes), part.length - produced))
@@ -1670,18 +1670,18 @@ public actor OtaService {
         }
         if startOffset > 0 {
             try fh.seek(toOffset: startOffset)
-            await transferAcks.note(transferId: transferId, received: UInt32(startOffset))
+            await transferAcks.note(transferId: transferId, received: UInt64(startOffset))
         }
         var pacer = TransferPacer(startOffset: startOffset)
         var offset = startOffset
         while offset < totalSize {
             try Task.checkCancellation()
             while true {
-                let acked = UInt64(await transferAcks.receivedBytes(transferId))
+                let acked = await transferAcks.receivedBytes(transferId)
                 pacer.observe(ackedBytes: acked)
                 emitStreaming(acked)
                 if offset < acked + pacer.windowBytes { break }
-                if !(await transferAcks.waitForProgress(transferId, beyond: UInt32(acked), timeoutSeconds: Self.otaAckTimeoutSeconds)) {
+                if !(await transferAcks.waitForProgress(transferId, beyond: acked, timeoutSeconds: Self.otaAckTimeoutSeconds)) {
                     throw TransferStalled()
                 }
             }

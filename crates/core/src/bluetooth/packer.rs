@@ -12,6 +12,20 @@ impl Lane {
   }
 }
 
+fn fill_lane(batch: &mut BytesMut, lane: &mut Lane, ceiling: usize, max_batch_bytes: usize) -> bool {
+  loop {
+    let Some(b) = lane.try_next() else { return true };
+    if batch.len() + b.len() > ceiling {
+      let fits_in_a_full_batch = batch.len() + b.len() <= max_batch_bytes;
+      lane.pending = Some(b);
+      return fits_in_a_full_batch;
+    }
+    batch.extend_from_slice(&b);
+  }
+}
+
+const LANE_RESERVE: [f32; 3] = [0.7, 0.2, 0.1];
+
 pub struct OutboundPacker {
   lanes: [Lane; 3],
   max_batch_bytes: usize,
@@ -51,14 +65,19 @@ impl OutboundPacker {
     };
     batch.extend_from_slice(&seed);
 
+    let max_batch_bytes = self.max_batch_bytes;
+
+    for (lane, share) in self.lanes.iter_mut().zip(LANE_RESERVE) {
+      let ceiling = ((max_batch_bytes as f32 * share) as usize).max(1);
+      let ceiling = batch.len().saturating_add(ceiling).min(max_batch_bytes);
+      if !fill_lane(&mut batch, lane, ceiling, max_batch_bytes) {
+        return Some(batch);
+      }
+    }
+
     for lane in &mut self.lanes {
-      loop {
-        let Some(b) = lane.try_next() else { break };
-        if batch.len() + b.len() > self.max_batch_bytes {
-          lane.pending = Some(b);
-          return Some(batch);
-        }
-        batch.extend_from_slice(&b);
+      if !fill_lane(&mut batch, lane, max_batch_bytes, max_batch_bytes) {
+        return Some(batch);
       }
     }
 
@@ -168,6 +187,40 @@ mod tests {
     drop(n_tx);
     let batch = p.next_batch().await.unwrap();
     assert_eq!(&batch[..], b"oversized", "lone oversized frame ships solo");
+  }
+
+  #[tokio::test]
+  async fn a_saturated_normal_lane_cannot_starve_the_lanes_below() {
+    let ((n_tx, b_tx, g_tx), mut p) = channels_sized(512, 100);
+
+    for _ in 0..200 {
+      n_tx.send(b(&[b'N'; 10])).await.unwrap();
+    }
+    b_tx.send(b(&[b'B'; 10])).await.unwrap();
+    g_tx.send(b(&[b'G'; 10])).await.unwrap();
+
+    let batch = p.next_batch().await.unwrap();
+    assert!(
+      batch.contains(&b'B') && batch.contains(&b'G'),
+      "bulk and background must each land a frame in the first batch despite a saturated normal lane, got {:?}",
+      String::from_utf8_lossy(&batch)
+    );
+  }
+
+  #[tokio::test]
+  async fn an_idle_lane_donates_its_reserve_to_the_lane_above() {
+    let ((n_tx, _b, _g), mut p) = channels_sized(512, 100);
+
+    for _ in 0..10 {
+      n_tx.send(b(&[b'N'; 10])).await.unwrap();
+    }
+
+    let batch = p.next_batch().await.unwrap();
+    assert_eq!(
+      batch.len(),
+      100,
+      "with bulk and background dry, normal fills the whole batch rather than stopping at its 70% share"
+    );
   }
 
   #[tokio::test]

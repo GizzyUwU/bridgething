@@ -319,7 +319,7 @@ fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, activity: EaActivit
     let mut seq: u32 = 0;
     let mut armed = false;
     let mut misses: u32 = 0;
-    let mut tripped = false;
+    let mut revoked: Option<PeerCompanionStatus> = None;
     let mut tick = tokio::time::interval(EA_KEEPALIVE_INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -335,19 +335,29 @@ fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, activity: EaActivit
           tracing::debug!(%address, rtt_ms = started.elapsed().as_millis() as u64, "ea keepalive rtt");
           armed = true;
           misses = 0;
-          tripped = false;
+          if let Some(restored) = revoked.take() {
+            tracing::info!(%address, "ea session answering again; restoring the companion");
+            state.peers.set_companion(address, restored).await;
+          }
         }
         Err(_) => {
           if activity
-            .last_inbound(address)
+            .last_activity(address)
             .is_some_and(|at| at.elapsed() < EA_KEEPALIVE_INTERVAL)
           {
-            tracing::debug!(%address, seq, "ea keepalive unanswered under active inbound traffic; not a miss");
-          } else if armed && !tripped {
+            tracing::debug!(%address, seq, "ea keepalive unanswered while the stream is carrying data; not a miss");
+          } else if armed && revoked.is_none() {
             misses += 1;
             if misses >= EA_KEEPALIVE_MAX_MISSES {
-              tripped = true;
               tracing::warn!(%address, "ea session wedged (keepalive unanswered); dropping companion to iap2");
+              let previous = state
+                .peers
+                .snapshot()
+                .peers
+                .get(&address)
+                .map(|peer| peer.companion.clone())
+                .unwrap_or_default();
+              revoked = Some(previous);
               state.peers.set_companion(address, PeerCompanionStatus::None).await;
             }
           }

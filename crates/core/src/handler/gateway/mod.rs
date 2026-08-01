@@ -224,8 +224,10 @@ impl GatewayHandler {
         }
       },
       GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {
-        if let Some(event) = tunnel_msg.into_event() {
-          tokio::spawn(async move { event.dispatch(&TunnelHandler::new(handle)).await });
+        if let Some(event) = tunnel_msg.into_event()
+          && let Err(err) = event.dispatch(&TunnelHandler::new(handle)).await
+        {
+          tracing::error!(?err, "tunnel event handler failed");
         }
       }
       GatewayToBridgeMsgData::Voice(voice_msg) => {

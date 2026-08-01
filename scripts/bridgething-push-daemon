@@ -1,23 +1,6 @@
 #!/usr/bin/env bash
 # Atomically replace the daemon binary on the device, with rollback safety.
 #
-# Stops bridgething.service, uploads via scp to a temp
-# file, rotates the existing .current to .previous (so a bad push has
-# something to roll back to), atomically renames the new binary into
-# .current, then restarts both. Stopping the consumers up front is what
-# keeps a 17 MB release transfer over USB-CDC from contending with chromium's
-# resident set and triggering an OOM cascade or USB watchdog reset (which an
-# earlier rsync flow without this stop produced reliably on 1 GB Car Thing
-# hardware).
-#
-# /opt/bridgething is a bind-mount from the settings partition on both prod
-# and dev images via bridgething-opt-overlay, so the dropped binary survives
-# bootslot swaps and OTA upgrades. The /usr/bin/bridgething launcher prefers
-# .current over the in-rootfs squashfs fallback. If the new daemon fails to
-# start 3 times in 60 seconds, bridgething-rollback.service promotes
-# .previous back to .current and the device keeps running on the prior
-# binary; .broken backups land alongside for diagnosis.
-#
 # Usage:
 #   bridgething-push-daemon <local-path>
 set -euo pipefail
@@ -40,24 +23,20 @@ if [ ! -x "$LOCAL" ]; then
     exit 1
 fi
 
-HOST="${SUPERBIRD_HOST:-bridgething.local}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/device.sh"
 DEST_DIR="/opt/bridgething/daemon"
 CURRENT="${DEST_DIR}/bridgething.current"
 PREVIOUS="${DEST_DIR}/bridgething.previous"
 TMP="${DEST_DIR}/bridgething.incoming.$$"
 
-SSH_OPTS=(-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR)
-
-ssh_dev() { ssh "${SSH_OPTS[@]}" "root@${HOST}" "$@"; }
-
 echo "[push-daemon] stopping bridgething"
-ssh_dev "systemctl stop bridgething.service"
+device_ssh "systemctl stop bridgething.service"
 
-echo "[push-daemon] uploading $(basename "$LOCAL") ($(du -h "$LOCAL" | cut -f1)) to ${HOST}:${TMP}"
-scp -C "${SSH_OPTS[@]}" -q "$LOCAL" "root@${HOST}:${TMP}"
+echo "[push-daemon] uploading $(basename "$LOCAL") ($(du -h "$LOCAL" | cut -f1)) to ${DEVICE_HOST}:${TMP}"
+device_scp -C -q "$LOCAL" "root@${DEVICE_HOST}:${TMP}"
 
 echo "[push-daemon] rotating current -> previous, swapping new -> current"
-ssh_dev "
+device_ssh "
     set -eu
     chmod 0755 ${TMP}
     if [ -e ${CURRENT} ]; then
@@ -68,6 +47,6 @@ ssh_dev "
 "
 
 echo "[push-daemon] restarting bridgething"
-ssh_dev "systemctl restart bridgething.service"
+device_ssh "systemctl restart bridgething.service"
 
 echo "[push-daemon] done."

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{TunnelClosed, TunnelData, TunnelError};
+use crate::{TunnelAck, TunnelClosed, TunnelData, TunnelError};
 
 #[typeshare]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -33,6 +33,8 @@ pub enum GatewayToBridgeTunnelMsg {
   ErrorReply(TunnelErrorReply),
   #[bridge_event]
   Data(TunnelData),
+  #[bridge_event]
+  Ack(TunnelAck),
   #[bridge_event]
   Closed(TunnelClosed),
 }

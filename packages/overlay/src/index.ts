@@ -4,6 +4,7 @@ import type {
   PeerSnapshotMap,
   PhoneCall,
   PhoneCallStatus,
+  VoiceActivity,
   VolumeChanged,
 } from '@bridgething/client';
 import { BridgethingClient } from '@bridgething/client';
@@ -16,6 +17,7 @@ export type OverlaySurfaces = {
   pairing: boolean;
   connection: boolean;
   volume: boolean;
+  voice: boolean;
 };
 
 export type OverlayConfig = { origin: string; surfaces: OverlaySurfaces };
@@ -31,6 +33,16 @@ const TOAST_TTL_MS = 5_000;
 const TOAST_MAX = 3;
 const VOLUME_TTL_MS = 1_500;
 const CONNECTION_SHOW_DELAY_MS = 3_000;
+const VOICE_OUTCOME_TTL_MS = 2_500;
+
+const VOICE_ERROR_LABEL: Record<string, string> = {
+  webappNotFound: 'no such app',
+  notDispatchable: "can't do that here",
+  unsupported: 'not supported yet',
+  playbackFailed: 'playback failed',
+  badSlots: "didn't catch that",
+  internal: 'something went wrong',
+};
 
 const CALL_LABEL: Partial<Record<PhoneCallStatus, string>> = {
   ringing: 'incoming call',
@@ -61,6 +73,7 @@ export class Overlay {
     if (cfg.surfaces.notifications) this.wireNotifications(client);
     if (cfg.surfaces.pairing) this.wirePairing(client);
     if (cfg.surfaces.volume) this.wireVolume(client);
+    if (cfg.surfaces.voice) this.wireVoice(client);
     document.addEventListener(
       'keydown',
       event => {
@@ -205,6 +218,50 @@ export class Overlay {
       bar.classList.remove('hidden');
       clearTimeout(hideTimer);
       hideTimer = setTimeout(() => bar.classList.add('hidden'), VOLUME_TTL_MS);
+    });
+  }
+
+  private wireVoice(client: BridgethingClient) {
+    const pill = el('div', 'voice hidden');
+    const orb = el('span', 'orb');
+    const label = el('span', 'label');
+    pill.append(orb, label);
+    this.root.layer.appendChild(pill);
+
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const hide = () => pill.classList.add('hidden');
+    const show = (phase: string, text: string) => {
+      clearTimeout(hideTimer);
+      label.textContent = text;
+      pill.className = `voice ${phase}`;
+      if (phase === 'done' || phase === 'failed') {
+        hideTimer = setTimeout(hide, VOICE_OUTCOME_TTL_MS);
+      }
+    };
+
+    const render = (a: VoiceActivity) => {
+      switch (a.phase) {
+        case 'listening':
+          return show('listening', 'listening');
+        case 'thinking':
+          return show('thinking', a.transcript || 'thinking');
+        case 'done':
+          return show('done', a.transcript || 'ok');
+        case 'failed':
+          return show(
+            'failed',
+            a.error ? (VOICE_ERROR_LABEL[a.error.code] ?? 'something went wrong') : "didn't catch that",
+          );
+        default:
+          return hide();
+      }
+    };
+
+    client.voice.onActivity(render);
+    void client.voice.stateGet().then(result => {
+      if (!result.ok) return;
+      const { phase } = result.response.state;
+      if (phase === 'listening' || phase === 'thinking') show(phase, phase);
     });
   }
 }

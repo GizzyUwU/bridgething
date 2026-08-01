@@ -6,28 +6,31 @@ use std::{
 
 use bytes::BytesMut;
 use libbridgething::{
-  TunnelClosed, TunnelData, TunnelError,
+  TunnelAck, TunnelClosed, TunnelData, TunnelError,
   gateway::{BridgeToGatewayTunnelMsgCommand, TunnelErrorReply, TunnelOpen},
   wire::RequestError,
 };
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   net::{TcpListener, TcpStream},
-  sync::mpsc,
+  sync::{mpsc, watch},
 };
 use uuid::Uuid;
 
 use crate::{
   bluetooth::BluetoothMan,
   state::{State, TunnelInbound},
+  transfer::pacer::Pacer,
 };
 
-const PROXY_LISTEN_ADDR: &str = "127.0.0.1:1080";
 const PROXY_PERMISSION: &str = "net.proxy";
-const READ_CHUNK_BYTES: usize = 16 * 1024;
+const READ_CHUNK_BYTES: usize = 4 * 1024;
 const TUNNEL_INBOUND_CAPACITY: usize = 32;
-const SOCKS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const TUNNEL_ACK_STALL: Duration = Duration::from_secs(30);
+const TUNNEL_ACK_INTERVAL_BYTES: u32 = 16 * 1024;
+const TUNNEL_ACK_FLUSH: Duration = Duration::from_millis(300);
 
+const SOCKS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const SOCKS_VERSION: u8 = 0x05;
 const SOCKS_AUTH_NONE: u8 = 0x00;
 const SOCKS_AUTH_NO_ACCEPTABLE: u8 = 0xff;
@@ -42,9 +45,21 @@ const SOCKS_REP_NOT_ALLOWED: u8 = 0x02;
 const SOCKS_REP_HOST_UNREACHABLE: u8 = 0x04;
 const SOCKS_REP_CMD_NOT_SUPPORTED: u8 = 0x07;
 
-pub async fn spawn(state: State, bluetooth: BluetoothMan) -> io::Result<()> {
-  let listener = TcpListener::bind(PROXY_LISTEN_ADDR).await?;
-  tracing::info!("SOCKS5 proxy listening on {PROXY_LISTEN_ADDR}");
+pub async fn bind(addr: SocketAddr) -> Option<TcpListener> {
+  match TcpListener::bind(addr).await {
+    Ok(listener) => {
+      let bound = listener.local_addr().unwrap_or(addr);
+      tracing::info!("SOCKS5 proxy listening on {bound}");
+      Some(listener)
+    }
+    Err(err) => {
+      tracing::warn!(?err, %addr, "SOCKS proxy failed to bind; net.proxy webapps will not work");
+      None
+    }
+  }
+}
+
+pub fn spawn(listener: TcpListener, state: State, bluetooth: BluetoothMan) {
   tokio::spawn(async move {
     loop {
       match listener.accept().await {
@@ -64,7 +79,6 @@ pub async fn spawn(state: State, bluetooth: BluetoothMan) -> io::Result<()> {
       }
     }
   });
-  Ok(())
 }
 
 async fn handle_session(
@@ -89,7 +103,7 @@ async fn handle_session(
 
   let tunnel_id = Uuid::now_v7();
   let (inbound_tx, inbound_rx) = mpsc::channel(TUNNEL_INBOUND_CAPACITY);
-  state.tunnel_routes.register(tunnel_id, inbound_tx);
+  let consumed_rx = state.tunnel_routes.register(tunnel_id, inbound_tx);
 
   let open = TunnelOpen {
     tunnel_id,
@@ -110,7 +124,7 @@ async fn handle_session(
     return Ok(());
   }
 
-  bridge(stream, inbound_rx, bluetooth, state, tunnel_id).await;
+  bridge(stream, inbound_rx, consumed_rx, bluetooth, state, tunnel_id).await;
   Ok(())
 }
 
@@ -195,44 +209,90 @@ fn tunnel_error_to_socks_rep(err: &RequestError<TunnelErrorReply>) -> u8 {
   }
 }
 
+async fn send_ack(bluetooth: &BluetoothMan, tunnel_id: Uuid, unacked: &mut u32) {
+  if *unacked == 0 {
+    return;
+  }
+  let cmd = BridgeToGatewayTunnelMsgCommand::Ack(TunnelAck {
+    tunnel_id,
+    consumed: *unacked,
+  });
+  *unacked = 0;
+  bluetooth.gateway_man.broadcast_command(cmd).await;
+}
+
 async fn bridge(
   stream: TcpStream,
   mut inbound_rx: mpsc::Receiver<TunnelInbound>,
+  mut consumed_rx: watch::Receiver<u64>,
   bluetooth: BluetoothMan,
   state: State,
   tunnel_id: Uuid,
 ) {
   let (mut socks_read, mut socks_write) = stream.into_split();
 
+  let bt_for_inbound = bluetooth.clone();
   let inbound_tunnel_id = tunnel_id;
   let inbound_task = tokio::spawn(async move {
-    while let Some(event) = inbound_rx.recv().await {
-      match event {
-        TunnelInbound::Data(bytes) => {
-          if let Err(err) = socks_write.write_all(&bytes).await {
-            tracing::trace!(?err, tunnel_id = %inbound_tunnel_id, "SOCKS write failed; closing tunnel");
-            return false;
+    let mut gateway_initiated = false;
+    let mut unacked: u32 = 0;
+    loop {
+      tokio::select! {
+        event = inbound_rx.recv() => match event {
+          Some(TunnelInbound::Data(bytes)) => {
+            if let Err(err) = socks_write.write_all(&bytes).await {
+              tracing::trace!(?err, tunnel_id = %inbound_tunnel_id, "SOCKS write failed; closing tunnel");
+              return false;
+            }
+            unacked = unacked.saturating_add(bytes.len() as u32);
+            if unacked >= TUNNEL_ACK_INTERVAL_BYTES {
+              send_ack(&bt_for_inbound, inbound_tunnel_id, &mut unacked).await;
+            }
           }
-        }
-        TunnelInbound::Closed(reason) => {
-          tracing::trace!(?reason, tunnel_id = %inbound_tunnel_id, "tunnel closed by gateway");
-          return true;
+          Some(TunnelInbound::Closed(reason)) => {
+            tracing::trace!(?reason, tunnel_id = %inbound_tunnel_id, "tunnel closed by gateway");
+            gateway_initiated = true;
+            break;
+          }
+          None => break,
+        },
+        _ = tokio::time::sleep(TUNNEL_ACK_FLUSH), if unacked > 0 => {
+          send_ack(&bt_for_inbound, inbound_tunnel_id, &mut unacked).await;
         }
       }
     }
-    false
+    let _ = socks_write.shutdown().await;
+    gateway_initiated
   });
 
   let bt_for_outbound = bluetooth.clone();
   let outbound_tunnel_id = tunnel_id;
   let outbound_task = tokio::spawn(async move {
     let mut buf = BytesMut::with_capacity(READ_CHUNK_BYTES);
+    let mut sent: u64 = 0;
+    let mut pacer = Pacer::new();
     loop {
+      loop {
+        let consumed = *consumed_rx.borrow();
+        pacer.observe(consumed);
+        if consumed == 0 || sent < consumed + pacer.window_bytes() {
+          break;
+        }
+        if tokio::time::timeout(TUNNEL_ACK_STALL, consumed_rx.changed())
+          .await
+          .is_err()
+        {
+          tracing::debug!(tunnel_id = %outbound_tunnel_id, sent, "tunnel ack window stalled; closing tunnel");
+          return;
+        }
+      }
+
       buf.reserve(READ_CHUNK_BYTES);
       match socks_read.read_buf(&mut buf).await {
         Ok(0) => return,
         Ok(_) => {
           let bytes = buf.split().freeze();
+          sent += bytes.len() as u64;
           let cmd = BridgeToGatewayTunnelMsgCommand::Data(TunnelData {
             tunnel_id: outbound_tunnel_id,
             bytes,

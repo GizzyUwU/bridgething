@@ -16,6 +16,53 @@ use crate::{
 };
 
 const RETRANSMIT_STALL_MARKER: u8 = 3;
+pub(super) const METER_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+struct Meter {
+  since: Instant,
+  tx_bytes: u64,
+  tx_packets: u32,
+  rx_bytes: u64,
+  rx_packets: u32,
+  retransmits: u32,
+  window_stalls: u32,
+}
+
+impl Meter {
+  fn new() -> Self {
+    Self {
+      since: Instant::now(),
+      tx_bytes: 0,
+      tx_packets: 0,
+      rx_bytes: 0,
+      rx_packets: 0,
+      retransmits: 0,
+      window_stalls: 0,
+    }
+  }
+
+  fn report(&mut self, pending: usize, unacked: usize) {
+    let elapsed = self.since.elapsed();
+    if self.tx_packets == 0 && self.rx_packets == 0 {
+      *self = Self::new();
+      return;
+    }
+    let secs = elapsed.as_secs_f64();
+    tracing::debug!(
+      tx_kb_s = self.tx_bytes as f64 / 1024.0 / secs,
+      rx_kb_s = self.rx_bytes as f64 / 1024.0 / secs,
+      tx_pkt_s = self.tx_packets as f64 / secs,
+      rx_pkt_s = self.rx_packets as f64 / secs,
+      retransmits = self.retransmits,
+      window_stalls = self.window_stalls,
+      pending,
+      unacked,
+      "iap2 link throughput"
+    );
+    *self = Self::new();
+  }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct LinkParams {
@@ -62,6 +109,8 @@ pub(super) struct EstablishedState {
   out_of_order: BTreeMap<u8, LinkPacket>,
   unacked_delivery: bool,
   must_send_ack: bool,
+
+  meter: Meter,
 }
 
 impl EstablishedState {
@@ -75,7 +124,14 @@ impl EstablishedState {
       out_of_order: BTreeMap::new(),
       unacked_delivery: false,
       must_send_ack: false,
+
+      meter: Meter::new(),
     }
+  }
+
+  pub(super) fn report_meter(&mut self) {
+    let (pending, unacked) = (self.pending_send.len(), self.unacked.len());
+    self.meter.report(pending, unacked);
   }
 
   pub(super) fn last_sent_psn(&self) -> u8 {
@@ -122,6 +178,9 @@ impl EstablishedState {
         break;
       };
       self.send_data_packet(session_id, payload, writer, codec).await?;
+    }
+    if !self.pending_send.is_empty() {
+      self.meter.window_stalls += 1;
     }
     Ok(())
   }
@@ -201,6 +260,8 @@ impl EstablishedState {
 
   pub(super) fn handle_inbound_data(&mut self, packet: LinkPacket) -> Vec<DeliveredData> {
     let recv_seq = packet.header.seq;
+    self.meter.rx_packets += 1;
+    self.meter.rx_bytes += packet.payload.len() as u64;
     let delta = recv_seq.wrapping_sub(self.last_received_in_sequence_psn);
 
     if delta == 0 {
@@ -260,6 +321,7 @@ impl EstablishedState {
     }
     front.retry_count += 1;
     front.deadline = Instant::now() + self.params.retransmission_timeout;
+    self.meter.retransmits += 1;
     let wire = front.wire.clone();
     let seq = front.seq;
     let retry = front.retry_count;
@@ -303,6 +365,8 @@ impl EstablishedState {
     writer.write_all(&wire).await?;
     writer.flush().await?;
 
+    self.meter.tx_packets += 1;
+    self.meter.tx_bytes += wire.len() as u64;
     self.last_sent_psn = seq;
     self.unacked_delivery = false;
     self.must_send_ack = false;

@@ -1,13 +1,5 @@
 //! Diagnoses the scene estimator rather than scoring it.
 //!
-//! A front end that does not help and a front end that never engaged score identically, and they
-//! want opposite fixes. This reports whether the noise field was adopted, how many bins adopted a
-//! measured look direction, and what bearing that look direction implies against the scene's truth.
-//!
-//! The last argument sweeps the short-horizon time constant the target covariance is snapshotted
-//! over, which trades how much of the phrase the estimate averages against how much surrounding
-//! noise it admits. Coverage and accuracy move against each other, so both are reported.
-//!
 //! ```text
 //! cargo run --release --example scene_probe -- <scene-dir> [scenes] [noise-prerolls] [recent-tau-csv]
 //! ```
@@ -33,6 +25,18 @@ struct Scene {
   snr_db: Option<f64>,
   speech_start: usize,
   speech_len: usize,
+  #[serde(default)]
+  speech_spans: Vec<[usize; 2]>,
+}
+
+impl Scene {
+  fn spans(&self) -> Vec<(usize, usize)> {
+    if self.speech_spans.is_empty() {
+      vec![(self.speech_start, self.speech_len)]
+    } else {
+      self.speech_spans.iter().map(|span| (span[0], span[1])).collect()
+    }
+  }
 }
 
 fn read_scene(path: &Path) -> Option<Vec<i32>> {
@@ -53,6 +57,10 @@ fn main() {
   let rounds: usize = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
   let taus: Vec<f64> = args.get(4).map_or_else(
     || vec![scene::Config::default().recent_tau_s],
+    |csv| csv.split(',').filter_map(|v| v.trim().parse().ok()).collect(),
+  );
+  let memories: Vec<f64> = args.get(5).map_or_else(
+    || vec![scene::Config::default().target_memory],
     |csv| csv.split(',').filter_map(|v| v.trim().parse().ok()).collect(),
   );
 
@@ -78,7 +86,11 @@ fn main() {
   );
 
   let mut summaries = Vec::new();
-  for (index, tau) in taus.iter().enumerate() {
+  for (index, (tau, memory)) in taus
+    .iter()
+    .flat_map(|tau| memories.iter().map(move |memory| (tau, memory)))
+    .enumerate()
+  {
     let detailed = index == 0;
     if detailed {
       println!(
@@ -94,6 +106,7 @@ fn main() {
         design: Design::Superdirective { wng_floor_db: -6.0 },
         adaptation: Some(scene::Config {
           recent_tau_s: *tau,
+          target_memory: *memory,
           ..scene::Config::default()
         }),
         ..Config::default()
@@ -109,10 +122,17 @@ fn main() {
         beamformer.reset_frames();
       }
 
-      let phrase_end = ((meta.speech_start + meta.speech_len) * CHANNELS).min(scene.len());
-      discard.clear();
-      beamformer.process(&scene[..phrase_end], &mut discard);
-      beamformer.mark_target();
+      let mut cursor = 0usize;
+      for (start, len) in meta.spans() {
+        let end = ((start + len) * CHANNELS).min(scene.len());
+        if end <= cursor {
+          continue;
+        }
+        discard.clear();
+        beamformer.process(&scene[cursor..end], &mut discard);
+        beamformer.mark_target();
+        cursor = end;
+      }
 
       let (adopted, noise_measured) = beamformer.adoption();
       adopted_total += adopted;
@@ -140,6 +160,7 @@ fn main() {
     errors.sort_by(f64::total_cmp);
     summaries.push((
       *tau,
+      *memory,
       noise_total,
       adopted_total as f64 / scenes.len().max(1) as f64,
       errors.clone(),
@@ -147,17 +168,17 @@ fn main() {
   }
 
   println!(
-    "\n{:>10} {:>8} {:>10} {:>10} {:>10} {:>9}",
-    "recent tau", "noise", "rtf bins", "resolving", "median err", "p90 err"
+    "\n{:>10} {:>7} {:>8} {:>10} {:>10} {:>10} {:>9}",
+    "recent tau", "memory", "noise", "rtf bins", "resolving", "median err", "p90 err"
   );
-  for (tau, noise_total, adopted, errors) in &summaries {
+  for (tau, memory, noise_total, adopted, errors) in &summaries {
     let (median, p90) = if errors.is_empty() {
       (f64::NAN, f64::NAN)
     } else {
       (errors[errors.len() / 2], errors[errors.len() * 9 / 10])
     };
     println!(
-      "{tau:>10.2} {:>8} {adopted:>10.1} {:>10} {median:>10.1} {p90:>9.1}",
+      "{tau:>10.2} {memory:>7.2} {:>8} {adopted:>10.1} {:>10} {median:>10.1} {p90:>9.1}",
       format!("{noise_total}/{}", scenes.len()),
       format!("{}/{}", errors.len(), scenes.len()),
     );

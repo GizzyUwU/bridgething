@@ -145,7 +145,7 @@ export type BridgethingOtaPollConfig = {
   rootUrl?: string;
 };
 
-export type BridgethingOtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp';
+export type BridgethingOtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp' | 'wakewordModel';
 
 export type BridgethingOtaPhase =
   | 'idle'

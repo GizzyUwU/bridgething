@@ -29,7 +29,7 @@ use now_playing::NowPlayingFlow;
 pub use now_playing::{NowPlayingAuthorityState, NowPlayingCommand};
 pub use telephony::TelephonyCommand;
 use telephony::TelephonyFlow;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
@@ -95,6 +95,7 @@ pub struct Iap2Session<M: MfiAccess> {
   identification: IdentificationConfig,
   app_launch_bundle_id: Option<String>,
   app_launch_command_rx: mpsc::Receiver<String>,
+  shutdown_rx: mpsc::Receiver<oneshot::Sender<()>>,
   mfi: M,
   link_command_tx: mpsc::Sender<Iap2Command>,
   link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -124,11 +125,13 @@ impl<M: MfiAccess> Iap2Session<M> {
     telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
     let (_app_launch_tx, app_launch_command_rx) = mpsc::channel(1);
+    let (_shutdown_tx, shutdown_rx) = mpsc::channel(1);
     Self::with_app_launch(
       identification,
       None,
       Vec::new(),
       app_launch_command_rx,
+      shutdown_rx,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -146,6 +149,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     app_launch_bundle_id: Option<String>,
     artwork_suppress_bundles: Vec<String>,
     app_launch_command_rx: mpsc::Receiver<String>,
+    shutdown_rx: mpsc::Receiver<oneshot::Sender<()>>,
     mfi: M,
     link_command_tx: mpsc::Sender<Iap2Command>,
     link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -168,6 +172,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       identification,
       app_launch_bundle_id,
       app_launch_command_rx,
+      shutdown_rx,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -196,6 +201,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     let mut np_authority_last = NowPlayingAuthorityState::default();
     let mut np_authority_closed = false;
     let mut app_launch_closed = false;
+    let mut shutdown_closed = false;
 
     loop {
       while let Some(frame) = CsmCodec.decode(&mut control_buf)? {
@@ -272,7 +278,7 @@ impl<M: MfiAccess> Iap2Session<M> {
             self.hid.reset();
             self.telephony.reset();
             if let Some(mut ea) = self.ea.take() {
-              ea.teardown(&self.session_events_tx).await;
+              ea.teardown(None, &self.session_events_tx).await;
             }
             emit(&self.session_events_tx, SessionEvent::LinkRestarting(reason)).await;
           }
@@ -318,6 +324,17 @@ impl<M: MfiAccess> Iap2Session<M> {
             }
           }
           None => app_launch_closed = true,
+        },
+        maybe_ack = self.shutdown_rx.recv(), if !shutdown_closed => match maybe_ack {
+          Some(ack) => {
+            tracing::info!("iap2 session: closing external accessory sessions for shutdown");
+            if let Some(ea) = self.ea.as_mut() {
+              ea.teardown(Some(&self.link_command_tx), &self.session_events_tx).await;
+            }
+            let _ = ack.send(());
+            return Ok(());
+          }
+          None => shutdown_closed = true,
         },
         res = self.now_playing_authority.changed(), if !np_authority_closed => {
           if res.is_err() {

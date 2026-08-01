@@ -110,7 +110,15 @@ import com.bridgething.schema.FavoritesSet
 import com.bridgething.schema.FavoritesSetMany
 
 public enum class CompanionLogLevel(public val raw: String) {
-    Debug("debug"), Info("info"), Warn("warn"), Error("error"),
+    Debug("debug"), Info("info"), Warn("warn"), Error("error"), ;
+
+    internal val storeLevel: LogStore.Level
+        get() = when (this) {
+            Debug -> LogStore.Level.DEBUG
+            Info -> LogStore.Level.INFO
+            Warn -> LogStore.Level.WARN
+            Error -> LogStore.Level.ERROR
+        }
 }
 
 public object BridgethingCompanionVersion {
@@ -505,7 +513,7 @@ public class BridgethingCompanion(
             LogLevel.Error -> CompanionLogLevel.Error
         }
         val message = "[${entry.target}] ${entry.message}"
-        LogStore.write("daemon ${level.raw}: $message")
+        LogStore.record(level.storeLevel, "daemon", message)
         DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }
@@ -559,7 +567,7 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runKeepaliveResponder() })
         dispatchers.add(
             scope.launch {
-                gateway.transfer.ack.collect { (_, ack) -> transferAcks.note(ack.transferId, ack.received) }
+                gateway.transfer.ack.collect { (_, ack) -> transferAcks.note(ack.transferId, ack.received.toLong()) }
             },
         )
         transferReceiver.start(scope)
@@ -787,7 +795,7 @@ public class BridgethingCompanion(
             if (acks != null) {
                 while (true) {
                     val acked = acks.receivedBytes(transferId)
-                    if (offset < acked.toInt() + TRANSFER_WINDOW_BYTES) break
+                    if (offset < acked + TRANSFER_WINDOW_BYTES) break
                     if (!acks.waitForProgress(transferId, acked, TRANSFER_ACK_TIMEOUT_MS)) {
                         acks.finish(transferId)
                         runCatching {

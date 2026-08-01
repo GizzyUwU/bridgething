@@ -5,9 +5,7 @@ use typeshare::typeshare;
 
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Bridge-side identity announce. Daemon sends one of these to every
-/// gateway on connect so the companion knows what daemon it's talking to
-/// and can opt out of unsupported surfaces.
+/// Bridge-side identity announce
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
@@ -46,23 +44,7 @@ impl BridgeThingMeta {
   }
 }
 
-/// What the streamed bytes are going to be applied as.
-///
-/// `Image` streams a `.swu` through libswupdate + slot flip + reboot.
-/// `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
-/// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
-/// streams a zip bundle of hub or stock, validates the manifest id is
-/// one of the reserved built-ins, atomic-rotates the bundle dir on the
-/// bandaid bind-mount, restarts the service. `InstalledWebapp` streams
-/// a zip bundle of a third-party (non-reserved) webapp and installs it
-/// into the writable registry; it neither stages on the bandaid nor
-/// restarts, and is never part of an `OtaActivate` batch.
-///
-/// Companions key reboot expectations off this: image means the device
-/// power-cycles; daemon and builtin-webapp mean the daemon process
-/// restarts and the gateway link drops and reconnects; installed-webapp
-/// applies in place with no restart, and the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// What the streamed bytes are going to be applied as
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -72,24 +54,11 @@ pub enum OtaKind {
   Daemon,
   BuiltinWebapp,
   InstalledWebapp,
+  WakewordModel,
 }
 
 /// Stage of the OTA orchestrator. The phase set is shared between
-/// kinds, with non-image kinds emitting a subset.
-///
-/// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
-/// -> `Confirming` (try-counter reset) -> `Reboot`.
-///
-/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
-/// where `Writing`/100 means the piece is validated and staged on the
-/// bandaid (not yet live). The atomic rotate and the single `systemctl
-/// restart` happen later, on `OtaActivate`, which emits the terminal
-/// `Reboot` for the whole batch. `Confirming` is image-only.
-///
-/// InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
-/// bundle installs into the writable registry. There is no `Writing`/100,
-/// no `Confirming`, and no `Reboot`; the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// kinds, with non-image kinds emitting a subset
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -102,10 +71,7 @@ pub enum OtaPhase {
   Reboot,
 }
 
-/// Per-phase progress tick. `percent` is 0-100 within the current
-/// libswupdate step, which resets at each step boundary, so it is not a
-/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
-/// time for the phase when the orchestrator can compute it.
+/// Per-phase progress tick
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -121,15 +87,13 @@ pub struct OtaProgress {
   pub eta_ms: Option<u32>,
 }
 
-/// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
+/// Terminal error from the OTA orchestrator
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum OtaErrorCode {
   /// Companion sent fragments for an `update_id` that was never begun
-  /// (or was abandoned mid-stream).
   UnknownUpdate,
   /// A fragment's offset did not match the daemon's `received`.
   OffsetMismatch,
@@ -168,12 +132,7 @@ pub struct OtaFinished {
   pub update_id: String,
 }
 
-/// Half-open byte range the daemon's range proxy asks the companion
-/// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
-/// inclusive, `length` bytes. The proxy caps the multi-range count at
-/// the daemon edge (loopback) - companions see whatever swupdate's
-/// delta downloader emits. Offsets are u32 because OTA artifacts are
-/// bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
+/// Half-open byte range the daemon's range proxy asks the companion to serve
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -183,9 +142,7 @@ pub struct RangeSpec {
   pub length: u32,
 }
 
-/// Resolved range the companion is about to serve. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
-/// `TransferBody`.
+/// Resolved range the companion is about to serve
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

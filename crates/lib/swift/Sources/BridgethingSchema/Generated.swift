@@ -2974,13 +2974,15 @@ public struct OtaAssetRangeReply: Codable, Sendable {
 /// Companions key reboot expectations off this: image means the device
 /// power-cycles; daemon and builtin-webapp mean the daemon process
 /// restarts and the gateway link drops and reconnects; installed-webapp
-/// applies in place with no restart, and the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// and wakeword-model apply in place with no restart.
 public enum OtaKind: String, Codable, Sendable {
 	case image
 	case daemon
 	case builtinWebapp
 	case installedWebapp
+	/// Wake word phrase classifier. Applies in place and the detector reloads
+	/// without a restart; the embedding stack rides in the daemon binary.
+	case wakewordModel
 }
 
 public struct TransferRef: Codable, Sendable {
@@ -3156,13 +3158,16 @@ public struct OverlayProfile: Codable, Sendable {
 	@WireDefault<WireDefaultOverlayProfileConnection> public var connection: Bool
 	/// Transient volume level indicator.
 	@WireDefault<WireDefaultOverlayProfileVolume> public var volume: Bool
+	/// Voice turn indicator: listening, recognizing, and the outcome.
+	@WireDefault<WireDefaultOverlayProfileVoice> public var voice: Bool
 
-	public init(notifications: Bool, call: Bool, pairing: Bool, connection: Bool, volume: Bool) {
+	public init(notifications: Bool, call: Bool, pairing: Bool, connection: Bool, volume: Bool, voice: Bool) {
 		self.notifications = notifications
 		self.call = call
 		self.pairing = pairing
 		self.connection = connection
 		self.volume = volume
+		self.voice = voice
 	}
 }
 
@@ -4416,6 +4421,16 @@ public struct TtsStarted: Codable, Sendable {
 	}
 }
 
+public struct TunnelAck: Codable, Sendable {
+	@MsgpackUuid public var tunnelId: UUID
+	public let consumed: UInt32
+
+	public init(tunnelId: UUID, consumed: UInt32) {
+		self.tunnelId = tunnelId
+		self.consumed = consumed
+	}
+}
+
 public struct TunnelClosed: Codable, Sendable {
 	@MsgpackUuid public var tunnelId: UUID
 	public let reason: String?
@@ -4521,11 +4536,25 @@ public struct TunnelOpenReply: Codable, Sendable {
 	public init() {}
 }
 
+/// Which arm of the companion's resolver produced an intent. Carried so a
+/// surface can tell a deterministic match from a model prediction.
+public enum NluStage: String, Codable, Sendable {
+	case fastPath
+	case model
+	case rejectedNoIntent
+	case rejectedClarify
+	/// The fast path missed and no model is configured, so nothing could
+	/// classify the utterance. Distinct from a model that ran and rejected.
+	case noModel
+}
+
 public struct VoiceDispatch: Codable, Sendable {
 	public let resolved: NluResolvedIntent
+	public let stage: NluStage?
 
-	public init(resolved: NluResolvedIntent) {
+	public init(resolved: NluResolvedIntent, stage: NluStage?) {
 		self.resolved = resolved
+		self.stage = stage
 	}
 }
 
@@ -4602,6 +4631,7 @@ public struct VoiceFrame: Codable, Sendable {
 	}
 }
 
+/// What opened a capture session.
 public enum VoiceCaptureReason: String, Codable, Sendable {
 	case pushToTalk
 	case assistant
@@ -6133,11 +6163,13 @@ public enum BridgeToGatewayTransferMsg: Codable, Sendable {
 public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 	case open(TunnelOpen)
 	case data(TunnelData)
+	case ack(TunnelAck)
 	case close(TunnelClosed)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case open,
 			data,
+			ack,
 			close
 	}
 
@@ -6159,6 +6191,11 @@ public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 					self = .data(content)
 					return
 				}
+			case .ack:
+				if let content = try? container.decode(TunnelAck.self, forKey: .data) {
+					self = .ack(content)
+					return
+				}
 			case .close:
 				if let content = try? container.decode(TunnelClosed.self, forKey: .data) {
 					self = .close(content)
@@ -6177,6 +6214,9 @@ public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .data(let content):
 			try container.encode(CodingKeys.data, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .ack(let content):
+			try container.encode(CodingKeys.ack, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .close(let content):
 			try container.encode(CodingKeys.close, forKey: .event)
@@ -7570,12 +7610,14 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 	case openReply(TunnelOpenReply)
 	case errorReply(TunnelErrorReply)
 	case data(TunnelData)
+	case ack(TunnelAck)
 	case closed(TunnelClosed)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case openReply,
 			errorReply,
 			data,
+			ack,
 			closed
 	}
 
@@ -7602,6 +7644,11 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 					self = .data(content)
 					return
 				}
+			case .ack:
+				if let content = try? container.decode(TunnelAck.self, forKey: .data) {
+					self = .ack(content)
+					return
+				}
 			case .closed:
 				if let content = try? container.decode(TunnelClosed.self, forKey: .data) {
 					self = .closed(content)
@@ -7623,6 +7670,9 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .data(let content):
 			try container.encode(CodingKeys.data, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .ack(let content):
+			try container.encode(CodingKeys.ack, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .closed(let content):
 			try container.encode(CodingKeys.closed, forKey: .event)
@@ -8344,6 +8394,10 @@ public enum WireDefaultOverlayProfileVolume: WireDefaultProvider {
 	public static var wireDefault: Bool { true }
 }
 
+public enum WireDefaultOverlayProfileVoice: WireDefaultProvider {
+	public static var wireDefault: Bool { true }
+}
+
 public enum WireDefaultQueueItemQueued: WireDefaultProvider {
 	public static var wireDefault: Bool { false }
 }
@@ -8369,5 +8423,5 @@ public enum WireDefaultWebappManifestRendersVoiceDisplay: WireDefaultProvider {
 }
 
 public enum WireDefaultWebappManifestOverlays: WireDefaultProvider {
-	public static var wireDefault: OverlayProfile { OverlayProfile(notifications: true, call: true, pairing: true, connection: true, volume: true) }
+	public static var wireDefault: OverlayProfile { OverlayProfile(notifications: true, call: true, pairing: true, connection: true, volume: true, voice: true) }
 }

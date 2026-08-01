@@ -4,18 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::NluResolvedIntent;
-
-#[typeshare]
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum VoiceCaptureReason {
-  #[default]
-  PushToTalk,
-  Assistant,
-  WakeWord,
-}
+use crate::{NluResolvedIntent, NluStage, VoiceCaptureReason};
 
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -32,6 +21,7 @@ pub struct VoiceMicOpen {
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceDispatch {
   pub resolved: Box<NluResolvedIntent>,
+  pub stage: Option<NluStage>,
 }
 
 #[typeshare]

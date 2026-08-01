@@ -1,4 +1,4 @@
-use libbridgething::{TunnelClosed, TunnelData, gateway::GatewayToBridgeTunnelMsgEventDispatch};
+use libbridgething::{TunnelAck, TunnelClosed, TunnelData, gateway::GatewayToBridgeTunnelMsgEventDispatch};
 
 use super::{HandlerResult, MsgHandle};
 use crate::state::TunnelInbound;
@@ -22,6 +22,15 @@ impl GatewayToBridgeTunnelMsgEventDispatch for TunnelHandler {
     } else {
       tracing::trace!(tunnel_id = %params.tunnel_id, "tunnel data for unknown tunnel; dropping");
     }
+    Ok(())
+  }
+
+  async fn ack(&self, params: TunnelAck) -> HandlerResult {
+    self
+      .handle
+      .state
+      .tunnel_routes
+      .note_ack(params.tunnel_id, params.consumed);
     Ok(())
   }
 

@@ -1,29 +1,29 @@
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
+use bridgething_wakeword::WakeWord;
 use bytes::Bytes;
-use tokio::{
-  io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-  net::UnixStream,
-  sync::mpsc,
-  task::JoinHandle,
-};
+use tokio::sync::mpsc;
 
 use super::Detection;
 
-const REDIAL: Duration = Duration::from_secs(2);
 const BACKLOG: usize = 8;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WakeWordLink {
   pcm: mpsc::Sender<Bytes>,
 }
 
 impl WakeWordLink {
-  pub fn spawn(socket: PathBuf) -> (Self, mpsc::Receiver<Detection>, JoinHandle<()>) {
+  pub fn spawn(models: &[PathBuf], threshold: f32) -> Option<(Self, mpsc::Receiver<Detection>)> {
+    let detector = load(models, threshold)?;
     let (pcm_tx, pcm_rx) = mpsc::channel(BACKLOG);
     let (hit_tx, hit_rx) = mpsc::channel(4);
-    let handle = tokio::spawn(run(socket, pcm_rx, hit_tx));
-    (Self { pcm: pcm_tx }, hit_rx, handle)
+    std::thread::Builder::new()
+      .name("wakeword".into())
+      .spawn(move || run(detector, pcm_rx, hit_tx))
+      .inspect_err(|err| tracing::error!("could not start the wake word thread: {err}"))
+      .ok()?;
+    Some((Self { pcm: pcm_tx }, hit_rx))
   }
 
   pub fn offer(&self, pcm: Bytes) {
@@ -33,53 +33,49 @@ impl WakeWordLink {
   }
 }
 
-async fn run(socket: PathBuf, mut pcm: mpsc::Receiver<Bytes>, hits: mpsc::Sender<Detection>) {
-  loop {
-    let stream = match UnixStream::connect(&socket).await {
-      Ok(stream) => stream,
-      Err(err) => {
-        tracing::debug!("wake word sidecar unavailable at {}: {err}", socket.display());
-        while pcm.try_recv().is_ok() {}
-        tokio::time::sleep(REDIAL).await;
-        continue;
-      }
-    };
-    tracing::info!("wake word sidecar attached");
-
-    if pump(stream, &mut pcm, &hits).await.is_none() {
-      break;
+fn load(models: &[PathBuf], threshold: f32) -> Option<WakeWord> {
+  for model in models {
+    if !model.exists() {
+      continue;
     }
-    tracing::warn!("wake word sidecar detached; will redial");
-    tokio::time::sleep(REDIAL).await;
+    match WakeWord::new(model, threshold) {
+      Ok(detector) => {
+        tracing::info!(model = %model.display(), threshold, "wake word loaded");
+        return Some(detector);
+      }
+      Err(err) => tracing::error!("wake word model {} is unusable: {err}", model.display()),
+    }
   }
+  tracing::warn!(
+    "no wake word model at {}; voice needs push to talk",
+    models
+      .iter()
+      .map(|p| p.display().to_string())
+      .collect::<Vec<_>>()
+      .join(", ")
+  );
+  None
 }
 
-async fn pump(stream: UnixStream, pcm: &mut mpsc::Receiver<Bytes>, hits: &mpsc::Sender<Detection>) -> Option<()> {
-  let (read, mut write) = stream.into_split();
-  let mut lines = BufReader::new(read).lines();
-
-  loop {
-    tokio::select! {
-      frame = pcm.recv() => {
-        let frame = frame?;
-        if write.write_all(&frame).await.is_err() {
-          return Some(());
+fn run(mut detector: WakeWord, mut pcm: mpsc::Receiver<Bytes>, hits: mpsc::Sender<Detection>) {
+  let mut samples: Vec<f32> = Vec::new();
+  while let Some(frame) = pcm.blocking_recv() {
+    samples.clear();
+    samples.extend(
+      frame
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0),
+    );
+    match detector.push(&samples) {
+      Ok(Some(hit)) => {
+        tracing::info!(score = hit.score, at_sample = hit.at_sample, "wake word fired");
+        if hits.blocking_send(Detection { score: hit.score }).is_err() {
+          break;
         }
       }
-      line = lines.next_line() => {
-        match line {
-          Ok(Some(line)) => match serde_json::from_str::<Detection>(&line) {
-            Ok(hit) => {
-              tracing::info!(score = hit.score, "wake word fired");
-              if hits.send(hit).await.is_err() {
-                return None;
-              }
-            }
-            Err(err) => tracing::warn!("undecodable detection {line:?}: {err}"),
-          },
-          Ok(None) | Err(_) => return Some(()),
-        }
-      }
+      Ok(None) => {}
+      Err(err) => tracing::warn!("wake word inference failed: {err}"),
     }
   }
+  tracing::debug!("wake word thread exiting");
 }

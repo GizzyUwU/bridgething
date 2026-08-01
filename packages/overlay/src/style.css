@@ -108,7 +108,38 @@
 .volume .track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
 .volume .fill { height: 100%; border-radius: 3px; background: #fff; transition: width 90ms linear; }
 .volume.muted .fill { background: #f06050; }
+.voice {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  font-size: 15px;
+  animation: bt-rise 160ms ease-out;
+}
+.voice .orb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  background: #4a9dff;
+}
+.voice .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voice.listening .orb { animation: bt-pulse 1s infinite; }
+.voice.thinking .orb { background: #d8a13a; animation: bt-pulse 700ms infinite; }
+.voice.thinking .label { opacity: 0.7; }
+.voice.done .orb { background: #35d06a; }
+.voice.failed .orb { background: #f06050; }
+.voice.failed .label { opacity: 0.8; }
 .hidden { display: none; }
+@keyframes bt-rise { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
 @keyframes bt-drop { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes bt-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }

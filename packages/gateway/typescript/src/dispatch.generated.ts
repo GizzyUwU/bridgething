@@ -19,6 +19,7 @@ import type {
   StreamEnd,
   StreamError,
   TimeInfo,
+  TunnelAck,
   TunnelClosed,
   TunnelData,
   WebappError,
@@ -391,12 +392,14 @@ export type TransferDeviceInboundHandlers = {
 
 export type TunnelInboundHandlers = {
   data: (deviceId: string, msg: TunnelData) => void;
+  ack: (deviceId: string, msg: TunnelAck) => void;
   close: (deviceId: string, msg: TunnelClosed) => void;
   open: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void;
 };
 
 export type TunnelDeviceInboundHandlers = {
   data: (msg: TunnelData) => void;
+  ack: (msg: TunnelAck) => void;
   close: (msg: TunnelClosed) => void;
   open: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void;
 };
@@ -2812,6 +2815,18 @@ export class TunnelSurface {
     });
   }
 
+  /** Subscribe to `Tunnel::Ack` across all peers. */
+  onAck(handler: (deviceId: string, msg: TunnelAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'ack') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Subscribe to `Tunnel::Close` across all peers. */
   onClose(handler: (deviceId: string, msg: TunnelClosed) => void): () => void {
     return this._gateway.on(event => {
@@ -2865,6 +2880,10 @@ export class TunnelSurface {
           handlers.data?.(event.deviceId, inner.data);
           return;
         }
+        case 'ack': {
+          handlers.ack?.(event.deviceId, inner.data);
+          return;
+        }
         case 'close': {
           handlers.close?.(event.deviceId, inner.data);
           return;
@@ -2900,6 +2919,21 @@ export class TunnelSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'tunnel', data: { event: 'data', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Tunnel::Ack` to every connected peer (broadcast). */
+  async ack(payload: TunnelAck, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'tunnel', data: { event: 'ack', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -6112,6 +6146,19 @@ export class TunnelSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Tunnel::Ack` from this peer. */
+  onAck(handler: (msg: TunnelAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'ack') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Tunnel::Close` from this peer. */
   onClose(handler: (msg: TunnelClosed) => void): () => void {
     return this._gateway.on(event => {
@@ -6168,6 +6215,10 @@ export class TunnelSurfaceForDevice {
           handlers.data?.(inner.data);
           return;
         }
+        case 'ack': {
+          handlers.ack?.(inner.data);
+          return;
+        }
         case 'close': {
           handlers.close?.(inner.data);
           return;
@@ -6200,6 +6251,16 @@ export class TunnelSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'tunnel', data: { event: 'data', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Tunnel::Ack` to this peer. */
+  async ack(payload: TunnelAck, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'tunnel', data: { event: 'ack', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -8641,6 +8702,10 @@ function outerSubscribeGateway(
             innerHandlers.data?.(event.deviceId, inner.data);
             return;
           }
+          case 'ack': {
+            innerHandlers.ack?.(event.deviceId, inner.data);
+            return;
+          }
           case 'close': {
             innerHandlers.close?.(event.deviceId, inner.data);
             return;
@@ -9387,6 +9452,10 @@ function outerSubscribeDevice(
         switch (inner.event) {
           case 'data': {
             innerHandlers.data?.(inner.data);
+            return;
+          }
+          case 'ack': {
+            innerHandlers.ack?.(inner.data);
             return;
           }
           case 'close': {

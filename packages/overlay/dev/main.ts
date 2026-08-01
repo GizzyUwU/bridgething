@@ -5,6 +5,7 @@ import type {
   PeerSnapshotMap,
   PhoneCall,
   PhoneCallStatus,
+  VoiceActivity,
   VolumeChanged,
 } from '@bridgething/client';
 
@@ -34,6 +35,7 @@ const removed = new Topic<{ id: string }>();
 const pin = new Topic<BluetoothPin>();
 const pairingResult = new Topic<unknown>();
 const volumeChanged = new Topic<VolumeChanged>();
+const voiceActivity = new Topic<VoiceActivity>();
 
 const fakeClient = {
   peer: { onSnapshot: peerSnapshot.on },
@@ -41,11 +43,15 @@ const fakeClient = {
   notifications: { onPosted: posted.on, onUpdated: updated.on, onRemoved: removed.on },
   bluetooth: { onPin: pin.on, onPairingResult: pairingResult.on },
   audio: { onVolumeChanged: volumeChanged.on },
+  voice: {
+    onActivity: voiceActivity.on,
+    stateGet: async () => ({ ok: false, kind: 'protocol', error: { type: 'unsupported' } }),
+  },
 } as unknown as BridgethingClient;
 
 const cfg: OverlayConfig = {
   origin: location.origin,
-  surfaces: { notifications: true, call: true, pairing: true, connection: true, volume: true },
+  surfaces: { notifications: true, call: true, pairing: true, connection: true, volume: true, voice: true },
 };
 
 const stage = document.getElementById('stage');
@@ -104,6 +110,21 @@ function peers(useful: boolean): PeerSnapshotMap {
   } as unknown as PeerSnapshotMap;
 }
 
+function voice(partial: Partial<VoiceActivity> & Pick<VoiceActivity, 'phase'>): VoiceActivity {
+  return {
+    streamId: '0199a1f0-0000-7000-8000-000000000001',
+    reason: null,
+    score: null,
+    transcript: null,
+    intent: null,
+    slots: {},
+    stage: null,
+    target: null,
+    error: null,
+    ...partial,
+  } as VoiceActivity;
+}
+
 let volume = 0.55;
 let muted = false;
 function emitVolume(): void {
@@ -147,6 +168,22 @@ const actions: Record<string, () => void> = {
     muted = !muted;
     emitVolume();
   },
+  'voice-listen': () => voiceActivity.emit(voice({ phase: 'listening', reason: 'wakeWord', score: 0.94 })),
+  'voice-think': () => voiceActivity.emit(voice({ phase: 'thinking', transcript: 'skip this song' })),
+  'voice-done': () =>
+    voiceActivity.emit(
+      voice({ phase: 'done', transcript: 'skip this song', intent: 'NEXT', stage: 'fastPath', target: 'playback' }),
+    ),
+  'voice-fail': () =>
+    voiceActivity.emit(
+      voice({
+        phase: 'failed',
+        transcript: 'play the new mitski album',
+        intent: 'NO_INTENT',
+        stage: 'noModel',
+        error: { code: 'notDispatchable', msg: 'NO_INTENT is resolved at the companion edge' },
+      }),
+    ),
   'conn-drop': () => peerSnapshot.emit(peers(false)),
   'conn-back': () => peerSnapshot.emit(peers(true)),
 };

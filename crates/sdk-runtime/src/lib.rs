@@ -12,7 +12,10 @@ pub use transport::{Connector, InboundHalf, OutboundHalf};
 
 #[cfg(test)]
 mod tests {
+  use std::sync::{Arc, Mutex};
+
   use libbridgething::{
+    Priority,
     protocol::PrioritizedFrame,
     wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
   };
@@ -180,55 +183,69 @@ mod tests {
     assert_eq!(resp.data, "pong");
   }
 
-  #[tokio::test]
-  async fn normal_preempts_queued_lower_lanes() {
-    use std::sync::{Arc, Mutex};
+  type Sent = Arc<Mutex<Vec<(Priority, String)>>>;
 
-    use libbridgething::Priority;
+  struct GatedConnector {
+    sent: Sent,
+    gate: Arc<tokio::sync::Semaphore>,
+    inn: mpsc::UnboundedReceiver<Msg>,
+  }
+  struct GatedOut {
+    sent: Sent,
+    gate: Arc<tokio::sync::Semaphore>,
+  }
+  impl Connector<FakeProto> for GatedConnector {
+    type Out = GatedOut;
+    type In = ChanIn;
+    fn split(self) -> (GatedOut, ChanIn) {
+      (
+        GatedOut {
+          sent: self.sent,
+          gate: self.gate,
+        },
+        ChanIn(self.inn),
+      )
+    }
+  }
+  impl OutboundHalf<FakeProto> for GatedOut {
+    async fn send(&mut self, frame: PrioritizedFrame<Msg>) -> Result<(), TransportError> {
+      self.gate.acquire().await.expect("gate open").forget();
+      self.sent.lock().unwrap().push((frame.priority, frame.msg.data));
+      Ok(())
+    }
+  }
 
-    struct GatedConnector {
-      sent: Arc<Mutex<Vec<(Priority, String)>>>,
-      gate: Arc<tokio::sync::Semaphore>,
-      inn: mpsc::UnboundedReceiver<Msg>,
-    }
-    struct GatedOut {
-      sent: Arc<Mutex<Vec<(Priority, String)>>>,
-      gate: Arc<tokio::sync::Semaphore>,
-    }
-    impl Connector<FakeProto> for GatedConnector {
-      type Out = GatedOut;
-      type In = ChanIn;
-      fn split(self) -> (GatedOut, ChanIn) {
-        (
-          GatedOut {
-            sent: self.sent,
-            gate: self.gate,
-          },
-          ChanIn(self.inn),
-        )
-      }
-    }
-    impl OutboundHalf<FakeProto> for GatedOut {
-      async fn send(&mut self, frame: PrioritizedFrame<Msg>) -> Result<(), TransportError> {
-        self.gate.acquire().await.expect("gate open").forget();
-        self.sent.lock().unwrap().push((frame.priority, frame.msg.data));
-        Ok(())
-      }
-    }
-
-    let sent = Arc::new(Mutex::new(Vec::new()));
+  fn gated() -> (
+    Sent,
+    Arc<tokio::sync::Semaphore>,
+    Connection<FakeProto>,
+    mpsc::UnboundedSender<Msg>,
+  ) {
+    let sent: Sent = Arc::new(Mutex::new(Vec::new()));
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
-    let (_fe_out, c_in) = mpsc::unbounded_channel();
+    let (fe_out, c_in) = mpsc::unbounded_channel();
     let conn = Connection::spawn(GatedConnector {
       sent: sent.clone(),
       gate: gate.clone(),
       inn: c_in,
     });
+    (sent, gate, conn, fe_out)
+  }
 
-    let send = |conn: Connection<FakeProto>, data: &str, priority: Priority| {
-      let data = data.to_string();
-      tokio::spawn(async move { conn.send_data(MsgMeta::Event, data, priority).await })
-    };
+  fn spawn_send(
+    conn: Connection<FakeProto>,
+    data: String,
+    priority: Priority,
+  ) -> tokio::task::JoinHandle<Result<(), SdkError>> {
+    tokio::spawn(async move { conn.send_data(MsgMeta::Event, data, priority).await })
+  }
+
+  #[tokio::test]
+  async fn normal_preempts_queued_lower_lanes() {
+    let (sent, gate, conn, _fe_out) = gated();
+
+    let send =
+      |conn: Connection<FakeProto>, data: &str, priority: Priority| spawn_send(conn, data.to_string(), priority);
 
     let t0 = send(conn.clone(), "bg0", Priority::Background);
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -246,6 +263,48 @@ mod tests {
 
     let order: Vec<String> = sent.lock().unwrap().iter().map(|(_, d)| d.clone()).collect();
     assert_eq!(order, vec!["bg0", "norm0", "bulk0", "bg1"]);
+  }
+
+  #[tokio::test]
+  async fn a_saturated_normal_lane_cannot_starve_the_lanes_below() {
+    const FLOOD: usize = 400;
+    const WINDOW: usize = 64;
+
+    let (sent, gate, conn, _fe_out) = gated();
+    let mut tasks = Vec::new();
+
+    for i in 0..4 {
+      tasks.push(spawn_send(conn.clone(), format!("seed{i}"), Priority::Normal));
+    }
+    tasks.push(spawn_send(conn.clone(), "bulk".into(), Priority::Bulk));
+    tasks.push(spawn_send(conn.clone(), "background".into(), Priority::Background));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    for i in 0..FLOOD {
+      tasks.push(spawn_send(conn.clone(), format!("n{i}"), Priority::Normal));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    gate.add_permits(tasks.len());
+    for t in tasks {
+      t.await.unwrap().unwrap();
+    }
+
+    let window: Vec<String> = sent
+      .lock()
+      .unwrap()
+      .iter()
+      .take(WINDOW)
+      .map(|(_, d)| d.clone())
+      .collect();
+    assert!(
+      window.iter().any(|d| d == "bulk"),
+      "bulk must land a frame within the first {WINDOW} sends despite a saturated normal lane, got {window:?}"
+    );
+    assert!(
+      window.iter().any(|d| d == "background"),
+      "background must land a frame within the first {WINDOW} sends despite a saturated normal lane, got {window:?}"
+    );
   }
 
   #[tokio::test]

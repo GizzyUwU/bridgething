@@ -8,7 +8,10 @@ use bridgething_iap2::{
 };
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::Bytes;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+  sync::{mpsc, oneshot},
+  task::JoinHandle,
+};
 
 pub const ACC_PSN: u8 = 99;
 pub const DEV_PSN: u8 = 215;
@@ -78,7 +81,19 @@ impl MfiAccess for FakeMfi {
 
 pub struct EmuHarness {
   pub acc_events: mpsc::Receiver<SessionEvent>,
+  session_shutdown: mpsc::Sender<oneshot::Sender<()>>,
   _keep: Keep,
+}
+
+impl EmuHarness {
+  pub async fn shutdown_session(&self) {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    self.session_shutdown.send(ack_tx).await.expect("session alive");
+    tokio::time::timeout(Duration::from_secs(2), ack_rx)
+      .await
+      .expect("session confirmed shutdown")
+      .expect("shutdown ack not dropped");
+  }
 }
 
 struct Keep {
@@ -120,11 +135,13 @@ where
     tokio::sync::watch::channel(bridgething_iap2::NowPlayingAuthorityState::default());
   let (tel_tx, tel_rx) = mpsc::channel(8);
   let (_app_launch_tx, app_launch_rx) = mpsc::channel(8);
+  let (session_shutdown_tx, session_shutdown_rx) = mpsc::channel(1);
   let session = Iap2Session::with_app_launch(
     ident,
     app_launch_bundle,
     Vec::new(),
     app_launch_rx,
+    session_shutdown_rx,
     FakeMfi,
     acc_cmd_tx,
     acc_link_ev_rx,
@@ -152,6 +169,7 @@ where
 
   let harness = EmuHarness {
     acc_events,
+    session_shutdown: session_shutdown_tx,
     _keep: Keep {
       _links: (acc_link, dev_link),
       _session: session,

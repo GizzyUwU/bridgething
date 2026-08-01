@@ -26,6 +26,7 @@ pub fn injected_script(
         "pairing": profile.pairing,
         "connection": profile.connection,
         "volume": profile.volume,
+        "voice": profile.voice,
       },
     });
     segments.push(format!(
@@ -57,6 +58,7 @@ mod tests {
       pairing: false,
       connection: false,
       volume: false,
+      voice: false,
     };
     assert!(injected_script(&off, 8891, None, false).is_none());
   }
@@ -65,7 +67,7 @@ mod tests {
   fn default_profile_injects_every_surface() {
     let script = injected_script(&OverlayProfile::default(), 8891, None, false).expect("script");
     assert!(script.starts_with("window.__bridgethingOverlay = "));
-    for surface in ["notifications", "call", "pairing", "connection", "volume"] {
+    for surface in ["notifications", "call", "pairing", "connection", "volume", "voice"] {
       assert!(script.contains(&format!("\"{surface}\":true")), "{surface} on");
     }
     assert!(script.contains(&kiosk_origin(8891)));
@@ -79,6 +81,7 @@ mod tests {
       pairing: true,
       connection: false,
       volume: false,
+      voice: false,
     };
     let script = injected_script(&profile, 8891, None, false).expect("script");
     assert!(script.contains("\"notifications\":true"));
@@ -105,6 +108,7 @@ mod tests {
       pairing: false,
       connection: false,
       volume: false,
+      voice: false,
     };
     assert!(injected_script(&off, 8891, Some("/* mine */"), false).is_none());
   }
@@ -116,6 +120,7 @@ mod tests {
       pairing: false,
       connection: false,
       volume: false,
+      voice: false,
     }
   }
 

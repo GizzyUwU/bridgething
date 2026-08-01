@@ -68,6 +68,7 @@ public enum WireSurfaceManifest {
     "player.skipToIndex",
     "player.transferTo",
     "system.otaAssetRangeAbandon",
+    "tunnel.ack",
     "tunnel.close",
     "tunnel.data",
   ]

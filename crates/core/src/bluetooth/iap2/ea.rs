@@ -68,7 +68,7 @@ impl EaActivity {
     self.inner.lock().unwrap().remove(&address);
   }
 
-  pub fn last_inbound(&self, address: Address) -> Option<Instant> {
+  pub fn last_activity(&self, address: Address) -> Option<Instant> {
     self.inner.lock().unwrap().get(&address).copied()
   }
 }
@@ -264,7 +264,9 @@ impl Iap2EaGateway {
     if let Err(err) = conn.outbound.send(ea_priority, buf.freeze()).await {
       tracing::warn!(stream_id = key.1, ?err, "iap2 ea gateway: chunker channel closed");
       self.tear_down(key).await;
+      return;
     }
+    self.activity.stamp(key.0);
   }
 
   async fn tear_down(&mut self, key: Key) {

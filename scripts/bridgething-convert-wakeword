@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODELS="$REPO_ROOT/crates/wakeword/models"
+
+log() { printf '\033[1;36m[convert-wakeword]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[convert-wakeword] error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+convert() {
+    local source="$1"
+    [ -f "$source" ] || die "no graph at $source"
+    cargo run --release --quiet -p bridgething-wakeword --example convert -- "$source" "${source%.onnx}.btww"
+}
+
+if [ $# -gt 0 ]; then
+    for source in "$@"; do convert "$source"; done
+    exit 0
+fi
+
+log "converting the vendored graphs"
+convert "$MODELS/embedding_stream.onnx"
+convert "$MODELS/hey_bridgething.onnx"

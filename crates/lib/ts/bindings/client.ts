@@ -35,6 +35,7 @@ import type {
   NetFetchRequest,
   NetFetchResponse,
   NluSlots,
+  NluStage,
   Notification,
   NotificationsError,
   NowPlayingUpdate,
@@ -61,6 +62,9 @@ import type {
   StreamEnd,
   StreamError,
   TimeInfo,
+  VoiceCaptureReason,
+  VoiceDispatchErrorCode,
+  VoiceDispatchTarget,
   WebappError,
   WebappInfo,
   WsError,
@@ -436,11 +440,13 @@ export type BridgeToClientTimeMsg =
   | { event: 'snapshot'; data: TimeSnapshot };
 
 /**
- * Daemon -> webapp voice/NLU surface: mic state-change events, resolved
- * display intents, and the reply to `voice.stateGet`.
+ * Daemon -> webapp voice/NLU surface: mic state-change events, per-turn
+ * pipeline activity, resolved display intents, and the reply to
+ * `voice.stateGet`.
  */
 export type BridgeToClientVoiceMsg =
   | { event: 'stateChanged'; data: VoiceState }
+  | { event: 'activity'; data: VoiceActivity }
   | { event: 'intent'; data: VoiceIntent }
   | { event: 'stateReply'; data: VoiceStateReply };
 
@@ -1670,6 +1676,31 @@ export type TtsStarted = {
 };
 
 /**
+ * One step of a voice turn, as it happens. Fields fill in as the turn
+ * progresses, so a `done` carries everything the earlier phases did.
+ */
+export type VoiceActivity = {
+  phase: VoicePhase;
+  streamId: string | null;
+  reason: VoiceCaptureReason | null;
+  /**
+   * Wake word confidence, present only on a wake-word-opened turn.
+   */
+  score: number | null;
+  transcript: string | null;
+  intent: string | null;
+  slots: NluSlots;
+  stage: NluStage | null;
+  target: VoiceDispatchTarget | null;
+  error: VoiceActivityError | null;
+};
+
+/**
+ * Why a turn ended without dispatching.
+ */
+export type VoiceActivityError = { code: VoiceDispatchErrorCode; msg: string };
+
+/**
  * The display-shaped intents
  */
 export type VoiceDisplayIntent = 'search' | 'showView' | 'moreLikeThis';
@@ -1680,6 +1711,13 @@ export type VoiceDisplayIntent = 'search' | 'showView' | 'moreLikeThis';
 export type VoiceIntent = { intent: VoiceDisplayIntent; slots: NluSlots; transcript: string };
 
 /**
+ * Where a voice turn is in the pipeline. `Done` and `Failed` are terminal
+ * and only ever appear on a `VoiceActivity`; the state a surface reads back
+ * from `voice.stateGet` settles to `Idle` instead of holding an outcome.
+ */
+export type VoicePhase = 'idle' | 'listening' | 'thinking' | 'done' | 'failed';
+
+/**
  * Current mic state.
  */
 export type VoiceState = {
@@ -1688,6 +1726,7 @@ export type VoiceState = {
    * True while a capture session is actively recording.
    */
   capturing: boolean;
+  phase: VoicePhase;
 };
 
 /**

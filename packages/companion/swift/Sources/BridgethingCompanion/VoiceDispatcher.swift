@@ -27,6 +27,13 @@ public actor VoiceDispatcher: VoiceCapturing {
     }
 
     public func start(gateway: BridgethingGateway) async {
+        tasks.append(Task { [recognizer] in
+            do {
+                try await recognizer.prepare()
+            } catch {
+                print("voice: speech recognizer unavailable: \(error)")
+            }
+        })
         tasks.append(Task { [weak self] in
             for await (deviceId, msg) in gateway.voice.streamOpen {
                 await self?.open(deviceId: deviceId, msg: msg)
@@ -88,7 +95,7 @@ public actor VoiceDispatcher: VoiceCapturing {
         }
 
         try await gateway.device(deviceId).voice.dispatch(
-            VoiceDispatch(resolved: prediction.toWire())
+            VoiceDispatch(resolved: prediction.toWire(), stage: resolution.stage.wire)
         )
     }
 

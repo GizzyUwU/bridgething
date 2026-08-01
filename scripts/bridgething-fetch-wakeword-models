@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODELS="$REPO_ROOT/crates/wakeword/models"
+BASE="${BRIDGETHING_OTA_BASE:-https://ota.bridgething.com}/wakeword/vendor"
+
+log() { printf '\033[1;36m[fetch-wakeword-models]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[fetch-wakeword-models] error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+ARTIFACTS=(
+  "melspectrogram.onnx:ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f"
+  "embedding_model.onnx:70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f"
+  "embedding_stream.onnx:3bba19573a3c0e90720b7380ddbbaa3317ed29bcf7fa0636f36f72e499ce89c2"
+  "hey_bridgething.onnx:3c546aca47c0ff7924825626e12d7208f9827f6887b82b129e048f6bfb10dcfe"
+  "hey_jarvis_v0.1.onnx:94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb"
+  "NOTICE.md:d599c04c6a4717d7644947a76db06ae2d284f30ba8b289726dc04f0db5d6487e"
+)
+
+command -v curl >/dev/null 2>&1 || die "missing curl"
+command -v shasum >/dev/null 2>&1 || die "missing shasum"
+mkdir -p "$MODELS"
+
+for entry in "${ARTIFACTS[@]}"; do
+  name="${entry%%:*}"
+  want="${entry#*:}"
+  dest="$MODELS/$name"
+
+  if [ -f "$dest" ] && [ -n "$want" ]; then
+    have=$(shasum -a 256 "$dest" | awk '{print $1}')
+    [ "$have" = "$want" ] && { log "have $name"; continue; }
+  fi
+
+  log "fetching $name"
+  curl -fsS -o "$dest.part" "$BASE/$name" || die "could not fetch $BASE/$name"
+  if [ -n "$want" ]; then
+    have=$(shasum -a 256 "$dest.part" | awk '{print $1}')
+    [ "$have" = "$want" ] || { rm -f "$dest.part"; die "$name digest ${have:0:12}, expected ${want:0:12}"; }
+  fi
+  mv "$dest.part" "$dest"
+done
+
+log "converting to the flat models the runtime reads"
+"$REPO_ROOT/scripts/bridgething-convert-wakeword"

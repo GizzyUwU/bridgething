@@ -1282,7 +1282,7 @@ public class OtaService(
                     raf.seek(part.start.toLong())
                     var produced: UInt = 0u
                     while (produced < part.length) {
-                        pacer.observe(transferAcks.receivedBytes(handle.requestId).toLong())
+                        pacer.observe(transferAcks.receivedBytes(handle.requestId))
                         transferAcks.awaitWindow(
                             handle.requestId, streamOffset.toLong(), pacer.windowBytes, OTA_RANGE_ACK_TIMEOUT_MS,
                         )
@@ -1522,17 +1522,17 @@ public class OtaService(
             RandomAccessFile(artifactPath, "r").use { raf ->
                 if (startOffset > 0L) {
                     raf.seek(startOffset)
-                    transferAcks.note(transferId, startOffset.toUInt())
+                    transferAcks.note(transferId, startOffset)
                 }
                 val pacer = TransferPacer(startOffset)
                 var offset = startOffset
                 while (offset < totalSize) {
                     while (true) {
-                        val acked = transferAcks.receivedBytes(transferId).toLong()
+                        val acked = transferAcks.receivedBytes(transferId)
                         pacer.observe(acked)
                         emitStreaming(acked)
                         if (offset < acked + pacer.windowBytes) break
-                        if (!transferAcks.waitForProgress(transferId, acked.toUInt(), OTA_ACK_TIMEOUT_MS)) {
+                        if (!transferAcks.waitForProgress(transferId, acked, OTA_ACK_TIMEOUT_MS)) {
                             throw IOException("transfer stalled: fragment acks stopped at $offset/$totalSize")
                         }
                     }

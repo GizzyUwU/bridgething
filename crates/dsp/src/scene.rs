@@ -23,6 +23,7 @@ pub struct Config {
   pub max_freeze_s: f64,
   pub degrade_when_unsteered: bool,
   pub reference: usize,
+  pub target_memory: f64,
 }
 
 impl Default for Config {
@@ -37,6 +38,7 @@ impl Default for Config {
       max_freeze_s: 2.5,
       degrade_when_unsteered: true,
       reference: 0,
+      target_memory: 0.0,
     }
   }
 }
@@ -168,7 +170,19 @@ impl SceneEstimator {
   }
 
   pub fn mark_target(&mut self) {
-    self.target.copy_from_slice(self.recent.as_slice());
+    let keep = if self.has_target {
+      self.config.target_memory.clamp(0.0, 1.0)
+    } else {
+      0.0
+    };
+    for (target, recent) in self.target.iter_mut().zip(self.recent.iter()) {
+      let fresh = normalized(recent);
+      for i in 0..CHANNELS {
+        for j in 0..CHANNELS {
+          target[i][j] = target[i][j] * keep + fresh[i][j] * (1.0 - keep);
+        }
+      }
+    }
     self.has_target = true;
     self.pooled_bearing = self.pool_bearing();
   }

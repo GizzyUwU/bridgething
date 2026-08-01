@@ -85,6 +85,16 @@ export class OtaDriver {
     return this.applyBandaidBatch(artifacts, onProgress);
   }
 
+  async pushWakewordModel(source: ArtifactSource, onProgress?: ProgressListener): Promise<OtaProgressSnapshot> {
+    const { snapshot } = await this.driveOta({
+      kind: 'wakewordModel',
+      source,
+      mode: 'full',
+      onProgress,
+    });
+    return snapshot;
+  }
+
   async installWebapp(source: ArtifactSource, provenance?: string): Promise<WebappInstallResult> {
     const totalSize = source.size;
     const sha256 = await sha256Hex(source);

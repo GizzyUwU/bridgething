@@ -4,24 +4,24 @@ set -euo pipefail
 [ $# -eq 0 ] || { echo "usage: bridgething-push-mfi-proxy" >&2; exit 2; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST="${SUPERBIRD_HOST:-bridgething.local}"
+source "$REPO_ROOT/scripts/device.sh"
 BIN="$REPO_ROOT/target-cross/aarch64-unknown-linux-gnu/release/bridgething-mfi-proxy"
 UNIT="$REPO_ROOT/crates/mfi-proxy/bridgething-mfi-proxy.service"
 
 [ -x "$BIN" ] || { echo "no binary at $BIN; run 'just push-mfi-proxy' so it gets cross-built first" >&2; exit 1; }
 [ -f "$UNIT" ] || { echo "missing unit: $UNIT" >&2; exit 1; }
 
-echo "pushing bridgething-mfi-proxy -> ${HOST}"
-scp -q "$BIN" "root@${HOST}:/tmp/bridgething-mfi-proxy.new"
-scp -q "$UNIT" "root@${HOST}:/tmp/bridgething-mfi-proxy.service"
+echo "pushing bridgething-mfi-proxy -> ${DEVICE_HOST}"
+device_scp -q "$BIN" "root@${DEVICE_HOST}:/tmp/bridgething-mfi-proxy.new"
+device_scp -q "$UNIT" "root@${DEVICE_HOST}:/tmp/bridgething-mfi-proxy.service"
 
-ssh "root@${HOST}" 'set -e
+device_ssh 'set -e
     systemctl stop bridgething-mfi-proxy.service 2>/dev/null || true
-    install -d /opt/bridgething/bin
-    install -m 0755 /tmp/bridgething-mfi-proxy.new /opt/bridgething/bin/bridgething-mfi-proxy
-    install -d /etc/systemd/system
+    mkdir -p /opt/bridgething/bin /run/systemd/system
+    cp /tmp/bridgething-mfi-proxy.new /opt/bridgething/bin/bridgething-mfi-proxy
+    chmod 0755 /opt/bridgething/bin/bridgething-mfi-proxy
     sed "s|^ExecStart=/usr/bin/bridgething-mfi-proxy|ExecStart=/opt/bridgething/bin/bridgething-mfi-proxy|" \
-        /tmp/bridgething-mfi-proxy.service > /etc/systemd/system/bridgething-mfi-proxy.service
+        /tmp/bridgething-mfi-proxy.service > /run/systemd/system/bridgething-mfi-proxy.service
     rm -f /tmp/bridgething-mfi-proxy.new /tmp/bridgething-mfi-proxy.service
     systemctl daemon-reload'
 

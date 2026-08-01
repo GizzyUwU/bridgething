@@ -1,0 +1,232 @@
+{
+  "cases" : [
+    {
+      "name" : "unmeasured-opens-at-the-floor",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        }
+      ]
+    },
+    {
+      "name" : "non-advancing-acks-are-ignored",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "t_ms" : 100,
+          "window_bytes" : 65536
+        },
+        {
+          "t_ms" : 200,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 32768000000,
+          "t_ms" : 1000,
+          "window_bytes" : 65536
+        }
+      ]
+    },
+    {
+      "name" : "a-slow-link-stays-at-the-floor",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 16384000000,
+          "t_ms" : 1000,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 16384000000,
+          "t_ms" : 2000,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 16384000000,
+          "t_ms" : 3000,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 16384000000,
+          "t_ms" : 4000,
+          "window_bytes" : 65536
+        }
+      ]
+    },
+    {
+      "name" : "a-fast-link-rides-the-cap",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 1000,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 2000,
+          "window_bytes" : 262144
+        }
+      ]
+    },
+    {
+      "name" : "mid-range-window-on-a-round-rate",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 150000000000,
+          "t_ms" : 1000,
+          "window_bytes" : 90000
+        }
+      ]
+    },
+    {
+      "name" : "mid-range-window-on-a-fractional-rate",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 150001000000,
+          "t_ms" : 1000,
+          "window_bytes" : 90001
+        }
+      ]
+    },
+    {
+      "name" : "rate-is-the-max-of-the-window-not-the-mean",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 1100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 2100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 3100,
+          "window_bytes" : 262144
+        }
+      ]
+    },
+    {
+      "name" : "the-sample-window-evicts-the-oldest",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 1100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 2100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 3100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 4100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 5100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 6100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 1000000000000,
+          "t_ms" : 7100,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 100000000,
+          "t_ms" : 8100,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 100000000,
+          "t_ms" : 9100,
+          "window_bytes" : 65536
+        }
+      ]
+    },
+    {
+      "name" : "a-zero-length-interval-clamps-to-one-millisecond",
+      "steps" : [
+        {
+          "t_ms" : 0,
+          "window_bytes" : 65536
+        },
+        {
+          "rate_micros" : 50000000000000,
+          "t_ms" : 0,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 50000000000000,
+          "t_ms" : 0,
+          "window_bytes" : 262144
+        },
+        {
+          "rate_micros" : 50000000000000,
+          "t_ms" : 5000,
+          "window_bytes" : 262144
+        }
+      ]
+    }
+  ],
+  "constants" : {
+    "ack_interval_bytes" : 16384,
+    "fragment_bytes" : 16384,
+    "max_window_bytes" : 262144,
+    "min_window_bytes" : 65536,
+    "rate_sample_count" : 8,
+    "target_delay_ms" : 600
+  },
+  "impl" : "swift"
+}

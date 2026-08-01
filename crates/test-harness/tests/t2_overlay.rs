@@ -26,6 +26,18 @@ async fn plant(harness: &Harness, id: Uuid, overlays: Option<&str>) {
   harness.state().webapps.rescan().await;
 }
 
+async fn first_page(browser: &Browser) -> Page {
+  for _ in 0..40 {
+    if let Ok(pages) = browser.pages().await
+      && let Some(page) = pages.into_iter().next()
+    {
+      return page;
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+  }
+  browser.new_page("about:blank").await.expect("initial page")
+}
+
 async fn overlay_mounted(page: &Page) -> bool {
   matches!(
     page.evaluate(HOST_PROBE).await.map(|r| r.into_value::<bool>()),
@@ -82,10 +94,7 @@ async fn t2_overlay_injection_follows_the_active_manifest() {
     }
   });
 
-  let page = match browser.pages().await.ok().and_then(|mut p| p.pop()) {
-    Some(p) => p,
-    None => browser.new_page("about:blank").await.expect("initial page"),
-  };
+  let page = first_page(&browser).await;
 
   let harness = Harness::start().await.expect("harness start");
   let url = format!("http://{}/", harness.modern_addr());

@@ -1,7 +1,9 @@
 use libbridgething::{
   BrightnessMode, ItemKind, ItemRef, NluBrightnessMode, NluDirection, NluPhoneAction, NluPlaybackSpeed, NluRepeatMode,
   NluResolvedIntent, NluSlots, NluSystemAction, RepeatMode, VoiceDispatchErrorCode, VoiceDispatchTarget,
-  client::{BridgeToClientVoiceMsgEvent, VoiceDisplayIntent, VoiceIntent},
+  client::{
+    BridgeToClientVoiceMsgEvent, VoiceActivity, VoiceActivityError, VoiceDisplayIntent, VoiceIntent, VoicePhase,
+  },
   gateway::{
     self, BridgeToGatewayAudioMsgCommand, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand,
     BridgeToGatewayVoiceMsg, GatewayToBridgeVoiceMsgCommandDispatch, VoiceCloseReason, VoiceDispatch,
@@ -34,8 +36,8 @@ impl VoiceHandler {
 impl GatewayToBridgeVoiceMsgCommandDispatch for VoiceHandler {
   type Output = HandlerResult;
 
-  async fn mic_open(&self, _params: VoiceMicOpen) -> HandlerResult {
-    match self.handle.state.mic.push_to_talk().await {
+  async fn mic_open(&self, params: VoiceMicOpen) -> HandlerResult {
+    match self.handle.state.mic.open(params.reason).await {
       Ok(stream_id) => tracing::debug!("({:?}) gateway opened mic -> stream {stream_id}", &self.handle.address),
       Err(err) => tracing::warn!("({:?}) gateway mic open failed: {err}", &self.handle.address),
     }
@@ -50,7 +52,7 @@ impl GatewayToBridgeVoiceMsgCommandDispatch for VoiceHandler {
   }
 
   async fn dispatch(&self, params: VoiceDispatch) -> HandlerResult {
-    let VoiceDispatch { resolved } = params;
+    let VoiceDispatch { resolved, stage } = params;
     tracing::info!(
       "({:?}) voice dispatch: intent={} transcript={:?}",
       &self.handle.address,
@@ -58,7 +60,15 @@ impl GatewayToBridgeVoiceMsgCommandDispatch for VoiceHandler {
       resolved.transcript,
     );
 
-    match self.route(&resolved).await {
+    let turn = VoiceActivity {
+      transcript: Some(resolved.transcript.clone()),
+      intent: Some(resolved.intent.clone()),
+      slots: resolved.slots.clone(),
+      stage,
+      ..VoiceActivity::new(VoicePhase::Done)
+    };
+
+    let outcome = match self.route(&resolved).await {
       Ok((target, webapp_id)) => {
         tracing::debug!("({:?}) voice dispatch -> {target:?}", &self.handle.address);
         self
@@ -69,6 +79,10 @@ impl GatewayToBridgeVoiceMsgCommandDispatch for VoiceHandler {
             webapp_id: webapp_id.map(|id| id.to_string()),
           }))
           .await;
+        VoiceActivity {
+          target: Some(target),
+          ..turn
+        }
       }
       Err((code, msg)) => {
         tracing::debug!("({:?}) voice dispatch refused: {code:?}: {msg}", &self.handle.address);
@@ -77,10 +91,19 @@ impl GatewayToBridgeVoiceMsgCommandDispatch for VoiceHandler {
           .send_info(BridgeToGatewayVoiceMsg::DispatchFailed(VoiceDispatchFailed {
             code,
             intent: resolved.intent.clone(),
-            msg,
+            msg: msg.clone(),
           }))
           .await;
+        VoiceActivity {
+          phase: VoicePhase::Failed,
+          error: Some(VoiceActivityError { code, msg }),
+          ..turn
+        }
       }
+    };
+
+    if let Err(err) = self.handle.state.mic.finish(outcome).await {
+      tracing::debug!("({:?}) could not publish voice outcome: {err}", &self.handle.address);
     }
     Ok(())
   }
@@ -202,7 +225,7 @@ impl VoiceHandler {
         Ok((VoiceDispatchTarget::Device, None))
       }
 
-      // display-shaped: the active webapp renders these, or nothing does
+      // display-shaped
       "SEARCH" => self.display(VoiceDisplayIntent::Search, resolved).await,
       "MORE_LIKE_THIS" => self.display(VoiceDisplayIntent::MoreLikeThis, resolved).await,
       "SHOW_VIEW" => {
@@ -210,7 +233,7 @@ impl VoiceHandler {
         self.display(VoiceDisplayIntent::ShowView, resolved).await
       }
 
-      // WHATS_PLAYING is answered from the daemon's own player mirror
+      // WHATS_PLAYING is answered from the daemon
       "WHATS_PLAYING" => Ok((VoiceDispatchTarget::Device, None)),
 
       "HELP" | "CLARIFY" | "NO_INTENT" => Err((

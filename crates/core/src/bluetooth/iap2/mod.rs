@@ -1,12 +1,13 @@
 use std::{
   collections::{HashMap, HashSet},
+  os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd},
   sync::Arc,
   time::Duration,
 };
 
 use bluer::{
   Adapter, Address, Session,
-  rfcomm::{ConnectRequest, Profile, ProfileHandle, Role},
+  rfcomm::{ConnectRequest, Profile, ProfileHandle, Role, Stream},
 };
 use bridgething_iap2::{
   HidCommand, IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event as Iap2InternalEvent,
@@ -18,7 +19,7 @@ use bridgething_mfi::MfiAuth;
 pub use ea::{EaActivity, Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
 use futures::StreamExt;
 use tokio::{
-  sync::{RwLock, mpsc, watch},
+  sync::{RwLock, mpsc, oneshot, watch},
   task::JoinHandle,
 };
 
@@ -36,7 +37,10 @@ const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 pub(crate) const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
 const COMPANION_EA_PROTOCOL_ID: u8 = 1;
-
+const LINK_TEARDOWN_GRACE: Duration = Duration::from_millis(750);
+const EA_CLOSE_GRACE: Duration = Duration::from_millis(500);
+const INHERITED_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
+const IAP2_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 const RECONNECT_DIAL_SETTLE: Duration = Duration::from_secs(8);
@@ -84,6 +88,12 @@ pub type Iap2InjectTx = mpsc::Sender<Iap2Event>;
 #[cfg(feature = "test-tap")]
 pub type Iap2OutboundTapTx = tokio::sync::broadcast::Sender<Iap2TransportCommand>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionOrigin {
+  Dialed,
+  Inherited,
+}
+
 #[derive(Debug)]
 struct ActiveSession {
   generation: u64,
@@ -91,6 +101,9 @@ struct ActiveSession {
   np_tx: mpsc::Sender<NowPlayingCommand>,
   tel_tx: mpsc::Sender<TelephonyCommand>,
   app_launch_tx: mpsc::Sender<String>,
+  session_shutdown_tx: mpsc::Sender<oneshot::Sender<()>>,
+  rfcomm_fd: Option<OwnedFd>,
+  link_command_tx: mpsc::Sender<Iap2Command>,
   link_handle: JoinHandle<bridgething_iap2::Result<()>>,
   session_handle: JoinHandle<bridgething_iap2::Result<()>>,
   shovel_handle: JoinHandle<()>,
@@ -101,6 +114,33 @@ impl ActiveSession {
     self.link_handle.abort();
     self.session_handle.abort();
     self.shovel_handle.abort();
+  }
+
+  async fn close_ea_sessions(&self) {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    if self.session_shutdown_tx.send(ack_tx).await.is_err() {
+      return;
+    }
+    if tokio::time::timeout(EA_CLOSE_GRACE, ack_rx).await.is_err() {
+      tracing::warn!("iAP2 external accessory close did not confirm within its budget");
+    }
+  }
+
+  async fn shutdown(self) {
+    self.close_ea_sessions().await;
+    if self.link_command_tx.send(Iap2Command::Disconnect).await.is_ok() {
+      let _ = tokio::time::timeout(LINK_TEARDOWN_GRACE, self.link_handle).await;
+    } else {
+      self.link_handle.abort();
+    }
+    self.session_handle.abort();
+    self.shovel_handle.abort();
+
+    if let Some(fd) = self.rfcomm_fd
+      && crate::systemd::socket::stash_iap2_fd(fd.as_fd())
+    {
+      tracing::info!("handed the iAP2 RFCOMM socket to the service manager to outlive this process");
+    }
   }
 }
 
@@ -204,6 +244,24 @@ pub struct Iap2Manager {
   next_generation: u64,
   session_dead_tx: mpsc::Sender<(Address, u64)>,
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
+  shutdown_rx: mpsc::Receiver<oneshot::Sender<()>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Iap2ShutdownHandle {
+  tx: mpsc::Sender<oneshot::Sender<()>>,
+}
+
+impl Iap2ShutdownHandle {
+  pub async fn shutdown(&self) {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    if self.tx.send(ack_tx).await.is_err() {
+      return;
+    }
+    if tokio::time::timeout(IAP2_SHUTDOWN_BUDGET, ack_rx).await.is_err() {
+      tracing::warn!("iAP2 teardown did not finish within its budget; exiting anyway");
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +269,7 @@ pub struct Iap2Handles {
   pub reconnect: Iap2ReconnectHandle,
   pub transport: Iap2TransportHandle,
   pub telephony: Iap2TelephonyHandle,
+  pub shutdown: Iap2ShutdownHandle,
 }
 
 pub(super) struct Iap2Bootstrap {
@@ -220,6 +279,7 @@ pub(super) struct Iap2Bootstrap {
   events_tx: mpsc::Sender<Iap2Event>,
   session_dead_tx: mpsc::Sender<(Address, u64)>,
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
+  shutdown_rx: mpsc::Receiver<oneshot::Sender<()>>,
   #[cfg(feature = "test-tap")]
   outbound_tap_tx: Iap2OutboundTapTx,
 }
@@ -245,6 +305,7 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
   let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
   let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
   let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
+  let (shutdown_tx, shutdown_rx) = mpsc::channel::<oneshot::Sender<()>>(1);
   #[cfg(feature = "test-tap")]
   let (outbound_tap_tx, _) = tokio::sync::broadcast::channel::<Iap2TransportCommand>(IAP2_OUTBOUND_TAP_CAPACITY);
 
@@ -252,6 +313,7 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
     reconnect: Iap2ReconnectHandle { tx: reconnect_tx },
     transport: Iap2TransportHandle { tx: transport_tx },
     telephony: Iap2TelephonyHandle { tx: telephony_tx },
+    shutdown: Iap2ShutdownHandle { tx: shutdown_tx },
   };
   let bootstrap = Iap2Bootstrap {
     reconnect_rx,
@@ -260,6 +322,7 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
     events_tx,
     session_dead_tx,
     session_dead_rx,
+    shutdown_rx,
     #[cfg(feature = "test-tap")]
     outbound_tap_tx,
   };
@@ -321,6 +384,7 @@ impl Iap2Manager {
       events_tx,
       session_dead_rx,
       session_dead_tx,
+      shutdown_rx,
       #[cfg(feature = "test-tap")]
         outbound_tap_tx: _,
     } = bootstrap;
@@ -343,6 +407,7 @@ impl Iap2Manager {
       next_generation: 0,
       session_dead_tx,
       session_dead_rx,
+      shutdown_rx,
     };
 
     Ok(Some(manager.spawn()))
@@ -354,6 +419,7 @@ impl Iap2Manager {
 
   async fn recv(&mut self) {
     tracing::info!("iAP2 manager listening for iPhone connections");
+    self.restore_inherited().await;
     self.kickoff_reconnects_for_paired_ios().await;
 
     loop {
@@ -380,6 +446,11 @@ impl Iap2Manager {
         Some(cmd) = self.telephony_rx.recv() => {
           self.dispatch_telephony(cmd).await;
         }
+        Some(ack) = self.shutdown_rx.recv() => {
+          self.shutdown_all().await;
+          let _ = ack.send(());
+          return;
+        }
         else => {
           tracing::error!("iAP2 manager streams all ended - this should not happen");
           return;
@@ -388,12 +459,63 @@ impl Iap2Manager {
     }
   }
 
+  async fn shutdown_all(&mut self) {
+    for (mac, task) in self.reconnects.drain() {
+      task.abort();
+      tracing::debug!(%mac, "cancelled iAP2 reconnect loop for shutdown");
+    }
+
+    let sessions = std::mem::take(&mut self.sessions);
+    if sessions.is_empty() {
+      return;
+    }
+
+    tracing::info!(count = sessions.len(), "tearing down iAP2 links for shutdown");
+    for (mac, session) in sessions {
+      self.active_sessions.remove(&mac).await;
+      session.shutdown().await;
+      tracing::debug!(%mac, "iAP2 link torn down");
+    }
+  }
+
   async fn accept(&mut self, request: ConnectRequest, direction: ConnectDirection) -> BluetoothResult<()> {
     let address = request.device();
     tracing::info!(%address, ?direction, "iAP2 connect request");
 
     let stream = request.accept()?;
+    self.start_session(address, stream, SessionOrigin::Dialed).await
+  }
 
+  async fn restore_inherited(&mut self) {
+    let inherited = crate::systemd::socket::claim_inherited_iap2();
+    if inherited.is_empty() {
+      return;
+    }
+    crate::systemd::socket::clear_iap2_fds();
+
+    for fd in inherited {
+      let stream = match unsafe { Stream::from_raw_fd(fd.into_raw_fd()) } {
+        Ok(stream) => stream,
+        Err(err) => {
+          tracing::warn!(?err, "inherited iAP2 RFCOMM socket could not be adopted");
+          continue;
+        }
+      };
+      let address = match stream.peer_addr() {
+        Ok(addr) => addr.addr,
+        Err(err) => {
+          tracing::warn!(?err, "inherited iAP2 RFCOMM socket has no peer; dropping it");
+          continue;
+        }
+      };
+      tracing::info!(%address, "resuming iAP2 on the RFCOMM socket carried across the restart");
+      if let Err(err) = self.start_session(address, stream, SessionOrigin::Inherited).await {
+        tracing::warn!(%address, ?err, "could not resume the inherited iAP2 socket");
+      }
+    }
+  }
+
+  async fn start_session(&mut self, address: Address, stream: Stream, origin: SessionOrigin) -> BluetoothResult<()> {
     if let Some(stale) = self.sessions.remove(&address) {
       tracing::debug!(%address, "aborting stale iAP2 session stack before replacing it");
       stale.abort();
@@ -411,8 +533,20 @@ impl Iap2Manager {
     let (np_tx, np_rx) = mpsc::channel::<NowPlayingCommand>(IAP2_CHANNEL_CAPACITY);
     let (tel_tx, tel_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
     let (app_launch_tx, app_launch_rx) = mpsc::channel::<String>(IAP2_CHANNEL_CAPACITY);
+    let (session_shutdown_tx, session_shutdown_rx) = mpsc::channel::<oneshot::Sender<()>>(1);
 
-    let link_config = LinkConfig::new(Lsp::accessory_default());
+    let rfcomm_fd = match unsafe { BorrowedFd::borrow_raw(stream.as_raw_fd()) }.try_clone_to_owned() {
+      Ok(fd) => Some(fd),
+      Err(err) => {
+        tracing::warn!(%address, ?err, "could not duplicate the iAP2 RFCOMM socket; restarts will drop it");
+        None
+      }
+    };
+
+    let mut link_config = LinkConfig::new(Lsp::accessory_default());
+    if matches!(origin, SessionOrigin::Inherited) {
+      link_config.handshake_timeout = INHERITED_HANDSHAKE_TIMEOUT;
+    }
     let link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
 
     let mfi = self.mfi_worker.handle();
@@ -421,8 +555,9 @@ impl Iap2Manager {
       Some(COMPANION_BUNDLE_ID.to_string()),
       vec![SPOTIFY_BUNDLE_ID.to_string()],
       app_launch_rx,
+      session_shutdown_rx,
       mfi,
-      link_command_tx,
+      link_command_tx.clone(),
       link_events_rx,
       session_events_tx,
       hid_rx,
@@ -449,6 +584,9 @@ impl Iap2Manager {
         np_tx,
         tel_tx,
         app_launch_tx,
+        session_shutdown_tx,
+        rfcomm_fd,
+        link_command_tx,
         link_handle,
         session_handle,
         shovel_handle,

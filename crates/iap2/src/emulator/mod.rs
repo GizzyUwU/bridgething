@@ -37,6 +37,7 @@ pub enum EmulatorEvent {
   Identified,
   ArtworkSent(u8),
   EaStreamOpened(DeviceEaStream),
+  EaStreamClosed(u16),
   LinkDown(String),
 }
 
@@ -219,8 +220,10 @@ impl DeviceEmulator {
       }
       StatusExternalAccessoryProtocolSession::CSM_MSG_ID => {
         let status = StatusExternalAccessoryProtocolSession::try_from(frame)?;
-        if let Some(ea) = self.ea.as_mut() {
-          ea.handle_status(status);
+        let stream_id = status.session_id;
+        let closed = self.ea.as_mut().is_some_and(|ea| ea.handle_status(status));
+        if closed {
+          emit(&self.events_tx, EmulatorEvent::EaStreamClosed(stream_id)).await;
         }
       }
       StartHID::CSM_MSG_ID => {

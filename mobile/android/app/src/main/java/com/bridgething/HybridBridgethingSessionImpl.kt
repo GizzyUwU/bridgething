@@ -1344,6 +1344,7 @@ public class HybridBridgethingSessionImpl(
         OtaKind.Daemon -> BridgethingOtaKind.DAEMON
         OtaKind.BuiltinWebapp -> BridgethingOtaKind.BUILTINWEBAPP
         OtaKind.InstalledWebapp -> BridgethingOtaKind.INSTALLEDWEBAPP
+        OtaKind.WakewordModel -> BridgethingOtaKind.WAKEWORDMODEL
     }
 
     private fun toRnStepKind(k: OtaStepKind): BridgethingOtaStepKind = when (k) {

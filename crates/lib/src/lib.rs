@@ -19,7 +19,7 @@ pub use shared::{
   LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry, LogLevel, LogSource, LyricLine, Lyrics, MediaItem,
   MediaItemUpdate, MediaType, MusicProvider, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
   NluAlternate, NluBrightnessMode, NluConfidence, NluDirection, NluPhoneAction, NluPlaybackSpeed, NluRepeatMode,
-  NluResolvedIntent, NluSlots, NluSystemAction, NluView, Notification, NotificationAction, NotificationApp,
+  NluResolvedIntent, NluSlots, NluStage, NluSystemAction, NluView, Notification, NotificationAction, NotificationApp,
   NotificationCategory, NotificationFlags, NotificationsError, NowPlayingUpdate, NumberField, OtaError, OtaErrorCode,
   OtaFinished, OtaKind, OtaPhase, OtaProgress, OverlayProfile, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
   PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback,
@@ -27,9 +27,10 @@ pub use shared::{
   PlaybackTargetKind, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position,
   Priority, QueueItem, QueuePosition, RECENTS_NODE_ID, RangePart, RangeSpec, RecommendationsResult, RedirectPolicy,
   RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station, StreamBegin, StreamChunk, StreamEnd,
-  StreamError, StringField, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, TunnelClosed,
-  TunnelData, TunnelError, VoiceDescriptor, VoiceDispatchErrorCode, VoiceDispatchTarget, WEBAPP_PROVENANCE_MAX_LEN,
-  WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource, WsError, WsFrame, to_slug,
+  StreamError, StringField, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, TunnelAck,
+  TunnelClosed, TunnelData, TunnelError, VoiceCaptureReason, VoiceDescriptor, VoiceDispatchErrorCode,
+  VoiceDispatchTarget, WEBAPP_PROVENANCE_MAX_LEN, WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource,
+  WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;
@@ -41,3 +42,4 @@ pub const BRIDGETHING_WS_MODERN_PORT: u16 = 8891;
 pub const BRIDGETHING_FILE_SERVE_PORT: u16 = 8891;
 pub const BRIDGETHING_NETWORK_GATEWAY_PORT: u16 = 8892;
 pub const BRIDGETHING_OTA_RANGE_PROXY_PORT: u16 = 8893;
+pub const BRIDGETHING_SOCKS_PROXY_PORT: u16 = 1080;

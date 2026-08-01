@@ -912,12 +912,17 @@
     {
       "name": "voice",
       "title": "Voice",
-      "description": "Daemon -> webapp voice/NLU surface: mic state-change events, resolved\ndisplay intents, and the reply to `voice.stateGet`.",
+      "description": "Daemon -> webapp voice/NLU surface: mic state-change events, per-turn\npipeline activity, resolved display intents, and the reply to\n`voice.stateGet`.",
       "events": [
         {
           "method": "onStateChanged",
           "payload": "VoiceState",
           "payload_ref": "VoiceState"
+        },
+        {
+          "method": "onActivity",
+          "payload": "VoiceActivity",
+          "payload_ref": "VoiceActivity"
         },
         {
           "method": "onIntent",
@@ -3770,6 +3775,28 @@
         }
       ]
     },
+    "NluStage": {
+      "kind": "enum",
+      "description": "Which arm of the companion's resolver produced an intent. Carried so a\nsurface can tell a deterministic match from a model prediction.",
+      "variants": [
+        {
+          "name": "FastPath"
+        },
+        {
+          "name": "Model"
+        },
+        {
+          "name": "RejectedNoIntent"
+        },
+        {
+          "name": "RejectedClarify"
+        },
+        {
+          "name": "NoModel",
+          "description": "The fast path missed and no model is configured, so nothing could\nclassify the utterance. Distinct from a model that ran and rejected."
+        }
+      ]
+    },
     "NluSystemAction": {
       "kind": "enum",
       "variants": [
@@ -4120,7 +4147,7 @@
     },
     "OtaKind": {
       "kind": "enum",
-      "description": "What the streamed bytes are going to be applied as.\n\n`Image` streams a `.swu` through libswupdate + slot flip + reboot.\n`Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on\nthe bandaid bind-mount, restarts the service. `BuiltinWebapp`\nstreams a zip bundle of hub or stock, validates the manifest id is\none of the reserved built-ins, atomic-rotates the bundle dir on the\nbandaid bind-mount, restarts the service. `InstalledWebapp` streams\na zip bundle of a third-party (non-reserved) webapp and installs it\ninto the writable registry; it neither stages on the bandaid nor\nrestarts, and is never part of an `OtaActivate` batch.\n\nCompanions key reboot expectations off this: image means the device\npower-cycles; daemon and builtin-webapp mean the daemon process\nrestarts and the gateway link drops and reconnects; installed-webapp\napplies in place with no restart, and the terminal signal is the\n`WebappInstalled` event (or an `OtaError`).",
+      "description": "What the streamed bytes are going to be applied as.\n\n`Image` streams a `.swu` through libswupdate + slot flip + reboot.\n`Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on\nthe bandaid bind-mount, restarts the service. `BuiltinWebapp`\nstreams a zip bundle of hub or stock, validates the manifest id is\none of the reserved built-ins, atomic-rotates the bundle dir on the\nbandaid bind-mount, restarts the service. `InstalledWebapp` streams\na zip bundle of a third-party (non-reserved) webapp and installs it\ninto the writable registry; it neither stages on the bandaid nor\nrestarts, and is never part of an `OtaActivate` batch.\n\nCompanions key reboot expectations off this: image means the device\npower-cycles; daemon and builtin-webapp mean the daemon process\nrestarts and the gateway link drops and reconnects; installed-webapp\nand wakeword-model apply in place with no restart.",
       "variants": [
         {
           "name": "Image"
@@ -4133,6 +4160,10 @@
         },
         {
           "name": "InstalledWebapp"
+        },
+        {
+          "name": "WakewordModel",
+          "description": "Wake word phrase classifier. Applies in place and the detector reloads\nwithout a restart; the embedding stack rides in the daemon binary."
         }
       ]
     },
@@ -5639,6 +5670,97 @@
         }
       ]
     },
+    "VoiceActivity": {
+      "kind": "struct",
+      "description": "One step of a voice turn, as it happens. Fields fill in as the turn\nprogresses, so a `done` carries everything the earlier phases did.",
+      "fields": [
+        {
+          "name": "phase",
+          "type": "VoicePhase",
+          "type_ref": "VoicePhase"
+        },
+        {
+          "name": "streamId",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "reason",
+          "type": "VoiceCaptureReason",
+          "optional": true,
+          "type_ref": "VoiceCaptureReason"
+        },
+        {
+          "name": "score",
+          "type": "number",
+          "optional": true,
+          "description": "Wake word confidence, present only on a wake-word-opened turn."
+        },
+        {
+          "name": "transcript",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "intent",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "slots",
+          "type": "NluSlots",
+          "type_ref": "NluSlots"
+        },
+        {
+          "name": "stage",
+          "type": "NluStage",
+          "optional": true,
+          "type_ref": "NluStage"
+        },
+        {
+          "name": "target",
+          "type": "VoiceDispatchTarget",
+          "optional": true,
+          "type_ref": "VoiceDispatchTarget"
+        },
+        {
+          "name": "error",
+          "type": "VoiceActivityError",
+          "optional": true,
+          "type_ref": "VoiceActivityError"
+        }
+      ]
+    },
+    "VoiceActivityError": {
+      "kind": "struct",
+      "description": "Why a turn ended without dispatching.",
+      "fields": [
+        {
+          "name": "code",
+          "type": "VoiceDispatchErrorCode",
+          "type_ref": "VoiceDispatchErrorCode"
+        },
+        {
+          "name": "msg",
+          "type": "string"
+        }
+      ]
+    },
+    "VoiceCaptureReason": {
+      "kind": "enum",
+      "description": "What opened a capture session.",
+      "variants": [
+        {
+          "name": "PushToTalk"
+        },
+        {
+          "name": "Assistant"
+        },
+        {
+          "name": "WakeWord"
+        }
+      ]
+    },
     "VoiceDescriptor": {
       "kind": "struct",
       "description": "One TTS voice the companion's audio backend can speak as. `id` is\nplatform-opaque (Apple/Android voice id); `locale` is BCP-47.",
@@ -5654,6 +5776,55 @@
         {
           "name": "locale",
           "type": "string"
+        }
+      ]
+    },
+    "VoiceDispatchErrorCode": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "WebappNotFound"
+        },
+        {
+          "name": "NotDispatchable"
+        },
+        {
+          "name": "Unsupported"
+        },
+        {
+          "name": "PlaybackFailed"
+        },
+        {
+          "name": "BadSlots"
+        },
+        {
+          "name": "Internal"
+        }
+      ]
+    },
+    "VoiceDispatchTarget": {
+      "kind": "enum",
+      "description": "Where the daemon actually routed a successful dispatch. Carried back\nto the companion so it can render the right confirmation UI.",
+      "variants": [
+        {
+          "name": "Playback",
+          "description": "Transport / playback effect, routed through the daemon's transport\ncontroller or a player command to the companion."
+        },
+        {
+          "name": "Device",
+          "description": "A daemon-local device setting (brightness, discoverable, power)."
+        },
+        {
+          "name": "Phone",
+          "description": "Phone call control over the companion's phone surface."
+        },
+        {
+          "name": "Display",
+          "description": "Display-shaped intent handed to the active webapp to render."
+        },
+        {
+          "name": "WebappSwitch",
+          "description": "Switched the active webapp via OPEN_WEBAPP."
         }
       ]
     },
@@ -5692,6 +5863,29 @@
         }
       ]
     },
+    "VoicePhase": {
+      "kind": "enum",
+      "description": "Where a voice turn is in the pipeline. `Done` and `Failed` are terminal\nand only ever appear on a `VoiceActivity`; the state a surface reads back\nfrom `voice.stateGet` settles to `Idle` instead of holding an outcome.",
+      "variants": [
+        {
+          "name": "Idle"
+        },
+        {
+          "name": "Listening",
+          "description": "Capture is open and audio is going up to the companion."
+        },
+        {
+          "name": "Thinking",
+          "description": "Capture closed on end of speech; the companion is recognizing and resolving."
+        },
+        {
+          "name": "Done"
+        },
+        {
+          "name": "Failed"
+        }
+      ]
+    },
     "VoiceState": {
       "kind": "struct",
       "description": "Current mic state.",
@@ -5704,6 +5898,11 @@
           "name": "capturing",
           "type": "boolean",
           "description": "True while a capture session is actively recording."
+        },
+        {
+          "name": "phase",
+          "type": "VoicePhase",
+          "type_ref": "VoicePhase"
         }
       ]
     },
