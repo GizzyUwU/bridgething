@@ -34,9 +34,10 @@ sd-notify = { version = "0.5.0", optional = true, features = ["fdstore"] }
 # als feature
 
 # mic feature
-alsa = { version = "0.11", optional = true }
+alsa = { version = "0.12.1", optional = true }
 bridgething-dsp = { workspace = true, optional = true }
 bridgething-wakeword = { workspace = true, optional = true }
+opus = { version = "0.3.1", optional = true }
 
 # chrome feature
 headless_chrome = { version = "1.0.21", optional = true }
@@ -86,7 +87,7 @@ memmap2 = "0.9.11"
 [features]
 default = ["dev-linux-host"]
 als = []
-mic = ["dep:alsa", "dep:bridgething-dsp", "dep:bridgething-wakeword"]
+mic = ["dep:alsa", "dep:bridgething-dsp", "dep:bridgething-wakeword", "dep:opus"]
 input = ["dep:evdev"]
 chrome = ["dep:headless_chrome"]
 systemd = ["dep:sd-notify", "dep:zbus"]

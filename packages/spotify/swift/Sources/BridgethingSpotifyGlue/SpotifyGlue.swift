@@ -1,3 +1,4 @@
+import BridgethingCompanion
 import BridgethingGateway
 import BridgethingGlue
 import BridgethingSchema
@@ -9,6 +10,7 @@ import os
 #endif
 
 public typealias WireRepeat = BridgethingSchema.RepeatMode
+public typealias WireQueuePosition = BridgethingSchema.QueuePosition
 
 private typealias LibraryItem = BridgethingSchema.LibraryItem
 
@@ -32,7 +34,7 @@ private let queueRunwayFloor = 8
 private let spotifyAppBundle = "com.spotify.client"
 private let glueLog = Logger(subsystem: "com.bridgething.spotify", category: "glue")
 
-public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
+public final class SpotifyGlue: BridgethingGlue, VoiceCatalogProviding, @unchecked Sendable {
     public static let name: String = "spotify"
     public static let displayName: String = "Spotify"
 
@@ -53,6 +55,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private let urlSession: URLSession
 
     private var client: (any SpotifyClientProviding)?
+    private var voiceCatalogResolver: SpotifyVoiceResolver?
     private var gateway: BridgethingGateway?
     private var connectTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
@@ -172,6 +175,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             real.setDeviceWaker(waker: GatewayDeviceWaker(glue: self))
         }
         self.client = client
+        stateLock.withLock { voiceCatalogResolver = SpotifyVoiceResolver(client: client) }
 
         currentAuthObserver()?(.pending(nil))
         glueLog.info("attach: spawning connect()")
@@ -234,10 +238,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             nowPlayingObserver = nil
             lastState = nil
             lastStateAt = nil
+            voiceCatalogResolver = nil
             likedOverride.removeAll()
         }
         client = nil
         setGateway(nil)
+    }
+
+    public func voiceResolver() -> (any VoiceCatalogResolving)? {
+        stateLock.withLock { voiceCatalogResolver }
     }
 
     // MARK: - serial emitter
@@ -443,8 +452,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func queue(_ req: QueueUri) async throws {
         guard let client else { throw GlueError.detached }
-        if case .index = req.position { throw GlueError.notImplemented }
-        try await client.queueUri(uri: req.uri)
+        try await client.queueUri(uri: req.uri, position: Self.mapQueuePosition(req.position))
     }
 
     public func pause() async throws { try await require().pause() }
@@ -481,7 +489,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func search(_ req: LibrarySearchRequest) async throws -> SearchResult {
         let client = try require()
-        let kinds = (req.kinds?.isEmpty == false) ? req.kinds! : [.track, .album, .artist, .playlist]
+        let kinds = (req.kinds?.isEmpty == false) ? req.kinds! : [.track, .album, .artist, .playlist, .show, .podcastEpisode]
         let res = try await client.search(query: req.query, limit: req.limit)
         let edge = artEdges().hero
         let limit = Int(req.limit)
@@ -495,6 +503,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             case .album: arr = res.albums
             case .artist: arr = res.artists
             case .playlist: arr = res.playlists
+            case .show: arr = res.shows
+            case .podcastEpisode: arr = res.episodes
             default: arr = []
             }
             let mapped = arr.compactMap { Self.libraryItem($0, edge: edge) }
@@ -838,6 +848,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private static func rawArtworkURL(_ ref: String) -> String? {
         guard !ref.isEmpty else { return nil }
         return ref.hasPrefix("http") ? ref : "\(scdnImagePrefix)\(ref)"
+    }
+
+    private static func mapQueuePosition(_ position: WireQueuePosition) -> Spotify.QueuePosition {
+        switch position {
+        case .append: .append
+        case .next: .next
+        case let .index(at): .index(at: at)
+        }
     }
 
     private static func mapRepeat(_ mode: Spotify.RepeatMode) -> WireRepeat {

@@ -56,11 +56,19 @@ spotify-codegen:
 
 # Build the spotify rust client as an ios xcframework + swift wrapper.
 spotify-ios:
-  bash crates/spotify/scripts/build-xcframework.sh
+  bash scripts/build-uniffi-xcframework.sh spotify Spotify
 
 # Build the spotify rust client as android jniLibs + kotlin bindings.
 spotify-android:
-  bash crates/spotify/scripts/build-jnilibs.sh
+  bash scripts/build-uniffi-jnilibs.sh spotify
+
+# Build the nlu tokenize+decode crate as an ios xcframework + swift wrapper.
+nlu-ios:
+  bash scripts/build-uniffi-xcframework.sh nlu Nlu
+
+# Build the nlu tokenize+decode crate as android jniLibs + kotlin bindings.
+nlu-android:
+  bash scripts/build-uniffi-jnilibs.sh nlu
 
 # --- Mobile app artifacts ---
 
@@ -85,8 +93,7 @@ goldens:
 test-host:
   cargo test -p bridgething-test-harness
 
-# Over-air tier (T3): needs a booted Car Thing with the test-tap daemon + a host
-# BT radio. Serial (one radio, one iAP2 link), plus the no-radio bridge proof.
+# Over-air tier (T3): needs a booted Car Thing with the test-tap daemon + a host BT radio
 test-device:
   SUPERBIRD_BT_MAC={{device_bt_mac}} cargo test -p bridgething-test-harness --test seam --test t3_infra -- --ignored --test-threads=1 --nocapture
 
@@ -96,8 +103,7 @@ test-device:
 submodules:
   git submodule update --init --recursive
 
-# Build the daemon build image. runs at the host's native arch and
-# cross-compiles to aarch64, so it is emulation-free on both x86_64 and arm64.
+# Build the daemon build image
 build-image: submodules
   docker build -t bridgething-build -f scripts/cross-aarch64.Dockerfile .
 
@@ -113,8 +119,7 @@ check extra="": build-image
 cross-release: build-image
   docker run --rm -v {{justfile_directory()}}:/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/work/target-cross-release bridgething-build {{release_build}}
 
-# Release-build the daemon against a toolchain already on the host, provisioned by
-# scripts/cross-aarch64-deps.sh. this is the CI path; on a mac use cross-release instead.
+# Release-build the daemon against a toolchain already on the host, provisioned by scripts/cross-aarch64-deps.sh
 cross-release-native:
   CARGO_TARGET_DIR={{cross_release_dir}} {{release_build}}
 
@@ -122,7 +127,6 @@ cross-release-native:
 push extra="": (cross-build extra)
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
 
-# Cross-build the wake-word sidecar and push it + its graphs + its unit to the device
 # Swap the wake-word phrase model on the connected device and restart the daemon
 push-wakeword:
   scripts/bridgething-push-wakeword
@@ -130,6 +134,14 @@ push-wakeword:
 # Publish the wake-word phrase model, printing the manifest fragment
 publish-wakeword *args:
   scripts/bridgething-publish-wakeword {{args}}
+
+# Publish the phone-side nlu bundle zips + channel manifest
+publish-nlu *args:
+  scripts/bridgething-publish-nlu {{args}}
+
+# Publish the android asr model + channel manifest
+publish-asr *args:
+  scripts/bridgething-publish-asr {{args}}
 
 # Cross-build the MFi i2c-3 dev proxy and push it + its unit to the device
 push-mfi-proxy: build-image

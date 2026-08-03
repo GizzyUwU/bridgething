@@ -80,8 +80,10 @@ export default function App() {
         <div className="flex gap-2">
           <button
             className="rounded-lg bg-white/10 px-3 py-1.5 text-sm active:bg-white/20"
-            onClick={() => void client.voice.pushToTalk()}>
-            talk
+            onPointerDown={() => void client.voice.pushToTalk()}
+            onPointerUp={() => void client.voice.release()}
+            onPointerCancel={() => void client.voice.cancel()}>
+            hold to talk
           </button>
           <button
             className="rounded-lg bg-white/10 px-3 py-1.5 text-sm active:bg-white/20"

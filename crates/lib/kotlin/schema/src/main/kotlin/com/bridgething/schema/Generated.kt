@@ -19,8 +19,7 @@ data class Album (
 
 /// Art render sizes a webapp declares so the companion warms exactly the
 /// pixels it renders: hero (now-playing / detail views) and thumb (queue /
-/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
-/// which is also the stock webapp's profile.
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`
 @Serializable
 data class ArtProfile (
 	val heroPx: UInt,
@@ -175,9 +174,7 @@ data class BoolField (
 	val default: Boolean? = null
 )
 
-/// Bridge-side identity announce. Daemon sends one of these to every
-/// gateway on connect so the companion knows what daemon it's talking to
-/// and can opt out of unsupported surfaces.
+/// Bridge-side identity announce
 @Serializable
 data class BridgeThingMeta (
 	val bridgethingVersion: String,
@@ -1327,6 +1324,48 @@ data class NetWsSend (
 )
 
 @Serializable
+enum class NluTargetType(val string: String) {
+	@SerialName("artist")
+	Artist("artist"),
+	@SerialName("track")
+	Track("track"),
+	@SerialName("album")
+	Album("album"),
+	@SerialName("playlist")
+	Playlist("playlist"),
+	@SerialName("podcast")
+	Podcast("podcast"),
+	@SerialName("episode")
+	Episode("episode"),
+	@SerialName("station")
+	Station("station"),
+}
+
+@Serializable
+enum class NluPopularityFilter(val string: String) {
+	@SerialName("top5")
+	Top5("top5"),
+	@SerialName("top10")
+	Top10("top10"),
+	@SerialName("popular")
+	Popular("popular"),
+	@SerialName("recent")
+	Recent("recent"),
+	@SerialName("new")
+	New("new"),
+	@SerialName("random")
+	Random("random"),
+}
+
+@Serializable
+enum class NluScope(val string: String) {
+	@SerialName("previousTrack")
+	PreviousTrack("previousTrack"),
+	@SerialName("restart")
+	Restart("restart"),
+}
+
+@Serializable
 enum class NluRepeatMode(val string: String) {
 	@SerialName("off")
 	Off("off"),
@@ -1357,29 +1396,39 @@ enum class NluDirection(val string: String) {
 }
 
 @Serializable
-enum class NluBrightnessMode(val string: String) {
-	@SerialName("auto")
-	Auto("auto"),
-	@SerialName("manual")
-	Manual("manual"),
+enum class NluAmount(val string: String) {
+	@SerialName("small")
+	Small("small"),
+	@SerialName("medium")
+	Medium("medium"),
+	@SerialName("large")
+	Large("large"),
 }
 
 @Serializable
 enum class NluView(val string: String) {
+	@SerialName("nowPlaying")
+	NowPlaying("nowPlaying"),
+	@SerialName("artist")
+	Artist("artist"),
+	@SerialName("album")
+	Album("album"),
+	@SerialName("playlist")
+	Playlist("playlist"),
+	@SerialName("playlists")
+	Playlists("playlists"),
 	@SerialName("library")
 	Library("library"),
-	@SerialName("presets")
-	Presets("presets"),
 	@SerialName("songs")
 	Songs("songs"),
+	@SerialName("presets")
+	Presets("presets"),
+	@SerialName("queue")
+	Queue("queue"),
 	@SerialName("savedEpisodes")
 	SavedEpisodes("savedEpisodes"),
 	@SerialName("newEpisodes")
 	NewEpisodes("newEpisodes"),
-	@SerialName("queue")
-	Queue("queue"),
-	@SerialName("thisArtist")
-	ThisArtist("thisArtist"),
 }
 
 @Serializable
@@ -1405,41 +1454,31 @@ enum class NluPhoneAction(val string: String) {
 }
 
 @Serializable
-enum class NluSystemAction(val string: String) {
-	@SerialName("reboot")
-	Reboot("reboot"),
-	@SerialName("powerOff")
-	PowerOff("powerOff"),
-}
-
-@Serializable
 data class NluSlots (
-	val artist: String? = null,
-	val track: String? = null,
-	val album: String? = null,
+	val target: String? = null,
+	val targetType: NluTargetType? = null,
 	val playlist: String? = null,
-	val podcast: String? = null,
-	val episode: String? = null,
-	val mood: String? = null,
 	val genre: String? = null,
+	val mood: String? = null,
 	val era: String? = null,
-	val popularityFilter: String? = null,
-	val entityType: String? = null,
-	val query: String? = null,
-	val webappName: String? = null,
-	val preset: String? = null,
+	val popularityFilter: NluPopularityFilter? = null,
+	val position: UInt? = null,
+	val count: UInt? = null,
+	val scope: NluScope? = null,
 	val enabled: Boolean? = null,
+	val mute: Boolean? = null,
 	val repeatMode: NluRepeatMode? = null,
 	val seconds: Int? = null,
 	val speed: NluPlaybackSpeed? = null,
 	val direction: NluDirection? = null,
-	val amount: String? = null,
+	val amount: NluAmount? = null,
 	val level: UInt? = null,
-	val brightnessMode: NluBrightnessMode? = null,
+	val preset: String? = null,
 	val view: NluView? = null,
 	val phoneAction: NluPhoneAction? = null,
-	val systemAction: NluSystemAction? = null,
-	val uri: String? = null
+	val webappName: String? = null,
+	val uri: String? = null,
+	val contextUri: String? = null
 )
 
 @Serializable
@@ -1449,17 +1488,10 @@ data class NluAlternate (
 )
 
 @Serializable
-data class NluConfidence (
-	val intent: String,
-	val slots: String? = null
-)
-
-@Serializable
 data class NluResolvedIntent (
 	val intent: String,
-	val slots: NluSlots = NluSlots(artist = null, track = null, album = null, playlist = null, podcast = null, episode = null, mood = null, genre = null, era = null, popularityFilter = null, entityType = null, query = null, webappName = null, preset = null, enabled = null, repeatMode = null, seconds = null, speed = null, direction = null, amount = null, level = null, brightnessMode = null, view = null, phoneAction = null, systemAction = null, uri = null),
+	val slots: NluSlots = NluSlots(target = null, targetType = null, playlist = null, genre = null, mood = null, era = null, popularityFilter = null, position = null, count = null, scope = null, enabled = null, mute = null, repeatMode = null, seconds = null, speed = null, direction = null, amount = null, level = null, preset = null, view = null, phoneAction = null, webappName = null, uri = null, contextUri = null),
 	val transcript: String,
-	val confidence: NluConfidence? = null,
 	val alternates: List<NluAlternate>? = null
 )
 
@@ -1682,12 +1714,7 @@ data class OtaActivate (
 	val expected: List<String>
 )
 
-/// Half-open byte range the daemon's range proxy asks the companion
-/// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
-/// inclusive, `length` bytes. The proxy caps the multi-range count at
-/// the daemon edge (loopback) - companions see whatever swupdate's
-/// delta downloader emits. Offsets are u32 because OTA artifacts are
-/// bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
+/// Half-open byte range the daemon's range proxy asks the companion to serve
 @Serializable
 data class RangeSpec (
 	val start: UInt,
@@ -1711,9 +1738,7 @@ data class OtaAssetRangeRejected (
 	val reason: String
 )
 
-/// Resolved range the companion is about to serve. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
-/// `TransferBody`.
+/// Resolved range the companion is about to serve
 @Serializable
 data class RangePart (
 	val start: UInt,
@@ -1727,22 +1752,7 @@ data class OtaAssetRangeReply (
 	val body: TransferBody
 )
 
-/// What the streamed bytes are going to be applied as.
-/// 
-/// `Image` streams a `.swu` through libswupdate + slot flip + reboot.
-/// `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
-/// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
-/// streams a zip bundle of hub or stock, validates the manifest id is
-/// one of the reserved built-ins, atomic-rotates the bundle dir on the
-/// bandaid bind-mount, restarts the service. `InstalledWebapp` streams
-/// a zip bundle of a third-party (non-reserved) webapp and installs it
-/// into the writable registry; it neither stages on the bandaid nor
-/// restarts, and is never part of an `OtaActivate` batch.
-/// 
-/// Companions key reboot expectations off this: image means the device
-/// power-cycles; daemon and builtin-webapp mean the daemon process
-/// restarts and the gateway link drops and reconnects; installed-webapp
-/// and wakeword-model apply in place with no restart.
+/// What the streamed bytes are going to be applied as
 @Serializable
 enum class OtaKind(val string: String) {
 	@SerialName("image")
@@ -1753,8 +1763,6 @@ enum class OtaKind(val string: String) {
 	BuiltinWebapp("builtinWebapp"),
 	@SerialName("installedWebapp")
 	InstalledWebapp("installedWebapp"),
-	/// Wake word phrase classifier. Applies in place and the detector reloads
-	/// without a restart; the embedding stack rides in the daemon binary.
 	@SerialName("wakewordModel")
 	WakewordModel("wakewordModel"),
 }
@@ -1802,12 +1810,10 @@ data class OtaBeginRejected (
 	val reason: String
 )
 
-/// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
+/// Terminal error from the OTA orchestrator
 @Serializable
 enum class OtaErrorCode(val string: String) {
 	/// Companion sent fragments for an `update_id` that was never begun
-	/// (or was abandoned mid-stream).
 	@SerialName("unknownUpdate")
 	UnknownUpdate("unknownUpdate"),
 	/// A fragment's offset did not match the daemon's `received`.
@@ -1847,21 +1853,7 @@ data class OtaFinished (
 )
 
 /// Stage of the OTA orchestrator. The phase set is shared between
-/// kinds, with non-image kinds emitting a subset.
-/// 
-/// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
-/// -> `Confirming` (try-counter reset) -> `Reboot`.
-/// 
-/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
-/// where `Writing`/100 means the piece is validated and staged on the
-/// bandaid (not yet live). The atomic rotate and the single `systemctl
-/// restart` happen later, on `OtaActivate`, which emits the terminal
-/// `Reboot` for the whole batch. `Confirming` is image-only.
-/// 
-/// InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
-/// bundle installs into the writable registry. There is no `Writing`/100,
-/// no `Confirming`, and no `Reboot`; the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// kinds, with non-image kinds emitting a subset
 @Serializable
 enum class OtaPhase(val string: String) {
 	@SerialName("streaming")
@@ -1876,10 +1868,7 @@ enum class OtaPhase(val string: String) {
 	Reboot("reboot"),
 }
 
-/// Per-phase progress tick. `percent` is 0-100 within the current
-/// libswupdate step, which resets at each step boundary, so it is not a
-/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
-/// time for the phase when the orchestrator can compute it.
+/// Per-phase progress tick
 @Serializable
 data class OtaProgress (
 	val phase: OtaPhase,
@@ -2446,7 +2435,8 @@ data class QueueSnapshot (
 )
 
 /// Where in the queue a `queue({ uri })` should land. `Append` (default)
-/// goes at the end; `Next` is play-next; `Index` is an explicit position.
+/// goes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot
+/// in the upcoming list.
 @Serializable(with = QueuePositionSerializer::class)
 sealed class QueuePosition {
 	@Serializable
@@ -2726,15 +2716,12 @@ data class TunnelErrorConnectFailedInner (
 
 @Serializable(with = TunnelErrorSerializer::class)
 sealed class TunnelError {
-	/// Companion couldn't reach the host (DNS / TCP RST / network unreachable).
 	@Serializable
 	@SerialName("connectFailed")
 	data class ConnectFailed(val data: TunnelErrorConnectFailedInner): TunnelError()
-	/// Companion refused to open a tunnel (e.g. user-denied policy).
 	@Serializable
 	@SerialName("permissionDenied")
 	object PermissionDenied: TunnelError()
-	/// Tunnel surface unavailable on this companion.
 	@Serializable
 	@SerialName("unavailable")
 	object Unavailable: TunnelError()
@@ -2755,8 +2742,6 @@ data class TunnelOpen (
 @Serializable
 object TunnelOpenReply
 
-/// Which arm of the companion's resolver produced an intent. Carried so a
-/// surface can tell a deterministic match from a model prediction.
 @Serializable
 enum class NluStage(val string: String) {
 	@SerialName("fastPath")
@@ -2767,8 +2752,6 @@ enum class NluStage(val string: String) {
 	RejectedNoIntent("rejectedNoIntent"),
 	@SerialName("rejectedClarify")
 	RejectedClarify("rejectedClarify"),
-	/// The fast path missed and no model is configured, so nothing could
-	/// classify the utterance. Distinct from a model that ran and rejected.
 	@SerialName("noModel")
 	NoModel("noModel"),
 }
@@ -2802,15 +2785,13 @@ data class VoiceDispatchFailed (
 	val msg: String
 )
 
-/// Where the daemon actually routed a successful dispatch. Carried back
-/// to the companion so it can render the right confirmation UI.
+/// Where the daemon actually routed a successful dispatch
 @Serializable
 enum class VoiceDispatchTarget(val string: String) {
-	/// Transport / playback effect, routed through the daemon's transport
-	/// controller or a player command to the companion.
+	/// Transport / playback effect
 	@SerialName("playback")
 	Playback("playback"),
-	/// A daemon-local device setting (brightness, discoverable, power).
+	/// A daemon-local device action (discoverable, preset save, cancel).
 	@SerialName("device")
 	Device("device"),
 	/// Phone call control over the companion's phone surface.
@@ -2832,20 +2813,25 @@ data class VoiceDispatched (
 )
 
 @Serializable
+enum class VoiceCodec(val string: String) {
+	@SerialName("opus")
+	Opus("opus"),
+}
+
+@Serializable
 data class VoiceFormat (
+	val codec: VoiceCodec,
 	val sampleRateHz: UInt,
-	val channels: UShort,
-	val bitsPerSample: UShort
+	val channels: UShort
 )
 
 @Serializable
 data class VoiceFrame (
 	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val seq: UInt,
-	val pcm: ByteArray
+	val packet: ByteArray
 )
 
-/// What opened a capture session.
 @Serializable
 enum class VoiceCaptureReason(val string: String) {
 	@SerialName("pushToTalk")

@@ -5,21 +5,39 @@ use librespot_protocol::{
   connect::Cluster,
   credentials::OneTimeToken,
   login5::{LoginRequest, LoginResponse, login_request::Login_method, login_response::Response as Login5Response},
+  player::ProvidedTrack,
 };
 use protobuf::{Message, MessageField};
 use spotify::{
   auth::{Auth, DEFAULT_WORKER_BASE, TokenStore},
   client::{Observer, SpotifyClient},
-  dealer::{Dealer, active_device},
+  dealer::{Dealer, active_device, is_queued, provided_track_from_json, provided_track_json},
   http::{ANDROID_CLIENT_ID, SPCLIENT, SpHttp, random_hex},
   httpx::{HttpExecutor, HttpMethod},
-  model::{AuthState, Device, LibraryScope, PlayerState, Queue},
+  model::{AuthState, Device, LibraryScope, PlayerState, Queue, QueuePosition},
+  resolver::{VoicePopularity, VoiceResolveRequest, VoiceResolved, VoiceTargetKind},
   spclient::SpClient,
   store::{FileTokenStore, load_or_make_device_id},
   util::image_hex,
 };
 
 type Boxed = Box<dyn Error>;
+
+const USAGE: &str = "\
+commands:
+  probe | np | devices | watch [secs] | product | whoami | apwhoami | pair
+  home | stations [filter] | search <query> | root | lib [node] | fav
+  ctx <uri>        raw context-resolve of one spotify uri
+  page <url>       follow a context page url
+  autoplay <uri>   what spotify would autoplay after a context
+  resolve <query...> [--type kind] [--position n] [--random] [--mood m] [--genre g] [--era e]
+                   voice slot resolution to a playable uri (read-only)
+  pause | resume | next | prev | seek <ms> | play <uri>
+  queue [show]     print queue_revision and the upcoming tracks
+  queue dump <f>   save revision + next/prev tracks to a json file
+  queue restore <f>  set_queue from a dump, re-stamped with the live revision
+  queue add <uri>  append (lands after the tracks already queued)
+  queue add-at <n> <uri>  insert at <n> of the upcoming list a webapp sees (delimiters skipped)";
 
 #[tokio::main]
 async fn main() -> Result<(), Boxed> {
@@ -75,6 +93,45 @@ async fn main() -> Result<(), Boxed> {
         println!("  [{}] {:?}  {} items", section_kind(s), car.0, car.1);
       }
     }
+    "stations" => {
+      let filter = args.get(2).map(String::as_str).unwrap_or("station");
+      let home = spc.get_home("en").await?;
+      for s in &home.body.sections {
+        let kind = section_kind(s);
+        if !filter.is_empty() && !kind.contains(filter) {
+          continue;
+        }
+        let (title, uris) = carousel_items(s);
+        println!("[{kind}] {title:?}  {} items", uris.len());
+        for u in &uris {
+          println!("    {u}");
+        }
+      }
+    }
+    "ctx" => {
+      let uri = args.get(2).map(String::as_str).ok_or("ctx needs a context uri")?;
+      print_context(&spc.context_resolve(uri).await?);
+    }
+    "resolve" => {
+      let req = parse_resolve(&args[2..])?;
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver::default()),
+      );
+      client.connect().await?;
+      print_resolved(&client.resolve_voice(req).await?);
+      client.disconnect().await;
+    }
+    "page" => {
+      let uri = args.get(2).map(String::as_str).ok_or("page needs a page url")?;
+      print_page(&spc.context_page(uri).await?);
+    }
+    "autoplay" => {
+      let uri = args.get(2).map(String::as_str).ok_or("autoplay needs a context uri")?;
+      print_context(&spc.autoplay_context(uri, &[]).await?);
+    }
     "search" => {
       let q = args.get(2).map(String::as_str).unwrap_or("daft punk");
       print_search(&spc, q).await?;
@@ -103,7 +160,7 @@ async fn main() -> Result<(), Boxed> {
         auth.clone(),
         dealer.device_id().to_string(),
         exec.clone(),
-        Arc::new(PrintObserver),
+        Arc::new(PrintObserver::default()),
       );
       client.connect().await?;
       println!("watching {secs}s - play/pause/skip on Spotify to see deltas...");
@@ -115,7 +172,7 @@ async fn main() -> Result<(), Boxed> {
         auth.clone(),
         dealer.device_id().to_string(),
         exec.clone(),
-        Arc::new(PrintObserver),
+        Arc::new(PrintObserver::default()),
       );
       let p = client.product().await?;
       println!(
@@ -128,7 +185,7 @@ async fn main() -> Result<(), Boxed> {
         auth.clone(),
         dealer.device_id().to_string(),
         exec.clone(),
-        Arc::new(PrintObserver),
+        Arc::new(PrintObserver::default()),
       );
       client.connect().await?;
       let shelves = client.root_browse(None, None).await?;
@@ -144,7 +201,7 @@ async fn main() -> Result<(), Boxed> {
         auth.clone(),
         dealer.device_id().to_string(),
         exec.clone(),
-        Arc::new(PrintObserver),
+        Arc::new(PrintObserver::default()),
       );
       client.connect().await?;
       let page = client.browse(node, 20, 0).await?;
@@ -170,7 +227,7 @@ async fn main() -> Result<(), Boxed> {
         auth.clone(),
         dealer.device_id().to_string(),
         exec.clone(),
-        Arc::new(PrintObserver),
+        Arc::new(PrintObserver::default()),
       );
       client.connect().await?;
       let page = client.favorites_list(20, 0).await?;
@@ -191,15 +248,19 @@ async fn main() -> Result<(), Boxed> {
     "pause" | "resume" | "next" | "prev" | "seek" | "play" => {
       write_cmd(&dealer, cmd, args.get(2).map(String::as_str)).await?
     }
+    "queue" => queue_cmd(&auth, &exec, &dealer, &args[2..]).await?,
     other => {
-      eprintln!("unknown command: {other}");
+      eprintln!("unknown command: {other}\n{USAGE}");
       std::process::exit(2);
     }
   }
   Ok(())
 }
 
-struct PrintObserver;
+#[derive(Default)]
+struct PrintObserver {
+  ready: Option<tokio::sync::mpsc::Sender<()>>,
+}
 
 impl Observer for PrintObserver {
   fn on_player(&self, s: PlayerState) {
@@ -222,6 +283,9 @@ impl Observer for PrintObserver {
   }
   fn on_queue(&self, q: Queue) {
     println!("[queue] {} upcoming", q.next.len());
+    if let Some(ready) = &self.ready {
+      let _ = ready.try_send(());
+    }
   }
   fn on_devices(&self, d: Vec<Device>) {
     let names: Vec<String> = d
@@ -396,11 +460,11 @@ async fn print_search(spc: &SpClient, q: &str) -> Result<(), Boxed> {
     if !it.section.entries.is_empty() {
       for e in &it.section.entries {
         let ent = &e.item.entity;
-        println!("  [section] {} {}", kind_of(&ent.uri), ent.name);
+        println!("  [section] {} {} {}", kind_of(&ent.uri), ent.name, ent.uri);
         shown += 1;
       }
     } else if !it.uri.is_empty() {
-      println!("  {} {}", kind_of(&it.uri), it.name);
+      println!("  {} {} {}", kind_of(&it.uri), it.name, it.uri);
       shown += 1;
     }
   }
@@ -428,6 +492,177 @@ async fn write_cmd(dealer: &Dealer, cmd: &str, arg: Option<&str>) -> Result<(), 
   };
   println!("{cmd} -> {status} {}", body.chars().take(120).collect::<String>());
   Ok(())
+}
+
+async fn queue_cmd(auth: &Arc<Auth>, exec: &HttpExecutor, dealer: &Dealer, args: &[String]) -> Result<(), Boxed> {
+  let sub = args.first().map(String::as_str).unwrap_or("show");
+  if matches!(sub, "add" | "add-at") {
+    return queue_write(auth, exec, dealer, sub, args).await;
+  }
+
+  let (_stream, writer) = dealer.open().await?;
+  let cluster = writer.cluster().await?;
+  let ps = &cluster.player_state;
+  let encode = |ts: &[ProvidedTrack]| ts.iter().map(provided_track_json).collect::<Vec<_>>();
+
+  match sub {
+    "show" => {
+      print_queue(&cluster);
+      return Ok(());
+    }
+    "dump" => {
+      let path = args.get(1).ok_or("queue dump needs a file path")?;
+      let dump = serde_json::json!({
+        "queue_revision": ps.queue_revision,
+        "next_tracks": encode(&ps.next_tracks),
+        "prev_tracks": encode(&ps.prev_tracks),
+      });
+      std::fs::write(path, serde_json::to_vec_pretty(&dump)?)?;
+      println!(
+        "dumped revision={} next={} prev={} -> {path}",
+        ps.queue_revision,
+        ps.next_tracks.len(),
+        ps.prev_tracks.len()
+      );
+      return Ok(());
+    }
+    _ => {}
+  }
+
+  let target = active_device(&cluster, dealer.device_id(), None).ok_or("no reachable target device")?;
+  let (status, body) = match sub {
+    "restore" => {
+      let path = args.get(1).ok_or("queue restore needs a file path")?;
+      let dump: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+      let tracks = |key: &str| {
+        dump
+          .get(key)
+          .and_then(|v| v.as_array())
+          .map(|a| a.iter().map(provided_track_from_json).collect::<Vec<_>>())
+          .unwrap_or_default()
+      };
+      writer
+        .set_queue(
+          &target,
+          &tracks("next_tracks"),
+          &tracks("prev_tracks"),
+          &ps.queue_revision,
+        )
+        .await?
+    }
+    other => return Err(format!("unknown queue subcommand: {other}").into()),
+  };
+  println!("queue {sub} -> {status} {}", body.chars().take(200).collect::<String>());
+  print_queue(&writer.cluster().await?);
+  Ok(())
+}
+
+async fn queue_write(
+  auth: &Arc<Auth>,
+  exec: &HttpExecutor,
+  dealer: &Dealer,
+  sub: &str,
+  args: &[String],
+) -> Result<(), Boxed> {
+  let (position, uri) = match sub {
+    "add" => (QueuePosition::Append, args.get(1).ok_or("queue add needs a uri")?),
+    _ => {
+      let at: u32 = args.get(1).ok_or("queue add-at needs an index")?.parse()?;
+      (
+        QueuePosition::Index { at },
+        args.get(2).ok_or("queue add-at needs a uri")?,
+      )
+    }
+  };
+
+  let (ready_tx, mut ready) = tokio::sync::mpsc::channel(1);
+  let client = SpotifyClient::new(
+    auth.clone(),
+    dealer.device_id().to_string(),
+    exec.clone(),
+    Arc::new(PrintObserver { ready: Some(ready_tx) }),
+  );
+  client.connect().await?;
+  tokio::time::timeout(Duration::from_secs(15), ready.recv())
+    .await
+    .map_err(|_| "no cluster arrived; is spotify playing anywhere?")?;
+  let wrote = client.queue_uri(uri, position).await;
+  client.disconnect().await;
+  wrote?;
+  println!("queue {sub} {position:?} {uri} -> ok");
+
+  tokio::time::sleep(Duration::from_millis(750)).await;
+  let (_stream, writer) = dealer.open().await?;
+  print_queue(&writer.cluster().await?);
+  Ok(())
+}
+
+fn print_queue(cluster: &Cluster) {
+  let ps = &cluster.player_state;
+  println!(
+    "revision={} current={} next={} prev={}",
+    ps.queue_revision,
+    ps.track.uri,
+    ps.next_tracks.len(),
+    ps.prev_tracks.len()
+  );
+  for (i, t) in ps.next_tracks.iter().enumerate().take(20) {
+    println!(
+      "  [{i}] {} uid={} provider={} queued={} title={:?}",
+      t.uri,
+      t.uid,
+      t.provider,
+      is_queued(t),
+      t.metadata.get("title")
+    );
+  }
+}
+
+fn parse_resolve(args: &[String]) -> Result<VoiceResolveRequest, Boxed> {
+  let mut req = VoiceResolveRequest::default();
+  let mut words: Vec<&str> = Vec::new();
+  let mut rest = args.iter();
+  while let Some(arg) = rest.next() {
+    let mut value = || rest.next().cloned().ok_or_else(|| format!("{arg} needs a value"));
+    match arg.as_str() {
+      "--type" => req.target_type = Some(target_kind(&value()?)?),
+      "--position" => req.position = Some(value()?.parse()?),
+      "--mood" => req.mood = Some(value()?),
+      "--genre" => req.genre = Some(value()?),
+      "--era" => req.era = Some(value()?),
+      "--random" => req.popularity_filter = Some(VoicePopularity::Random),
+      flag if flag.starts_with("--") => return Err(format!("unknown flag: {flag}").into()),
+      word => words.push(word),
+    }
+  }
+  if !words.is_empty() {
+    req.target = Some(words.join(" "));
+  }
+  Ok(req)
+}
+
+fn target_kind(name: &str) -> Result<VoiceTargetKind, Boxed> {
+  match name {
+    "track" => Ok(VoiceTargetKind::Track),
+    "album" => Ok(VoiceTargetKind::Album),
+    "artist" => Ok(VoiceTargetKind::Artist),
+    "playlist" => Ok(VoiceTargetKind::Playlist),
+    "show" | "podcast" => Ok(VoiceTargetKind::Show),
+    "episode" => Ok(VoiceTargetKind::Episode),
+    "station" => Ok(VoiceTargetKind::Station),
+    other => Err(format!("unknown target type: {other}").into()),
+  }
+}
+
+fn print_resolved(out: &VoiceResolved) {
+  println!("uri     = {}", out.uri);
+  println!("context = {}", out.context_uri.as_deref().unwrap_or("(none)"));
+  println!("display = {}", out.display);
+  println!("kind    = {:?}", out.kind);
+  println!("{} alternatives", out.alternatives.len());
+  for alt in &out.alternatives {
+    println!("  [{:?}] {} {}", alt.kind, alt.display, alt.uri);
+  }
 }
 
 fn play_envelope(uri: &str) -> serde_json::Value {
@@ -468,6 +703,56 @@ fn pick_carousel(s: &spotify::proto::custom::casita_home::Section) -> (String, u
     }
   }
   (String::new(), 0)
+}
+
+fn carousel_items(s: &spotify::proto::custom::casita_home::Section) -> (String, Vec<String>) {
+  for car in [&s.shortcuts, &s.carousel, &s.list_carousel] {
+    if let Some(c) = car.as_ref() {
+      let uris: Vec<String> = c.items.inner.items.iter().map(|i| i.uri.clone()).collect();
+      if !uris.is_empty() || !c.header.title.text.is_empty() {
+        return (c.header.title.text.clone(), uris);
+      }
+    }
+  }
+  (String::new(), Vec::new())
+}
+
+fn print_context(ctx: &serde_json::Value) {
+  let s = |k: &str| ctx.get(k).and_then(|v| v.as_str()).unwrap_or("(none)");
+  println!("uri = {}", s("uri"));
+  println!("url = {}", s("url"));
+  if let Some(md) = ctx.get("metadata").and_then(|v| v.as_object()) {
+    for (k, v) in md {
+      println!("meta {k} = {v}");
+    }
+  }
+  if let Some(r) = ctx.get("restrictions") {
+    println!("restrictions = {r}");
+  }
+  let pages = ctx.get("pages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+  println!("{} pages", pages.len());
+  for p in &pages {
+    print_page(p);
+  }
+}
+
+fn print_page(p: &serde_json::Value) {
+  let tracks = p.get("tracks").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+  println!(
+    "  page: {} tracks page_url={:?} next_page_url={:?} meta={:?}",
+    tracks.len(),
+    p.get("page_url").and_then(|v| v.as_str()),
+    p.get("next_page_url").and_then(|v| v.as_str()),
+    p.get("metadata"),
+  );
+  for t in tracks.iter().take(5) {
+    println!(
+      "    {} uid={:?} meta={:?}",
+      t.get("uri").and_then(|v| v.as_str()).unwrap_or("(no uri)"),
+      t.get("uid").and_then(|v| v.as_str()),
+      t.get("metadata"),
+    );
+  }
 }
 
 fn section_kind(s: &spotify::proto::custom::casita_home::Section) -> String {

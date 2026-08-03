@@ -1,5 +1,7 @@
 package com.bridgething.spotify
 
+import com.bridgething.companion.VoiceCatalogProviding
+import com.bridgething.companion.VoiceCatalogResolving
 import com.bridgething.gateway.BridgethingGateway
 import com.bridgething.gateway.library
 import com.bridgething.glue.AssetBytes
@@ -82,6 +84,7 @@ import uniffi.spotify.LibraryScope as SpLibraryScope
 import uniffi.spotify.Observer as SpObserver
 import uniffi.spotify.PlayerState as SpPlayerState
 import uniffi.spotify.Queue as SpQueue
+import uniffi.spotify.QueuePosition as SpQueuePosition
 import uniffi.spotify.RepeatMode as SpRepeat
 import uniffi.spotify.Shelf as SpShelf
 import uniffi.spotify.SpotifyClient
@@ -122,7 +125,7 @@ class SpotifyGlue(
             it.setHttpTransport(KtorHttpTransport())
         }
     },
-) : BridgethingGlue {
+) : BridgethingGlue, VoiceCatalogProviding {
     override val name: String = "spotify"
     override val displayName: String = "Spotify"
 
@@ -148,6 +151,7 @@ class SpotifyGlue(
         cacheDir?.let { ImageDiskCache(java.io.File(it, "spotify-art"), 200L shl 20) }
 
     private var client: SpotifyClientInterface? = null
+    @Volatile private var voiceCatalogResolver: SpotifyVoiceResolver? = null
     private var gateway: BridgethingGateway? = null
     private var connectJob: Job? = null
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
@@ -181,6 +185,7 @@ class SpotifyGlue(
         val client = clientFactory(tokenStore, ObserverBridge(this))
         localWaker?.let { client.setDeviceWaker(it) }
         this.client = client
+        voiceCatalogResolver = SpotifyVoiceResolver(client)
 
         authObserver?.invoke(GlueAuthState.Pending(null))
         connectJob = scope.launch {
@@ -215,8 +220,11 @@ class SpotifyGlue(
         lastStateAtMs = null
         lastQueueItems = emptyList()
         client = null
+        voiceCatalogResolver = null
         gateway = null
     }
+
+    override fun voiceResolver(): VoiceCatalogResolving? = voiceCatalogResolver
 
     override suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) { nowPlayingObserver = observer }
     override suspend fun setNowPlayingSink(sink: NowPlayingSink?) { this.sink = sink }
@@ -327,8 +335,12 @@ class SpotifyGlue(
 
     override suspend fun queue(req: QueueUri) {
         val client = client ?: throw GlueError.Detached
-        if (req.position is QueuePosition.Index) throw GlueError.NotImplemented
-        client.queueUri(req.uri)
+        val position = when (val p = req.position) {
+            is QueuePosition.Append -> SpQueuePosition.Append
+            is QueuePosition.Next -> SpQueuePosition.Next
+            is QueuePosition.Index -> SpQueuePosition.Index(p.data)
+        }
+        client.queueUri(req.uri, position)
     }
 
     override suspend fun pause() { require().pause() }

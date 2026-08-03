@@ -60,7 +60,6 @@ final class OtaManifestTests: XCTestCase {
     XCTAssertNil(manifest.releases["0.8.4+image.2026.05.0"]?.yanked)
     XCTAssertEqual(manifest.releases["0.8.3+image.2026.04.0"]?.yanked, "bad build")
     XCTAssertEqual(manifest.releases["0.8.4+image.2026.05.0"]?.builtinWebapps, ["hub": "0.1.0", "stock": "8.9.2"])
-    // a release entry with no builtin_webapps decodes as empty (backward compatible).
     XCTAssertEqual(manifest.releases["0.8.3+image.2026.04.0"]?.builtinWebapps, [:])
   }
 
@@ -76,7 +75,7 @@ final class OtaManifestTests: XCTestCase {
     """
     let artifacts = try JSONDecoder().decode(OtaReleaseArtifacts.self, from: Data(json.utf8))
     XCTAssertEqual(artifacts.daemonPatches["0.8.3"]?.sourceSha256, "cc")
-    XCTAssertEqual(artifacts.daemonPatches["0.8.3"]?.digest, OtaArtifactDigest(size: 10, sha256: "bb"))
+    XCTAssertEqual(artifacts.daemonPatches["0.8.3"]?.digest, ArtifactDigest(size: 10, sha256: "bb"))
     XCTAssertNil(artifacts.daemonPatches["0.8.2"]?.sourceSha256)
   }
 

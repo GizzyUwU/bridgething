@@ -440,9 +440,7 @@ export type BridgeToClientTimeMsg =
   | { event: 'snapshot'; data: TimeSnapshot };
 
 /**
- * Daemon -> webapp voice/NLU surface: mic state-change events, per-turn
- * pipeline activity, resolved display intents, and the reply to
- * `voice.stateGet`.
+ * Daemon -> webapp voice/NLU surface
  */
 export type BridgeToClientVoiceMsg =
   | { event: 'stateChanged'; data: VoiceState }
@@ -722,13 +720,12 @@ export type ClientToBridgeSystemMsg =
 export type ClientToBridgeTimeMsg = { event: 'get' };
 
 /**
- * Webapp -> daemon voice/NLU surface: mic mute control and manual
- * capture triggering. May be unavailable on builds without the mic
- * hardware or the NLU pipeline enabled.
+ * Webapp -> daemon voice/NLU surface: mic mute control and manual capture triggering
  */
 export type ClientToBridgeVoiceMsg =
   | { event: 'cancel' }
   | { event: 'pushToTalk' }
+  | { event: 'release' }
   | { event: 'muteMic'; data: MicMute }
   | { event: 'unmuteMic'; data: MicUnmute }
   | { event: 'stateGet' };
@@ -1202,24 +1199,12 @@ export type LyricsReply = {
 /**
  * Payload for `voice.muteMic`.
  */
-export type MicMute = {
-  /**
-   * When true and a capture session is already in progress, let it
-   * keep running instead of cutting it short.
-   */
-  preserve: boolean;
-};
+export type MicMute = { preserve: boolean };
 
 /**
  * Payload for `voice.unmuteMic`.
  */
-export type MicUnmute = {
-  /**
-   * Accepted for symmetry with `MicMute`; the daemon ignores it on
-   * unmute.
-   */
-  preserve: boolean;
-};
+export type MicUnmute = { preserve: boolean };
 
 /**
  * Payload for `net.fetch`: a single proxied HTTP request/response
@@ -1676,16 +1661,12 @@ export type TtsStarted = {
 };
 
 /**
- * One step of a voice turn, as it happens. Fields fill in as the turn
- * progresses, so a `done` carries everything the earlier phases did.
+ * One step of a voice turn, as it happens
  */
 export type VoiceActivity = {
   phase: VoicePhase;
   streamId: string | null;
   reason: VoiceCaptureReason | null;
-  /**
-   * Wake word confidence, present only on a wake-word-opened turn.
-   */
   score: number | null;
   transcript: string | null;
   intent: string | null;
@@ -1711,23 +1692,14 @@ export type VoiceDisplayIntent = 'search' | 'showView' | 'moreLikeThis';
 export type VoiceIntent = { intent: VoiceDisplayIntent; slots: NluSlots; transcript: string };
 
 /**
- * Where a voice turn is in the pipeline. `Done` and `Failed` are terminal
- * and only ever appear on a `VoiceActivity`; the state a surface reads back
- * from `voice.stateGet` settles to `Idle` instead of holding an outcome.
+ * Where a voice turn is in the pipeline
  */
 export type VoicePhase = 'idle' | 'listening' | 'thinking' | 'done' | 'failed';
 
 /**
  * Current mic state.
  */
-export type VoiceState = {
-  muted: boolean;
-  /**
-   * True while a capture session is actively recording.
-   */
-  capturing: boolean;
-  phase: VoicePhase;
-};
+export type VoiceState = { muted: boolean; capturing: boolean; phase: VoicePhase };
 
 /**
  * Response to `voice.stateGet`.

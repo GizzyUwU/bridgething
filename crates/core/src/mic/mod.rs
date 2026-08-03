@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+#[cfg(feature = "mic")]
+use libbridgething::gateway::VoiceFrame;
 use libbridgething::{
   VoiceCaptureReason, VoiceDispatchErrorCode,
   client::{BridgeToClientVoiceMsg, VoiceActivity, VoiceActivityError, VoicePhase, VoiceState},
   gateway::{
-    BridgeToGatewayVoiceMsgEvent, VoiceCloseReason, VoiceFormat, VoiceFrame, VoiceStreamClose, VoiceStreamOpen,
+    BridgeToGatewayVoiceMsgEvent, VoiceCloseReason, VoiceCodec, VoiceFormat, VoiceStreamClose, VoiceStreamOpen,
   },
   wire::MsgMeta,
 };
@@ -18,6 +20,8 @@ use crate::{bluetooth::BluetoothMan, net::WireEventBus};
 
 #[cfg(feature = "mic")]
 mod alsa_capture;
+#[cfg(feature = "mic")]
+mod encoder;
 #[cfg(feature = "mic")]
 mod wakeword;
 
@@ -52,7 +56,6 @@ async fn next_detection(hits: &mut Option<mpsc::Receiver<Detection>>) -> Detecti
 pub struct CaptureFormat {
   pub sample_rate_hz: u32,
   pub channels: u16,
-  pub bits_per_sample: u16,
   pub frame_samples: u32,
 }
 
@@ -61,7 +64,6 @@ impl Default for CaptureFormat {
     Self {
       sample_rate_hz: 16_000,
       channels: 1,
-      bits_per_sample: 16,
       frame_samples: 256,
     }
   }
@@ -70,9 +72,9 @@ impl Default for CaptureFormat {
 impl CaptureFormat {
   pub fn wire(&self) -> VoiceFormat {
     VoiceFormat {
+      codec: VoiceCodec::Opus,
       sample_rate_hz: self.sample_rate_hz,
       channels: self.channels,
-      bits_per_sample: self.bits_per_sample,
     }
   }
 }
@@ -117,6 +119,8 @@ pub enum MicError {
   Unavailable,
   #[error("alsa: {0}")]
   Alsa(String),
+  #[error("opus: {0}")]
+  Encode(String),
 }
 
 #[derive(Debug, Default)]
@@ -331,19 +335,22 @@ async fn run_loop(
         if let Some(link) = link.as_ref() {
           link.offer(frame.clone());
         }
-        if let Some(open) = stream.as_mut()
-          && !open.forward(frame)
-        {
-          tracing::error!("gateway fell a full uplink buffer behind; ending the stream rather than holing it");
-          stop_stream(&state, &bus, &bluetooth, &mut stream, VoiceCloseReason::Error, &mut resolve_by).await;
+        if let Some(open) = stream.as_mut() {
+          let ended = open.endpoint(&frame);
+          if !open.forward(frame) {
+            tracing::error!("gateway fell a full uplink buffer behind; ending the stream rather than holing it");
+            stop_stream(&state, &bus, &mut stream, VoiceCloseReason::Error, &mut resolve_by).await;
+          } else if let Some(reason) = ended {
+            stop_stream(&state, &bus, &mut stream, reason, &mut resolve_by).await;
+          }
         }
       }
       hit = next_detection(&mut hits) => {
         on_wake_word(hit, &state, &bus, &bluetooth, &config, &frame_tx, &mut capture, &mut stream).await;
       }
       () = past_cap(stream.as_ref()) => {
-        tracing::warn!(cap = ?config.max_uplink, "uplink hit the cap with no close from the gateway");
-        stop_stream(&state, &bus, &bluetooth, &mut stream, VoiceCloseReason::Cancelled, &mut resolve_by).await;
+        tracing::warn!(cap = ?config.max_uplink, "uplink hit the cap; answering with what the turn already carried");
+        stop_stream(&state, &bus, &mut stream, VoiceCloseReason::EndOfSpeech, &mut resolve_by).await;
       }
       () = past_deadline(resolve_by) => {
         tracing::warn!(wait = ?RESOLVE_TIMEOUT, "companion never answered a closed turn");
@@ -441,7 +448,7 @@ async fn handle_cmd(
       let _ = reply.send(outcome);
     }
     Cmd::Stop { reason, reply } => {
-      stop_stream(state, bus, bluetooth, stream, reason, resolve_by).await;
+      stop_stream(state, bus, stream, reason, resolve_by).await;
       let _ = reply.send(());
     }
     Cmd::Finish { activity, reply } => {
@@ -486,7 +493,7 @@ async fn handle_cmd(
         open.stop();
       }
       if was_open && !preserve {
-        stop_stream(state, bus, bluetooth, stream, VoiceCloseReason::Muted, resolve_by).await;
+        stop_stream(state, bus, stream, VoiceCloseReason::Muted, resolve_by).await;
       } else {
         broadcast_state(bus, state).await;
       }
@@ -537,7 +544,13 @@ async fn start_stream(
   }
 
   let stream_id = Uuid::now_v7();
-  *stream = Some(Stream::open(stream_id, config.max_uplink, bluetooth.clone()));
+  *stream = Some(Stream::open(
+    stream_id,
+    config.max_uplink,
+    config.format,
+    bluetooth.clone(),
+    reason,
+  ));
 
   let activity = {
     let mut guard = state.write().await;
@@ -561,21 +574,24 @@ async fn start_stream(
   Ok(stream_id)
 }
 
+fn settled_phase(reason: VoiceCloseReason) -> VoicePhase {
+  match reason {
+    VoiceCloseReason::EndOfSpeech => VoicePhase::Thinking,
+    VoiceCloseReason::Error => VoicePhase::Failed,
+    VoiceCloseReason::Cancelled | VoiceCloseReason::Muted => VoicePhase::Idle,
+  }
+}
+
 async fn stop_stream(
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
-  bluetooth: &BluetoothMan,
   stream: &mut Option<Stream>,
   reason: VoiceCloseReason,
   resolve_by: &mut Option<tokio::time::Instant>,
 ) {
-  let next = match reason {
-    VoiceCloseReason::EndOfSpeech => VoicePhase::Thinking,
-    VoiceCloseReason::Error => VoicePhase::Failed,
-    VoiceCloseReason::Cancelled | VoiceCloseReason::Muted => VoicePhase::Idle,
-  };
+  let next = settled_phase(reason);
 
-  let (id, activity) = {
+  let activity = {
     let mut guard = state.write().await;
     if !guard.capturing {
       return;
@@ -587,23 +603,15 @@ async fn stop_stream(
       VoicePhase::Idle
     };
     let activity = guard.activity(next);
-    let id = guard.current_stream;
     if next != VoicePhase::Thinking {
       guard.clear_turn();
     }
-    (id, activity)
+    activity
   };
 
   *resolve_by = (next == VoicePhase::Thinking).then(|| tokio::time::Instant::now() + RESOLVE_TIMEOUT);
-  stream.take();
-  if let Some(stream_id) = id {
-    bluetooth
-      .gateway_man
-      .broadcast(BridgeToGatewayVoiceMsgEvent::StreamClose(VoiceStreamClose {
-        stream_id,
-        reason,
-      }))
-      .await;
+  if let Some(open) = stream.take() {
+    open.close(reason);
   }
   broadcast_activity(bus, activity).await;
   broadcast_state(bus, state).await;
@@ -675,47 +683,161 @@ impl Capture {
   }
 }
 
+#[cfg(feature = "mic")]
+struct Endpointer {
+  vad: bridgething_dsp::vad::VoiceEndpointer,
+  samples: Vec<f32>,
+}
+
+#[cfg(feature = "mic")]
+impl Endpointer {
+  fn new() -> Self {
+    Self {
+      vad: bridgething_dsp::vad::VoiceEndpointer::new(bridgething_dsp::vad::Config::default()),
+      samples: Vec::with_capacity(1024),
+    }
+  }
+
+  fn observe(&mut self, pcm: &[u8]) -> Option<VoiceCloseReason> {
+    self.samples.clear();
+    bridgething_dsp::pipeline::from_pcm16(pcm, &mut self.samples);
+    let end = self.vad.observe(&self.samples)?;
+    tracing::debug!(?end, "the endpointer ended the turn");
+    Some(VoiceCloseReason::EndOfSpeech)
+  }
+}
+
+#[cfg(feature = "mic")]
+fn endpointer_for(reason: VoiceCaptureReason) -> Option<Endpointer> {
+  (reason == VoiceCaptureReason::WakeWord).then(Endpointer::new)
+}
+
 struct Stream {
-  id: Uuid,
-  seq: u32,
   deadline: tokio::time::Instant,
-  frames: mpsc::Sender<VoiceFrame>,
+  pcm: mpsc::Sender<bytes::Bytes>,
+  close: oneshot::Sender<VoiceCloseReason>,
+  #[cfg(feature = "mic")]
+  endpointer: Option<Endpointer>,
   _uplink: JoinHandle<()>,
 }
 
 impl Stream {
-  fn open(id: Uuid, cap: std::time::Duration, bluetooth: BluetoothMan) -> Self {
-    let (frames, rx) = mpsc::channel(UPLINK_BACKLOG);
+  fn open(
+    id: Uuid,
+    cap: std::time::Duration,
+    format: CaptureFormat,
+    bluetooth: BluetoothMan,
+    reason: VoiceCaptureReason,
+  ) -> Self {
+    let (pcm, rx) = mpsc::channel(UPLINK_BACKLOG);
+    let (close, closed) = oneshot::channel();
+    #[cfg(not(feature = "mic"))]
+    let _ = reason;
     Self {
-      id,
-      seq: 0,
       deadline: tokio::time::Instant::now() + cap,
-      frames,
-      _uplink: tokio::spawn(run_uplink(rx, bluetooth)),
+      pcm,
+      close,
+      #[cfg(feature = "mic")]
+      endpointer: endpointer_for(reason),
+      _uplink: tokio::spawn(run_uplink(rx, closed, bluetooth, id, format)),
     }
   }
 
+  #[cfg(feature = "mic")]
+  fn endpoint(&mut self, pcm: &[u8]) -> Option<VoiceCloseReason> {
+    self.endpointer.as_mut()?.observe(pcm)
+  }
+
+  #[cfg(not(feature = "mic"))]
+  fn endpoint(&mut self, _pcm: &[u8]) -> Option<VoiceCloseReason> {
+    None
+  }
+
   fn forward(&mut self, pcm: bytes::Bytes) -> bool {
-    let seq = self.seq;
-    self.seq = self.seq.wrapping_add(1);
-    self
-      .frames
-      .try_send(VoiceFrame {
-        stream_id: self.id,
-        seq,
-        pcm,
-      })
-      .is_ok()
+    self.pcm.try_send(pcm).is_ok()
+  }
+
+  fn close(self, reason: VoiceCloseReason) {
+    let _ = self.close.send(reason);
   }
 }
 
-async fn run_uplink(mut frames: mpsc::Receiver<VoiceFrame>, bluetooth: BluetoothMan) {
-  while let Some(frame) = frames.recv().await {
+#[cfg(feature = "mic")]
+async fn run_uplink(
+  mut pcm: mpsc::Receiver<bytes::Bytes>,
+  closed: oneshot::Receiver<VoiceCloseReason>,
+  bluetooth: BluetoothMan,
+  id: Uuid,
+  format: CaptureFormat,
+) {
+  let mut encoder = match encoder::Encoder::new(format) {
+    Ok(encoder) => encoder,
+    Err(err) => {
+      tracing::error!("could not open the opus encoder, the uplink carries nothing: {err}");
+      close_uplink(&bluetooth, id, closed).await;
+      return;
+    }
+  };
+  let mut seq = 0u32;
+  let mut packets = Vec::new();
+
+  while let Some(chunk) = pcm.recv().await {
+    if let Err(err) = encoder.push(&chunk, &mut packets) {
+      tracing::error!("opus encode failed mid-utterance: {err}");
+      close_uplink(&bluetooth, id, closed).await;
+      return;
+    }
+    broadcast_packets(&bluetooth, id, &mut seq, packets.drain(..)).await;
+  }
+  match encoder.flush() {
+    Ok(tail) => broadcast_packets(&bluetooth, id, &mut seq, tail).await,
+    Err(err) => tracing::warn!("the tail of the utterance would not encode: {err}"),
+  }
+  close_uplink(&bluetooth, id, closed).await;
+}
+
+#[cfg(not(feature = "mic"))]
+async fn run_uplink(
+  mut pcm: mpsc::Receiver<bytes::Bytes>,
+  closed: oneshot::Receiver<VoiceCloseReason>,
+  bluetooth: BluetoothMan,
+  id: Uuid,
+  _format: CaptureFormat,
+) {
+  while pcm.recv().await.is_some() {}
+  close_uplink(&bluetooth, id, closed).await;
+}
+
+#[cfg(feature = "mic")]
+async fn broadcast_packets(
+  bluetooth: &BluetoothMan,
+  stream_id: Uuid,
+  seq: &mut u32,
+  packets: impl IntoIterator<Item = bytes::Bytes>,
+) {
+  for packet in packets {
+    let frame = VoiceFrame {
+      stream_id,
+      seq: *seq,
+      packet,
+    };
+    *seq = seq.wrapping_add(1);
     bluetooth
       .gateway_man
       .broadcast(BridgeToGatewayVoiceMsgEvent::Frame(frame))
       .await;
   }
+}
+
+async fn close_uplink(bluetooth: &BluetoothMan, stream_id: Uuid, closed: oneshot::Receiver<VoiceCloseReason>) {
+  let Ok(reason) = closed.await else { return };
+  bluetooth
+    .gateway_man
+    .broadcast(BridgeToGatewayVoiceMsgEvent::StreamClose(VoiceStreamClose {
+      stream_id,
+      reason,
+    }))
+    .await;
 }
 
 #[cfg(test)]
@@ -753,6 +875,28 @@ mod tests {
     );
     assert_eq!(next.reason, None);
     assert_eq!(next.stream_id, None);
+  }
+
+  #[test]
+  fn a_turn_that_ended_by_itself_is_still_answered() {
+    assert_eq!(settled_phase(VoiceCloseReason::EndOfSpeech), VoicePhase::Thinking);
+  }
+
+  #[test]
+  fn an_explicit_stop_drops_the_turn_rather_than_dispatching_it() {
+    assert_eq!(settled_phase(VoiceCloseReason::Cancelled), VoicePhase::Idle);
+    assert_eq!(settled_phase(VoiceCloseReason::Muted), VoicePhase::Idle);
+    assert_eq!(settled_phase(VoiceCloseReason::Error), VoicePhase::Failed);
+  }
+
+  #[cfg(feature = "mic")]
+  #[test]
+  fn only_a_wake_word_turn_is_endpointed() {
+    assert!(endpointer_for(VoiceCaptureReason::WakeWord).is_some());
+    assert!(
+      endpointer_for(VoiceCaptureReason::PushToTalk).is_none(),
+      "a held button is the user's own endpoint"
+    );
   }
 
   #[test]

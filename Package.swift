@@ -13,6 +13,7 @@ let package = Package(
     .library(name: "BridgethingLyrics", targets: ["BridgethingLyrics"]),
     .library(name: "BridgethingGlue", targets: ["BridgethingGlue"]),
     .library(name: "BridgethingCompanion", targets: ["BridgethingCompanion"]),
+    .library(name: "BridgethingNluKit", targets: ["BridgethingNluKit"]),
     .library(name: "BridgethingAppleMusicGlue", targets: ["BridgethingAppleMusicGlue"]),
     .library(name: "BridgethingTestKit", targets: ["BridgethingTestKit"]),
   ],
@@ -20,6 +21,7 @@ let package = Package(
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
     .package(url: "https://github.com/1024jp/GzipSwift", from: "6.1.0"),
     .package(url: "https://github.com/apple/swift-log", from: "1.6.0"),
+    .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.20"),
   ],
   targets: [
     .target(
@@ -36,9 +38,6 @@ let package = Package(
       ],
       path: "packages/gateway/swift/Sources/BridgethingGateway",
       linkerSettings: [
-        // IOBluetoothRFCOMMAdapter only compiles on macOS (gated by
-        // canImport(IOBluetooth)); link the framework when building
-        // for that platform so the symbols resolve.
         .linkedFramework("IOBluetooth", .when(platforms: [.macOS])),
       ]
     ),
@@ -66,6 +65,7 @@ let package = Package(
       dependencies: [
         "BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema",
         .product(name: "Logging", package: "swift-log"),
+        .product(name: "ZIPFoundation", package: "ZIPFoundation"),
       ],
       path: "packages/companion/swift/Sources/BridgethingCompanion",
       resources: [.process("Resources")]
@@ -77,8 +77,27 @@ let package = Package(
     ),
     .testTarget(
       name: "BridgethingCompanionTests",
-      dependencies: ["BridgethingCompanion", "BridgethingTestKit"],
+      dependencies: ["BridgethingCompanion", "BridgethingTestKit",.product(name: "ZIPFoundation", package: "ZIPFoundation"),],
       path: "packages/companion/swift/Tests/BridgethingCompanionTests"
+    ),
+    .binaryTarget(
+      name: "NluFFI",
+      path: "packages/nlu/swift/Frameworks/NluFFI.xcframework"
+    ),
+    .target(
+      name: "Nlu",
+      dependencies: ["NluFFI"],
+      path: "packages/nlu/swift/Sources/Nlu"
+    ),
+    .target(
+      name: "BridgethingNluKit",
+      dependencies: ["Nlu", "BridgethingCompanion", "BridgethingSchema"],
+      path: "packages/nlu/swift/Sources/BridgethingNluKit"
+    ),
+    .testTarget(
+      name: "BridgethingNluKitTests",
+      dependencies: ["BridgethingNluKit", "Nlu"],
+      path: "packages/nlu/swift/Tests/BridgethingNluKitTests"
     ),
     .target(
       name: "BridgethingAppleMusicGlue",

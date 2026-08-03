@@ -3218,6 +3218,16 @@ export class VoiceSurface {
     await this._client.send(msg);
   }
 
+  /** Send `Voice::Release` to the daemon. */
+  async release(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'release' } },
+    };
+    await this._client.send(msg);
+  }
+
   /** Send `Voice::MuteMic` to the daemon. */
   async muteMic(payload: MicMute): Promise<void> {
     const msg: ClientToBridgeMsg = {

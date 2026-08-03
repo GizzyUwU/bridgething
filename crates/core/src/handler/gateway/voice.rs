@@ -1,6 +1,6 @@
 use libbridgething::{
-  BrightnessMode, ItemKind, ItemRef, NluBrightnessMode, NluDirection, NluPhoneAction, NluPlaybackSpeed, NluRepeatMode,
-  NluResolvedIntent, NluSlots, NluSystemAction, RepeatMode, VoiceDispatchErrorCode, VoiceDispatchTarget,
+  ItemKind, ItemRef, NluDirection, NluPhoneAction, NluPlaybackSpeed, NluRepeatMode, NluResolvedIntent, NluScope,
+  NluSlots, NluTargetType, PlayContext, RepeatMode, VoiceDispatchErrorCode, VoiceDispatchTarget,
   client::{
     BridgeToClientVoiceMsgEvent, VoiceActivity, VoiceActivityError, VoiceDisplayIntent, VoiceIntent, VoicePhase,
   },
@@ -13,9 +13,7 @@ use libbridgething::{
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle, webapp::navigate_url_for_active};
-use crate::{chrome::ChromeCommand, state::TelephonyManager, systemd::power};
-
-const BRIGHTNESS_STEP: f32 = 0.15;
+use crate::{chrome::ChromeCommand, state::TelephonyManager};
 
 type Routed = Result<(VoiceDispatchTarget, Option<Uuid>), (VoiceDispatchErrorCode, String)>;
 
@@ -123,11 +121,17 @@ impl VoiceHandler {
         Ok((VoiceDispatchTarget::Playback, None))
       }
       "NEXT" => {
-        self.handle.transport.next().await;
+        for _ in 0..skip_count(slots)? {
+          self.handle.transport.next().await;
+        }
+        Ok((VoiceDispatchTarget::Playback, None))
+      }
+      "PREVIOUS" if slots.scope == Some(NluScope::Restart) => {
+        self.handle.transport.seek_to(0).await;
         Ok((VoiceDispatchTarget::Playback, None))
       }
       "PREVIOUS" => {
-        self.handle.transport.prev(true).await;
+        self.handle.transport.prev(false).await;
         Ok((VoiceDispatchTarget::Playback, None))
       }
       "SET_SHUFFLE" => {
@@ -158,18 +162,9 @@ impl VoiceHandler {
           .await;
         Ok((VoiceDispatchTarget::Playback, None))
       }
-      "SET_MUTE" => {
-        let enabled = slots.enabled.ok_or_else(|| bad("SET_MUTE without `enabled`"))?;
-        self
-          .send_audio(BridgeToGatewayAudioMsgCommand::SetMute(gateway::SetMute {
-            muted: enabled,
-          }))
-          .await;
-        Ok((VoiceDispatchTarget::Playback, None))
-      }
       "SET_VOLUME" => self.set_volume(slots).await,
-      "PLAY_PRESET" => self.play_preset(slots).await,
-      "SAVE_TO_PRESET" => self.save_to_preset(slots).await,
+      "PRESET_PLAY" => self.play_preset(slots).await,
+      "PRESET_SAVE" => self.save_to_preset(slots).await,
       "ADD_TO_QUEUE" => {
         let uri = slots.uri.clone().ok_or((
           VoiceDispatchErrorCode::PlaybackFailed,
@@ -183,16 +178,13 @@ impl VoiceHandler {
           .await;
         Ok((VoiceDispatchTarget::Playback, None))
       }
-      "ADD_TO_COLLECTION" => self.favorite(slots, true).await,
-      "THUMBS_UP" => self.favorite_current().await,
+      "THUMBS_UP" => self.thumbs_up(slots).await,
       "ADD_TO_PLAYLIST" => Err((
         VoiceDispatchErrorCode::Unsupported,
         "no playlist-mutation surface exists yet".into(),
       )),
 
-      // device control
       "OPEN_WEBAPP" => self.open_webapp(slots).await,
-      "SET_BRIGHTNESS" => self.set_brightness(slots).await,
       "SET_DISCOVERABLE" => {
         let enabled = slots.enabled.ok_or_else(|| bad("SET_DISCOVERABLE without `enabled`"))?;
         self
@@ -205,12 +197,6 @@ impl VoiceHandler {
           .await
           .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?;
         Ok((VoiceDispatchTarget::Device, None))
-      }
-      "SYSTEM_ACTION" => {
-        let action = slots
-          .system_action
-          .ok_or_else(|| bad("SYSTEM_ACTION without `systemAction`"))?;
-        self.system_action(action).await
       }
       "PHONE_ACTION" => {
         let action = slots
@@ -225,16 +211,12 @@ impl VoiceHandler {
         Ok((VoiceDispatchTarget::Device, None))
       }
 
-      // display-shaped
       "SEARCH" => self.display(VoiceDisplayIntent::Search, resolved).await,
       "MORE_LIKE_THIS" => self.display(VoiceDisplayIntent::MoreLikeThis, resolved).await,
       "SHOW_VIEW" => {
         slots.view.ok_or_else(|| bad("SHOW_VIEW without `view`"))?;
         self.display(VoiceDisplayIntent::ShowView, resolved).await
       }
-
-      // WHATS_PLAYING is answered from the daemon
-      "WHATS_PLAYING" => Ok((VoiceDispatchTarget::Device, None)),
 
       "HELP" | "CLARIFY" | "NO_INTENT" => Err((
         VoiceDispatchErrorCode::NotDispatchable,
@@ -249,20 +231,19 @@ impl VoiceHandler {
   }
 
   async fn play_catalog(&self, slots: &NluSlots) -> Routed {
-    let uri = slots.uri.clone().ok_or((
-      VoiceDispatchErrorCode::PlaybackFailed,
-      "catalog play arrived without a resolved uri".into(),
-    ))?;
     self
-      .send_player(BridgeToGatewayPlayerMsgCommand::Play(gateway::PlayUri {
-        uri,
-        context: None,
-      }))
+      .send_player(BridgeToGatewayPlayerMsgCommand::Play(play_uri(slots)?))
       .await;
     Ok((VoiceDispatchTarget::Playback, None))
   }
 
   async fn set_volume(&self, slots: &NluSlots) -> Routed {
+    if let Some(muted) = slots.mute {
+      self
+        .send_audio(BridgeToGatewayAudioMsgCommand::SetMute(gateway::SetMute { muted }))
+        .await;
+      return Ok((VoiceDispatchTarget::Playback, None));
+    }
     if let Some(level) = slots.level {
       self
         .send_audio(BridgeToGatewayAudioMsgCommand::SetVolume(gateway::SetVolume {
@@ -273,52 +254,12 @@ impl VoiceHandler {
     }
     match slots
       .direction
-      .ok_or_else(|| bad("SET_VOLUME without direction or level"))?
+      .ok_or_else(|| bad("SET_VOLUME without direction, level, or mute"))?
     {
       NluDirection::Up => self.handle.transport.volume_up().await,
       NluDirection::Down => self.handle.transport.volume_down().await,
     }
     Ok((VoiceDispatchTarget::Playback, None))
-  }
-
-  async fn set_brightness(&self, slots: &NluSlots) -> Routed {
-    if let Some(NluBrightnessMode::Auto) = slots.brightness_mode {
-      self
-        .handle
-        .state
-        .als
-        .set_mode(BrightnessMode::Auto)
-        .await
-        .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?;
-      return Ok((VoiceDispatchTarget::Device, None));
-    }
-
-    let target = if let Some(level) = slots.level {
-      (level.min(100) as f32) / 100.0
-    } else {
-      let step = match slots.direction.ok_or_else(|| bad("SET_BRIGHTNESS without a target"))? {
-        NluDirection::Up => BRIGHTNESS_STEP,
-        NluDirection::Down => -BRIGHTNESS_STEP,
-      };
-      (self.handle.state.als.snapshot().await.brightness.level + step).clamp(0.0, 1.0)
-    };
-
-    self
-      .handle
-      .state
-      .als
-      .set_mode(BrightnessMode::Manual)
-      .await
-      .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?;
-    self
-      .handle
-      .state
-      .als
-      .set_level(target)
-      .await
-      .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?
-      .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err:?}")))?;
-    Ok((VoiceDispatchTarget::Device, None))
   }
 
   async fn play_preset(&self, slots: &NluSlots) -> Routed {
@@ -365,26 +306,26 @@ impl VoiceHandler {
     Ok((VoiceDispatchTarget::Device, None))
   }
 
-  async fn favorite(&self, slots: &NluSlots, saved: bool) -> Routed {
-    let uri = slots.uri.clone().ok_or((
-      VoiceDispatchErrorCode::PlaybackFailed,
-      "collection change arrived without a resolved uri".into(),
-    ))?;
-    let kind = if slots.podcast.is_some() {
-      ItemKind::Show
-    } else if slots.episode.is_some() {
-      ItemKind::PodcastEpisode
-    } else if slots.album.is_some() {
-      ItemKind::Album
-    } else if slots.artist.is_some() && slots.track.is_none() {
-      ItemKind::Artist
-    } else {
-      ItemKind::Track
-    };
-    self.set_favorite(uri, kind, saved).await
-  }
-
-  async fn favorite_current(&self) -> Routed {
+  async fn thumbs_up(&self, slots: &NluSlots) -> Routed {
+    let saved = slots.enabled.unwrap_or(true);
+    if let Some(uri) = slots.uri.clone() {
+      return self.set_favorite(uri, favorite_kind(slots.target_type), saved).await;
+    }
+    if slots.scope == Some(NluScope::PreviousTrack) {
+      let uri = self
+        .handle
+        .state
+        .player
+        .queue_reply()
+        .previous
+        .first()
+        .map(|item| item.uri.clone())
+        .ok_or((
+          VoiceDispatchErrorCode::PlaybackFailed,
+          "no recently played track to favorite".into(),
+        ))?;
+      return self.set_favorite(uri, ItemKind::Track, saved).await;
+    }
     let uri = self
       .handle
       .state
@@ -397,7 +338,7 @@ impl VoiceHandler {
         VoiceDispatchErrorCode::PlaybackFailed,
         "nothing is playing to favorite".into(),
       ))?;
-    self.set_favorite(uri, ItemKind::Track, true).await
+    self.set_favorite(uri, ItemKind::Track, saved).await
   }
 
   async fn set_favorite(&self, uri: String, kind: ItemKind, saved: bool) -> Routed {
@@ -510,15 +451,6 @@ impl VoiceHandler {
     Ok((VoiceDispatchTarget::Phone, None))
   }
 
-  async fn system_action(&self, action: NluSystemAction) -> Routed {
-    match action {
-      NluSystemAction::Reboot => power::reboot().await,
-      NluSystemAction::PowerOff => power::power_off().await,
-    }
-    .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?;
-    Ok((VoiceDispatchTarget::Device, None))
-  }
-
   async fn send_player(&self, msg: BridgeToGatewayPlayerMsgCommand) {
     self.handle.bluetooth.gateway_man.broadcast_command(msg).await;
   }
@@ -529,16 +461,45 @@ impl VoiceHandler {
 }
 
 fn has_catalog_slots(slots: &NluSlots) -> bool {
-  slots.artist.is_some()
-    || slots.track.is_some()
-    || slots.album.is_some()
-    || slots.playlist.is_some()
-    || slots.podcast.is_some()
-    || slots.episode.is_some()
-    || slots.mood.is_some()
+  slots.target.is_some()
     || slots.genre.is_some()
+    || slots.mood.is_some()
     || slots.era.is_some()
+    || slots.popularity_filter.is_some()
+    || slots.position.is_some()
     || slots.uri.is_some()
+    || slots.context_uri.is_some()
+}
+
+fn play_uri(slots: &NluSlots) -> Result<gateway::PlayUri, (VoiceDispatchErrorCode, String)> {
+  let uri = slots.uri.clone().ok_or((
+    VoiceDispatchErrorCode::PlaybackFailed,
+    "catalog play arrived without a resolved uri".into(),
+  ))?;
+  Ok(gateway::PlayUri {
+    uri,
+    context: slots.context_uri.clone().map(|context_uri| PlayContext { context_uri }),
+  })
+}
+
+fn skip_count(slots: &NluSlots) -> Result<u32, (VoiceDispatchErrorCode, String)> {
+  match slots.count {
+    None => Ok(1),
+    Some(n) if (2..=5).contains(&n) => Ok(n),
+    Some(n) => Err(bad(format!("NEXT count {n} is outside 2-5"))),
+  }
+}
+
+fn favorite_kind(target_type: Option<NluTargetType>) -> ItemKind {
+  match target_type {
+    Some(NluTargetType::Artist) => ItemKind::Artist,
+    Some(NluTargetType::Album) => ItemKind::Album,
+    Some(NluTargetType::Playlist) => ItemKind::Playlist,
+    Some(NluTargetType::Podcast) => ItemKind::Show,
+    Some(NluTargetType::Episode) => ItemKind::PodcastEpisode,
+    Some(NluTargetType::Station) => ItemKind::Station,
+    Some(NluTargetType::Track) | None => ItemKind::Track,
+  }
 }
 
 fn preset_slot(slots: &NluSlots) -> Result<u8, (VoiceDispatchErrorCode, String)> {
@@ -581,10 +542,45 @@ mod tests {
   }
 
   #[test]
-  fn any_entity_slot_makes_it_a_catalog_play() {
+  fn any_catalog_slot_makes_it_a_catalog_play() {
     let mut s = slots();
-    s.artist = Some("mitski".into());
+    s.target = Some("mitski".into());
     assert!(has_catalog_slots(&s));
+    let mut s = slots();
+    s.position = Some(3);
+    assert!(has_catalog_slots(&s));
+    let mut s = slots();
+    s.context_uri = Some("spotify:album:9".into());
+    assert!(has_catalog_slots(&s));
+  }
+
+  #[test]
+  fn catalog_play_carries_the_resolved_context() {
+    let mut s = slots();
+    s.uri = Some("spotify:track:1".into());
+    s.context_uri = Some("spotify:album:9".into());
+    let play = play_uri(&s).unwrap();
+    assert_eq!(play.uri, "spotify:track:1");
+    assert_eq!(
+      play.context,
+      Some(PlayContext {
+        context_uri: "spotify:album:9".into()
+      })
+    );
+  }
+
+  #[test]
+  fn catalog_play_without_a_context_stays_contextless() {
+    let mut s = slots();
+    s.uri = Some("spotify:track:1".into());
+    assert_eq!(play_uri(&s).unwrap().context, None);
+  }
+
+  #[test]
+  fn catalog_play_without_a_uri_is_rejected() {
+    let mut s = slots();
+    s.context_uri = Some("spotify:album:9".into());
+    assert!(play_uri(&s).is_err());
   }
 
   #[test]
@@ -594,5 +590,15 @@ mod tests {
     assert!(preset_slot(&s).is_err());
     s.preset = Some("3".into());
     assert_eq!(preset_slot(&s).unwrap(), 3);
+  }
+
+  #[test]
+  fn next_count_defaults_to_one_and_rejects_out_of_range() {
+    assert_eq!(skip_count(&slots()).unwrap(), 1);
+    let mut s = slots();
+    s.count = Some(4);
+    assert_eq!(skip_count(&s).unwrap(), 4);
+    s.count = Some(7);
+    assert!(skip_count(&s).is_err());
   }
 }

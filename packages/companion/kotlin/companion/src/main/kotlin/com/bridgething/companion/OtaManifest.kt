@@ -21,28 +21,22 @@ public data class OtaManifestChannel(
 )
 
 @Serializable
-public data class OtaArtifactDigest(
-    val size: Long,
-    val sha256: String,
-)
-
-@Serializable
 public data class OtaPatchDigest(
     val size: Long,
     val sha256: String,
     @SerialName("source_sha256") val sourceSha256: String? = null,
 ) {
-    public val digest: OtaArtifactDigest get() = OtaArtifactDigest(size, sha256)
+    public val digest: ArtifactDigest get() = ArtifactDigest(size, sha256)
 }
 
 @Serializable
 public data class OtaReleaseArtifacts(
-    val daemon: OtaArtifactDigest? = null,
-    @SerialName("daemon_zst") val daemonZst: OtaArtifactDigest? = null,
-    @SerialName("image_swu") val imageSwu: OtaArtifactDigest? = null,
-    @SerialName("image_zck") val imageZck: OtaArtifactDigest? = null,
-    @SerialName("image_boot_zck") val imageBootZck: OtaArtifactDigest? = null,
-    val webapps: Map<String, OtaArtifactDigest> = emptyMap(),
+    val daemon: ArtifactDigest? = null,
+    @SerialName("daemon_zst") val daemonZst: ArtifactDigest? = null,
+    @SerialName("image_swu") val imageSwu: ArtifactDigest? = null,
+    @SerialName("image_zck") val imageZck: ArtifactDigest? = null,
+    @SerialName("image_boot_zck") val imageBootZck: ArtifactDigest? = null,
+    val webapps: Map<String, ArtifactDigest> = emptyMap(),
     @SerialName("daemon_patches") val daemonPatches: Map<String, OtaPatchDigest> = emptyMap(),
 )
 

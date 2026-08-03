@@ -7,8 +7,6 @@ use ts_rs::TS;
 #[ts(export, export_to = "client.ts")]
 /// Payload for `voice.muteMic`.
 pub struct MicMute {
-  /// When true and a capture session is already in progress, let it
-  /// keep running instead of cutting it short.
   pub preserve: bool,
 }
 
@@ -17,8 +15,6 @@ pub struct MicMute {
 #[ts(export, export_to = "client.ts")]
 /// Payload for `voice.unmuteMic`.
 pub struct MicUnmute {
-  /// Accepted for symmetry with `MicMute`; the daemon ignores it on
-  /// unmute.
   pub preserve: bool,
 }
 
@@ -38,14 +34,14 @@ pub struct VoiceStateGet;
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
-/// Webapp -> daemon voice/NLU surface: mic mute control and manual
-/// capture triggering. May be unavailable on builds without the mic
-/// hardware or the NLU pipeline enabled.
+/// Webapp -> daemon voice/NLU surface: mic mute control and manual capture triggering
 pub enum ClientToBridgeVoiceMsg {
   #[bridge_command]
   Cancel,
   #[bridge_command]
   PushToTalk,
+  #[bridge_command]
+  Release,
   #[bridge_command]
   MuteMic(MicMute),
   #[bridge_command]

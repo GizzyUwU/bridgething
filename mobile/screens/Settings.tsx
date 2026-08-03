@@ -4,6 +4,7 @@ import {
   type BridgethingOtaPollConfig,
   type BridgethingProviderInfo,
   type BridgethingSessionPeer,
+  type BridgethingVoiceModelState,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -21,6 +22,7 @@ import {
   LogOut,
   MapPin,
   MessageCircle,
+  Mic,
   MoonStar,
   MoreHorizontal,
   Pencil,
@@ -476,6 +478,10 @@ export function SettingsScreen({ navigation }: Props) {
               value={flags.audioTts}
               onChange={audioTts => writeFlags({ ...flags, audioTts })}
             />
+            <VoiceModelRow
+              value={flags.voiceModel}
+              onChange={voiceModel => writeFlags({ ...flags, voiceModel })}
+            />
           </ListGroup>
         </View>
       </View>
@@ -700,6 +706,60 @@ function FlagRow({
       trailing={<Switch value={value} onValueChange={onChange} />}
     />
   );
+}
+
+function VoiceModelRow({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const model = useSession(s => s.voiceModel);
+  const status = voiceModelStatusLine(value, model);
+
+  return (
+    <>
+      <FlagRow
+        icon={Mic}
+        iconTint={value ? 'primary' : 'default'}
+        title="voice model"
+        subtitle="downloads ~127 MB over wi-fi so voice understands more than set phrases"
+        value={value}
+        onChange={onChange}
+      />
+      {status ? (
+        <Text className="px-4 pb-3.5 pl-16 text-[12px] leading-[17px] text-muted-foreground">
+          {status}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+function voiceModelStatusLine(
+  enabled: boolean,
+  model: BridgethingVoiceModelState,
+): string | null {
+  if (!enabled) return null;
+  switch (model.status) {
+    case 'downloading': {
+      const pct =
+        model.totalBytes > 0
+          ? Math.min(
+              99,
+              Math.floor((model.receivedBytes / model.totalBytes) * 100),
+            )
+          : 0;
+      return `downloading… ${pct}%`;
+    }
+    case 'ready':
+      return `installed${model.version ? ` · ${model.version}` : ''}`;
+    case 'failed':
+      return `download failed: ${model.error ?? 'unknown error'}. turn this off and back on to retry`;
+    case 'absent':
+      return 'not downloaded yet. starts on wi-fi';
+  }
 }
 
 function GeoFlagRow({

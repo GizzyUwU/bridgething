@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::future::join_all;
-use librespot_protocol::connect::Cluster;
+use librespot_protocol::{connect::Cluster, player::PlayerState as PbPlayerState};
 use serde_json::json;
 use tokio::{
   sync::{Mutex, Notify},
@@ -15,14 +15,15 @@ use tokio::{
 use crate::{
   aplogin,
   auth::{Auth, DeviceFlow, TokenStore},
-  dealer::{Dealer, DealerEvent, DealerWriter, active_device, cluster_playing, phone_device},
+  dealer::{self, Dealer, DealerEvent, DealerWriter, active_device, cluster_playing, phone_device},
   error::{Error, Result},
   http::SpHttp,
   httpx::{HttpExecutor, HttpTransport},
   model::{
-    self, AuthState, BrowseItem, BrowsePage, Device, LibraryScope, PlayerState, ProductState, Queue, RepeatMode,
-    SearchResults, Shelf, Track,
+    self, AuthState, BrowseItem, BrowsePage, Device, LibraryScope, PlayerState, ProductState, Queue, QueuePosition,
+    RepeatMode, SearchResults, Shelf, Track,
   },
+  resolver::{self, VoiceResolveRequest, VoiceResolved, VoiceResult},
   spclient::SpClient,
   transport::WsTransport,
   util::gid_to_base62,
@@ -38,6 +39,7 @@ const RECENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 const HYDRATE_CACHE_CAP: usize = 4096;
 const LIBRARY_CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(750);
 const DJ_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
+const UPCOMING_CAP: usize = 80;
 
 #[uniffi::export(callback_interface)]
 pub trait Observer: Send + Sync {
@@ -93,9 +95,15 @@ pub struct SpotifyClient {
 struct BrowseCache {
   rootlist: Option<Vec<String>>,
   collections: HashMap<String, Vec<String>>,
-  recents: Option<(tokio::time::Instant, Vec<String>)>,
+  recents: Option<(tokio::time::Instant, Recents)>,
   hydrated: HashMap<String, (u64, BrowseItem)>,
   counter: u64,
+}
+
+#[derive(Clone, Default)]
+struct Recents {
+  tracks: Vec<String>,
+  contexts: Vec<String>,
 }
 
 impl BrowseCache {
@@ -335,7 +343,7 @@ impl SpotifyClient {
     });
   }
 
-  async fn recents_uris(&self) -> Result<Vec<String>> {
+  async fn recents(&self) -> Result<Recents> {
     if let Some((at, cached)) = self.browse_cache.lock().await.recents.clone()
       && at.elapsed() < RECENTS_CACHE_TTL
     {
@@ -343,18 +351,29 @@ impl SpotifyClient {
     }
     let user = self.username().await?;
     let rp = self.spc.recently_played(&user, 50).await?;
-    let mut seen = std::collections::HashSet::new();
-    let uris: Vec<String> = rp
-      .items
-      .iter()
-      .map(|e| e.track_uri.clone())
-      .filter(|u| u.starts_with("spotify:track:") && seen.insert(u.clone()))
-      .collect();
-    self.browse_cache.lock().await.recents = Some((tokio::time::Instant::now(), uris.clone()));
-    Ok(uris)
+    let (mut seen_track, mut seen_ctx) = (HashSet::new(), HashSet::new());
+    let mut out = Recents::default();
+    for e in &rp.items {
+      if e.track_uri.starts_with("spotify:track:") && seen_track.insert(e.track_uri.clone()) {
+        out.tracks.push(e.track_uri.clone());
+      }
+      if !e.context_uri.is_empty() && seen_ctx.insert(e.context_uri.clone()) {
+        out.contexts.push(e.context_uri.clone());
+      }
+    }
+    self.browse_cache.lock().await.recents = Some((tokio::time::Instant::now(), out.clone()));
+    Ok(out)
   }
 
-  async fn playlist_uris(&self) -> Result<Vec<String>> {
+  async fn recents_uris(&self) -> Result<Vec<String>> {
+    Ok(self.recents().await?.tracks)
+  }
+
+  pub(crate) async fn recent_context_uris(&self) -> Result<Vec<String>> {
+    Ok(self.recents().await?.contexts)
+  }
+
+  pub(crate) async fn playlist_uris(&self) -> Result<Vec<String>> {
     if let Some(cached) = self.browse_cache.lock().await.rootlist.clone() {
       return Ok(cached);
     }
@@ -503,7 +522,7 @@ impl SpotifyClient {
     out
   }
 
-  async fn hydrate_uris(&self, uris: &[String]) -> Vec<BrowseItem> {
+  pub(crate) async fn hydrate_uris(&self, uris: &[String]) -> Vec<BrowseItem> {
     let map = self.hydrate_map(uris).await;
     uris
       .iter()
@@ -516,7 +535,7 @@ impl SpotifyClient {
       .collect()
   }
 
-  async fn browse_container(&self, uri: &str, limit: u32, offset: u32) -> Result<BrowsePage> {
+  pub(crate) async fn browse_container(&self, uri: &str, limit: u32, offset: u32) -> Result<BrowsePage> {
     match uri.split(':').nth(1).unwrap_or("") {
       "playlist" => {
         let id = uri.rsplit(':').next().unwrap_or("");
@@ -605,11 +624,29 @@ impl SpotifyClient {
     Ok(())
   }
 
-  async fn current_context_uri(&self) -> Option<String> {
+  pub(crate) async fn current_context_uri(&self) -> Option<String> {
     let guard = self.shared.cluster.lock().await;
     let cluster = guard.as_ref()?;
     let uri = &cluster.player_state.context_uri;
     (!uri.is_empty()).then(|| uri.clone())
+  }
+
+  pub(crate) async fn home_uris(&self) -> Vec<String> {
+    let Ok(home) = self.spc.get_home("en").await else {
+      return Vec::new();
+    };
+    home.body.sections.iter().flat_map(|s| carousel_of(s).1).collect()
+  }
+
+  pub(crate) async fn search_flat(&self, query: &str, limit: u32) -> Result<Vec<FlatItem>> {
+    let resp = self.spc.search(query, limit.max(20)).await?;
+    Ok(flatten_search(&resp))
+  }
+
+  async fn upcoming_state(&self) -> Option<PbPlayerState> {
+    let guard = self.shared.cluster.lock().await;
+    let ps = &guard.as_ref()?.player_state;
+    (!ps.next_tracks.is_empty()).then(|| (**ps).clone())
   }
 }
 
@@ -914,9 +951,38 @@ impl SpotifyClient {
     self.set_volume(target).await?;
     Ok(target)
   }
-  pub async fn queue_uri(&self, uri: &str) -> Result<()> {
-    self.writer().await?.add_to_queue(&self.target().await?, uri).await?;
-    Ok(())
+  pub async fn queue_uri(&self, uri: &str, position: QueuePosition) -> Result<()> {
+    let writer = self.writer().await?;
+    let target = self.target().await?;
+    let filtered_index = match position {
+      QueuePosition::Append => {
+        writer.add_to_queue(&target, uri).await?;
+        return Ok(());
+      }
+      QueuePosition::Next => 0,
+      QueuePosition::Index { at } => at,
+    };
+
+    let Some(state) = self.upcoming_state().await else {
+      writer.add_to_queue(&target, uri).await?;
+      return Ok(());
+    };
+    ensure_insertable(&state)?;
+    let Err(err) = splice_queue(&writer, &target, uri, filtered_index, &state).await else {
+      return Ok(());
+    };
+    tracing::warn!(error = %err, "spotify queue: positional insert refused; re-reading the cluster once");
+    let Some(fresh) = writer
+      .cluster()
+      .await
+      .ok()
+      .map(|c| (*c.player_state).clone())
+      .filter(|ps| !ps.next_tracks.is_empty())
+    else {
+      return Err(err);
+    };
+    ensure_insertable(&fresh)?;
+    splice_queue(&writer, &target, uri, filtered_index, &fresh).await
   }
   pub async fn transfer(&self, device_id: &str) -> Result<()> {
     self.writer().await?.transfer(device_id).await?;
@@ -955,28 +1021,11 @@ impl SpotifyClient {
   // ---- content ------------------------------------------------------------
 
   pub async fn search(&self, query: &str, limit: u32) -> Result<SearchResults> {
-    let resp = self.spc.search(query, limit.max(20)).await?;
-    let mut out = SearchResults::default();
-    for item in flatten_search(&resp) {
-      let bucket = match item.uri.split(':').nth(1) {
-        Some("track") => &mut out.tracks,
-        Some("album") => &mut out.albums,
-        Some("artist") => &mut out.artists,
-        Some("playlist") => &mut out.playlists,
-        _ => continue,
-      };
-      if bucket.len() < limit as usize {
-        bucket.push(BrowseItem {
-          uri: item.uri.clone(),
-          title: item.name.clone(),
-          image_id: model::cdn_image_ref(&item.image),
-          playable: true,
-          has_children: !item.uri.starts_with("spotify:track:"),
-          ..Default::default()
-        });
-      }
-    }
-    Ok(out)
+    Ok(bucket_search(self.search_flat(query, limit).await?, limit))
+  }
+
+  pub async fn resolve_voice(&self, req: VoiceResolveRequest) -> VoiceResult<VoiceResolved> {
+    resolver::resolve(self, req).await
   }
 
   pub async fn product(&self) -> Result<ProductState> {
@@ -1189,7 +1238,7 @@ fn liked_songs_item(uri: &str) -> BrowseItem {
   }
 }
 
-fn carousel_of(section: &crate::proto::custom::casita_home::Section) -> (String, Vec<String>) {
+pub(crate) fn carousel_of(section: &crate::proto::custom::casita_home::Section) -> (String, Vec<String>) {
   for car in [&section.shortcuts, &section.carousel, &section.list_carousel] {
     if let Some(c) = car.as_ref() {
       let uris: Vec<String> = c.items.inner.items.iter().map(|i| i.uri.clone()).collect();
@@ -1201,13 +1250,13 @@ fn carousel_of(section: &crate::proto::custom::casita_home::Section) -> (String,
   (String::new(), Vec::new())
 }
 
-struct FlatItem {
-  uri: String,
-  name: String,
+pub(crate) struct FlatItem {
+  pub(crate) uri: String,
+  pub(crate) name: String,
   image: String,
 }
 
-fn flatten_search(resp: &crate::proto::custom::searchview::SearchResponse) -> Vec<FlatItem> {
+pub(crate) fn flatten_search(resp: &crate::proto::custom::searchview::SearchResponse) -> Vec<FlatItem> {
   let mut out = Vec::new();
   let mut seen = std::collections::HashSet::new();
   let mut push = |uri: &str, name: &str, image: &str, out: &mut Vec<FlatItem>| {
@@ -1227,6 +1276,34 @@ fn flatten_search(resp: &crate::proto::custom::searchview::SearchResponse) -> Ve
       }
     } else if !it.uri.is_empty() {
       push(&it.uri, &it.name, &it.image, &mut out);
+    }
+  }
+  out
+}
+
+fn bucket_search(items: Vec<FlatItem>, limit: u32) -> SearchResults {
+  let mut out = SearchResults::default();
+  for item in items {
+    let kind = item.uri.split(':').nth(1);
+    let leaf = matches!(kind, Some("track" | "episode"));
+    let bucket = match kind {
+      Some("track") => &mut out.tracks,
+      Some("album") => &mut out.albums,
+      Some("artist") => &mut out.artists,
+      Some("playlist") => &mut out.playlists,
+      Some("show") => &mut out.shows,
+      Some("episode") => &mut out.episodes,
+      _ => continue,
+    };
+    if bucket.len() < limit as usize {
+      bucket.push(BrowseItem {
+        image_id: model::cdn_image_ref(&item.image),
+        uri: item.uri,
+        title: item.name,
+        playable: true,
+        has_children: !leaf,
+        ..Default::default()
+      });
     }
   }
   out
@@ -1375,6 +1452,39 @@ async fn events_loop(
   }
 }
 
+fn ensure_insertable(state: &PbPlayerState) -> Result<()> {
+  let r = &state.restrictions;
+  for reasons in [
+    &r.disallow_set_queue_reasons,
+    &r.disallow_inserting_into_next_tracks_reasons,
+  ] {
+    if !reasons.is_empty() {
+      return Err(Error::other(format!(
+        "the active device forbids positional queue inserts: {}",
+        reasons.join(", ")
+      )));
+    }
+  }
+  Ok(())
+}
+
+async fn splice_queue(
+  writer: &DealerWriter,
+  target: &str,
+  uri: &str,
+  filtered_index: u32,
+  state: &PbPlayerState,
+) -> Result<()> {
+  let mut next = state.next_tracks.clone();
+  let at = model::raw_next_index(&next, filtered_index);
+  next.insert(at, dealer::queued_track(uri));
+  next.truncate(UPCOMING_CAP.max(at + 1));
+  writer
+    .set_queue(target, &next, &state.prev_tracks, &state.queue_revision)
+    .await?;
+  Ok(())
+}
+
 struct Emitter<'a> {
   spc: &'a SpClient,
   observer: &'a Arc<dyn Observer>,
@@ -1394,7 +1504,7 @@ impl Emitter<'_> {
     let o = &ps.options;
     let r = &ps.restrictions;
     let np_sig = format!(
-      "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+      "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
       ps.track.uri,
       ps.is_paused,
       ps.position_as_of_timestamp,
@@ -1408,6 +1518,9 @@ impl Emitter<'_> {
       r.disallow_toggling_shuffle_reasons.is_empty(),
       r.disallow_toggling_repeat_context_reasons.is_empty(),
       r.disallow_toggling_repeat_track_reasons.is_empty(),
+      r.disallow_set_queue_reasons.is_empty(),
+      r.disallow_inserting_into_next_tracks_reasons.is_empty(),
+      r.disallow_add_to_queue_reasons.is_empty(),
     );
     let dev_sig = cluster
       .device
@@ -1521,7 +1634,7 @@ impl Emitter<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use std::sync::{
     Arc, Mutex as StdMutex,
     atomic::{AtomicUsize, Ordering},
@@ -1531,6 +1644,7 @@ mod tests {
     connect::{Cluster, DeviceInfo},
     devices::DeviceType,
   };
+  use protobuf::Message;
 
   use super::*;
   use crate::httpx::{HttpRequest, HttpResponse, HttpSink, HttpTransport};
@@ -1547,7 +1661,7 @@ mod tests {
     fn save_username(&self, _username: String) {}
   }
 
-  struct NullObserver;
+  pub(crate) struct NullObserver;
   impl Observer for NullObserver {
     fn on_player(&self, _state: PlayerState) {}
     fn on_queue(&self, _queue: Queue) {}
@@ -1561,6 +1675,8 @@ mod tests {
     hits: Arc<StdMutex<Vec<(String, String)>>>,
     #[allow(clippy::type_complexity)]
     resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+    set_queue_failures: Arc<AtomicUsize>,
+    cluster_bytes: Arc<StdMutex<Option<Vec<u8>>>>,
   }
   impl HttpTransport for RouteTransport {
     fn execute(&self, request: HttpRequest, sink: Arc<HttpSink>) {
@@ -1579,17 +1695,34 @@ mod tests {
       }
       let body = String::from_utf8_lossy(&request.body).into_owned();
       let resumed = body.contains("\"endpoint\":\"resume\"");
-      self.hits.lock().unwrap().push((url, body));
+      let stale_queue = body.contains("\"endpoint\":\"set_queue\"")
+        && self
+          .set_queue_failures
+          .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+          .is_ok();
+      self.hits.lock().unwrap().push((url.clone(), body));
       if resumed && let Some((shared, cluster)) = self.resume_flip.lock().unwrap().clone() {
         tokio::spawn(async move {
           *shared.cluster.lock().await = Some(cluster);
           shared.cluster_changed.notify_waiters();
         });
       }
+      if stale_queue {
+        sink.complete(HttpResponse {
+          status: 409,
+          headers: Vec::new(),
+          body: b"stale queue_revision".to_vec(),
+        });
+        return;
+      }
+      let cluster_read = url.contains("/connect-state/v1/devices/");
       sink.complete(HttpResponse {
         status: 200,
         headers: Vec::new(),
-        body: Vec::new(),
+        body: match cluster_read {
+          true => self.cluster_bytes.lock().unwrap().clone().unwrap_or_default(),
+          false => Vec::new(),
+        },
       });
     }
   }
@@ -1670,11 +1803,18 @@ mod tests {
     wake_reasons: Arc<StdMutex<Vec<WakeReason>>>,
     #[allow(clippy::type_complexity)]
     resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+    set_queue_failures: Arc<AtomicUsize>,
+    cluster_bytes: Arc<StdMutex<Option<Vec<u8>>>>,
   }
 
   impl Rig {
     async fn flip_to_on_resume(&self, cluster: Cluster) {
       *self.resume_flip.lock().unwrap() = Some((self.client.shared.clone(), cluster));
+    }
+
+    fn refuse_set_queue(&self, count: usize, refreshed: &Cluster) {
+      self.set_queue_failures.store(count, Ordering::SeqCst);
+      *self.cluster_bytes.lock().unwrap() = Some(refreshed.write_to_bytes().unwrap());
     }
   }
 
@@ -1682,6 +1822,8 @@ mod tests {
     let transport = RouteTransport::default();
     let hits = transport.hits.clone();
     let resume_flip = transport.resume_flip.clone();
+    let set_queue_failures = transport.set_queue_failures.clone();
+    let cluster_bytes = transport.cluster_bytes.clone();
     let exec = HttpExecutor::new();
     exec.set(Arc::new(transport));
     let auth = Arc::new(Auth::new(
@@ -1708,10 +1850,12 @@ mod tests {
       wake_calls,
       wake_reasons,
       resume_flip,
+      set_queue_failures,
+      cluster_bytes,
     }
   }
 
-  fn test_client(observer: Arc<dyn Observer>) -> SpotifyClient {
+  pub(crate) fn test_client(observer: Arc<dyn Observer>) -> SpotifyClient {
     let exec = HttpExecutor::new();
     let auth = Arc::new(Auth::new(
       "https://example.invalid",
@@ -2022,5 +2166,316 @@ mod tests {
       1,
       "overlapping connect resumes collapse to one run"
     );
+  }
+
+  // ---- search bucketing ----------------------------------------------------
+
+  pub(crate) fn search_item(uri: &str) -> crate::proto::custom::searchview::SearchItem {
+    let id = uri.rsplit(':').next().unwrap();
+    let mut it = crate::proto::custom::searchview::SearchItem::new();
+    it.uri = uri.to_string();
+    it.name = id.to_uppercase();
+    it.image = format!("https://i.scdn.co/image/{id}");
+    it
+  }
+
+  pub(crate) fn search_response(
+    loose: &[&str],
+    sectioned: &[&str],
+  ) -> crate::proto::custom::searchview::SearchResponse {
+    use protobuf::MessageField;
+
+    let mut resp = crate::proto::custom::searchview::SearchResponse::new();
+    resp.items.extend(loose.iter().map(|u| search_item(u)));
+    if !sectioned.is_empty() {
+      let mut section = crate::proto::custom::searchview::Section::new();
+      for uri in sectioned {
+        let mut wrapper = crate::proto::custom::searchview::EntityWrapper::new();
+        wrapper.entity = MessageField::some(search_item(uri));
+        let mut entry = crate::proto::custom::searchview::SectionEntry::new();
+        entry.item = MessageField::some(wrapper);
+        section.entries.push(entry);
+      }
+      let mut holder = crate::proto::custom::searchview::SearchItem::new();
+      holder.section = MessageField::some(section);
+      resp.items.push(holder);
+    }
+    resp
+  }
+
+  fn uris(items: &[BrowseItem]) -> Vec<&str> {
+    items.iter().map(|i| i.uri.as_str()).collect()
+  }
+
+  #[test]
+  fn search_buckets_shows_and_episodes_alongside_music() {
+    let resp = search_response(
+      &["spotify:track:t1", "spotify:album:a1", "spotify:artist:r1"],
+      &[
+        "spotify:playlist:p1",
+        "spotify:show:s1",
+        "spotify:episode:e1",
+        "spotify:user:nobody",
+      ],
+    );
+    let out = bucket_search(flatten_search(&resp), 10);
+    assert_eq!(uris(&out.tracks), ["spotify:track:t1"]);
+    assert_eq!(uris(&out.albums), ["spotify:album:a1"]);
+    assert_eq!(uris(&out.artists), ["spotify:artist:r1"]);
+    assert_eq!(uris(&out.playlists), ["spotify:playlist:p1"]);
+    assert_eq!(uris(&out.shows), ["spotify:show:s1"], "shows get their own bucket");
+    assert_eq!(
+      uris(&out.episodes),
+      ["spotify:episode:e1"],
+      "episodes get their own bucket"
+    );
+  }
+
+  #[test]
+  fn search_treats_episodes_as_leaves_and_shows_as_containers() {
+    let resp = search_response(&["spotify:show:s1", "spotify:episode:e1", "spotify:track:t1"], &[]);
+    let out = bucket_search(flatten_search(&resp), 10);
+    assert!(out.shows[0].has_children, "a show browses to its episodes");
+    assert!(!out.episodes[0].has_children, "an episode is playable, not browsable");
+    assert!(!out.tracks[0].has_children);
+    assert_eq!(out.episodes[0].image_id, "e1", "cdn urls collapse to bare image refs");
+  }
+
+  #[test]
+  fn search_caps_each_bucket_at_the_limit() {
+    let resp = search_response(
+      &[
+        "spotify:show:s1",
+        "spotify:show:s2",
+        "spotify:episode:e1",
+        "spotify:episode:e2",
+      ],
+      &[],
+    );
+    let out = bucket_search(flatten_search(&resp), 1);
+    assert_eq!(uris(&out.shows), ["spotify:show:s1"]);
+    assert_eq!(uris(&out.episodes), ["spotify:episode:e1"]);
+  }
+
+  // ---- queue positioning ---------------------------------------------------
+
+  fn queued(uri: &str) -> librespot_protocol::player::ProvidedTrack {
+    let mut t = librespot_protocol::player::ProvidedTrack::new();
+    t.uri = uri.to_string();
+    t
+  }
+
+  fn queue_cluster(next: &[&str], revision: &str) -> Cluster {
+    let mut c = cluster("phone-1", true, &[("phone-1", DeviceType::SMARTPHONE)]);
+    let ps = c.player_state.mut_or_insert_default();
+    ps.queue_revision = revision.to_string();
+    ps.next_tracks = next.iter().map(|u| queued(u)).collect();
+    ps.prev_tracks = vec![queued("spotify:track:played")];
+    c
+  }
+
+  fn commands(hits: &Hits, endpoint: &str) -> Vec<serde_json::Value> {
+    command_hits(hits)
+      .iter()
+      .filter_map(|(_, body)| serde_json::from_str::<serde_json::Value>(body).ok())
+      .map(|v| v["command"].clone())
+      .filter(|c| c["endpoint"] == endpoint)
+      .collect()
+  }
+
+  fn sent_next_uris(command: &serde_json::Value) -> Vec<String> {
+    command["next_tracks"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .map(|t| t["uri"].as_str().unwrap_or_default().to_string())
+      .collect()
+  }
+
+  #[tokio::test]
+  async fn queue_append_stays_on_the_add_to_queue_endpoint() {
+    let r = rig(Some(queue_cluster(&["spotify:track:a"], "rev-1")), None).await;
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Append)
+      .await
+      .unwrap();
+    assert_eq!(commands(&r.hits, "add_to_queue").len(), 1);
+    assert!(
+      commands(&r.hits, "set_queue").is_empty(),
+      "append never rewrites the queue"
+    );
+  }
+
+  #[tokio::test]
+  async fn queue_next_splices_at_the_head_and_echoes_the_read_revision() {
+    let r = rig(
+      Some(queue_cluster(&["spotify:track:a", "spotify:track:b"], "rev-1")),
+      None,
+    )
+    .await;
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Next)
+      .await
+      .unwrap();
+
+    let sent = commands(&r.hits, "set_queue");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+      sent_next_uris(&sent[0]),
+      ["spotify:track:new", "spotify:track:a", "spotify:track:b"],
+      "next lands at the head and nothing already upcoming is lost"
+    );
+    assert_eq!(sent[0]["queue_revision"], "rev-1");
+    assert_eq!(
+      sent[0]["prev_tracks"][0]["uri"], "spotify:track:played",
+      "history is echoed back or set_queue wipes it"
+    );
+    assert_eq!(
+      sent[0]["next_tracks"][0]["provider"], "queue",
+      "the spliced row carries the queued markers"
+    );
+    assert_eq!(sent[0]["next_tracks"][0]["metadata"]["is_queued"], "true");
+  }
+
+  #[tokio::test]
+  async fn queue_index_is_an_index_into_the_delimiter_free_list() {
+    let r = rig(
+      Some(queue_cluster(
+        &["spotify:track:a", "spotify:delimiter", "spotify:track:b"],
+        "rev-1",
+      )),
+      None,
+    )
+    .await;
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Index { at: 1 })
+      .await
+      .unwrap();
+
+    let sent = commands(&r.hits, "set_queue");
+    assert_eq!(
+      sent_next_uris(&sent[0]),
+      [
+        "spotify:track:a",
+        "spotify:delimiter",
+        "spotify:track:new",
+        "spotify:track:b"
+      ],
+      "index 1 of the list a webapp sees is raw slot 2, past the delimiter"
+    );
+  }
+
+  #[tokio::test]
+  async fn queue_splice_drops_the_tail_at_the_upcoming_cap() {
+    let full: Vec<String> = (0..UPCOMING_CAP).map(|i| format!("spotify:track:{i}")).collect();
+    let refs: Vec<&str> = full.iter().map(String::as_str).collect();
+    let r = rig(Some(queue_cluster(&refs, "rev-1")), None).await;
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Next)
+      .await
+      .unwrap();
+
+    let sent = sent_next_uris(&commands(&r.hits, "set_queue")[0]);
+    assert_eq!(sent.len(), UPCOMING_CAP, "a full window never grows");
+    assert_eq!(sent[0], "spotify:track:new");
+    assert_eq!(sent.last().unwrap(), "spotify:track:78", "the last row falls off");
+  }
+
+  #[tokio::test]
+  async fn queue_index_past_the_end_lands_at_the_tail() {
+    let r = rig(Some(queue_cluster(&["spotify:track:a"], "rev-1")), None).await;
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Index { at: 9 })
+      .await
+      .unwrap();
+
+    let sent = commands(&r.hits, "set_queue");
+    assert_eq!(
+      sent_next_uris(&sent[0]),
+      ["spotify:track:a", "spotify:track:new"],
+      "a tail insert is the one splice allowed to grow the list"
+    );
+  }
+
+  #[tokio::test]
+  async fn queue_falls_back_to_append_when_nothing_is_upcoming() {
+    for position in [QueuePosition::Next, QueuePosition::Index { at: 0 }] {
+      let r = rig(Some(queue_cluster(&[], "rev-1")), None).await;
+      r.client.queue_uri("spotify:track:new", position).await.unwrap();
+      assert_eq!(
+        commands(&r.hits, "add_to_queue").len(),
+        1,
+        "{position:?} has nothing to splice into"
+      );
+      assert!(commands(&r.hits, "set_queue").is_empty(), "{position:?}");
+    }
+  }
+
+  #[tokio::test]
+  async fn queue_positional_insert_is_refused_when_the_device_disallows_it() {
+    for reason in [
+      "disallow_set_queue_reasons",
+      "disallow_inserting_into_next_tracks_reasons",
+    ] {
+      let mut c = queue_cluster(&["spotify:track:a"], "rev-1");
+      let r = c
+        .player_state
+        .mut_or_insert_default()
+        .restrictions
+        .mut_or_insert_default();
+      match reason {
+        "disallow_set_queue_reasons" => r.disallow_set_queue_reasons.push("not_now".to_string()),
+        _ => r
+          .disallow_inserting_into_next_tracks_reasons
+          .push("not_now".to_string()),
+      }
+      let rig = rig(Some(c), None).await;
+      let err = rig
+        .client
+        .queue_uri("spotify:track:new", QueuePosition::Next)
+        .await
+        .unwrap_err();
+      assert!(err.to_string().contains("not_now"), "{reason}: {err}");
+      assert!(
+        commands(&rig.hits, "set_queue").is_empty(),
+        "{reason}: a refused insert never reaches the wire"
+      );
+      assert!(commands(&rig.hits, "add_to_queue").is_empty(), "{reason}");
+    }
+  }
+
+  #[tokio::test]
+  async fn queue_retries_once_against_a_freshly_read_revision() {
+    let r = rig(Some(queue_cluster(&["spotify:track:a"], "rev-1")), None).await;
+    r.refuse_set_queue(1, &queue_cluster(&["spotify:track:z"], "rev-2"));
+
+    r.client
+      .queue_uri("spotify:track:new", QueuePosition::Next)
+      .await
+      .unwrap();
+
+    let sent = commands(&r.hits, "set_queue");
+    assert_eq!(sent.len(), 2, "one refusal, one retry, and no more");
+    assert_eq!(sent[0]["queue_revision"], "rev-1");
+    assert_eq!(sent[1]["queue_revision"], "rev-2", "the retry re-reads the revision");
+    assert_eq!(
+      sent_next_uris(&sent[1]),
+      ["spotify:track:new", "spotify:track:z"],
+      "the retry splices into the list it just read, not the stale one"
+    );
+  }
+
+  #[tokio::test]
+  async fn queue_gives_up_after_one_retry() {
+    let r = rig(Some(queue_cluster(&["spotify:track:a"], "rev-1")), None).await;
+    r.refuse_set_queue(2, &queue_cluster(&["spotify:track:z"], "rev-2"));
+
+    let err = r
+      .client
+      .queue_uri("spotify:track:new", QueuePosition::Next)
+      .await
+      .unwrap_err();
+    assert!(err.to_string().contains("409"), "the caller sees the failure: {err}");
+    assert_eq!(commands(&r.hits, "set_queue").len(), 2, "the retry is bounded at one");
   }
 }

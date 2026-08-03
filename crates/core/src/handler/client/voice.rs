@@ -1,5 +1,6 @@
-use libbridgething::client::{
-  BridgeToClientVoiceMsg, ClientToBridgeVoiceMsgDispatch, MicMute, MicUnmute, VoiceStateReply,
+use libbridgething::{
+  client::{BridgeToClientVoiceMsg, ClientToBridgeVoiceMsgDispatch, MicMute, MicUnmute, VoiceStateReply},
+  gateway::VoiceCloseReason,
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -29,6 +30,13 @@ impl ClientToBridgeVoiceMsgDispatch for VoiceHandler {
     match self.handle.state.mic.push_to_talk().await {
       Ok(stream_id) => tracing::debug!("({}) voice.pushToTalk -> stream {stream_id}", &self.handle.from),
       Err(err) => tracing::warn!("({}) voice.pushToTalk failed: {err}", &self.handle.from),
+    }
+    Ok(())
+  }
+
+  async fn release(&self) -> HandlerResult {
+    if let Err(err) = self.handle.state.mic.stop_with(VoiceCloseReason::EndOfSpeech).await {
+      tracing::warn!("({}) voice.release failed: {err}", &self.handle.from);
     }
     Ok(())
   }

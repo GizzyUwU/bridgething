@@ -5,20 +5,17 @@ public struct NluPrediction: Sendable {
     public var intent: String
     public var slots: NluMutableSlots
     public var transcript: String
-    public var confidence: NluConfidence?
     public var alternates: [NluAlternate]?
 
     public init(
         intent: String,
         slots: NluMutableSlots = .init(),
         transcript: String,
-        confidence: NluConfidence? = nil,
         alternates: [NluAlternate]? = nil
     ) {
         self.intent = intent
         self.slots = slots
         self.transcript = transcript
-        self.confidence = confidence
         self.alternates = alternates
     }
 
@@ -27,7 +24,6 @@ public struct NluPrediction: Sendable {
             intent: intent,
             slots: slots.toWire(),
             transcript: transcript,
-            confidence: confidence,
             alternates: alternates
         )
     }
@@ -37,155 +33,144 @@ public struct NluPrediction: Sendable {
             intent: r.intent,
             slots: NluMutableSlots.fromWire(r.slots),
             transcript: r.transcript,
-            confidence: r.confidence,
             alternates: r.alternates
         )
     }
 }
 
 public struct NluMutableSlots: Equatable, Sendable {
-    public var artist: String?
-    public var track: String?
-    public var album: String?
+    public var target: String?
+    public var targetType: NluTargetType?
     public var playlist: String?
-    public var podcast: String?
-    public var episode: String?
-    public var mood: String?
     public var genre: String?
+    public var mood: String?
     public var era: String?
-    public var popularityFilter: String?
-    public var entityType: String?
-    public var query: String?
-    public var webappName: String?
-    public var preset: String?
+    public var popularityFilter: NluPopularityFilter?
+    public var position: UInt32?
+    public var count: UInt32?
+    public var scope: NluScope?
     public var enabled: Bool?
+    public var mute: Bool?
     public var repeatMode: NluRepeatMode?
     public var seconds: Int32?
     public var speed: NluPlaybackSpeed?
     public var direction: NluDirection?
-    public var amount: String?
+    public var amount: NluAmount?
     public var level: UInt32?
-    public var brightnessMode: NluBrightnessMode?
+    public var preset: String?
     public var view: NluView?
     public var phoneAction: NluPhoneAction?
-    public var systemAction: NluSystemAction?
+    public var webappName: String?
     public var uri: String?
+    public var contextUri: String?
 
     public init(
-        artist: String? = nil,
-        track: String? = nil,
-        album: String? = nil,
+        target: String? = nil,
+        targetType: NluTargetType? = nil,
         playlist: String? = nil,
-        podcast: String? = nil,
-        episode: String? = nil,
-        mood: String? = nil,
         genre: String? = nil,
+        mood: String? = nil,
         era: String? = nil,
-        popularityFilter: String? = nil,
-        entityType: String? = nil,
-        query: String? = nil,
-        webappName: String? = nil,
-        preset: String? = nil,
+        popularityFilter: NluPopularityFilter? = nil,
+        position: UInt32? = nil,
+        count: UInt32? = nil,
+        scope: NluScope? = nil,
         enabled: Bool? = nil,
+        mute: Bool? = nil,
         repeatMode: NluRepeatMode? = nil,
         seconds: Int32? = nil,
         speed: NluPlaybackSpeed? = nil,
         direction: NluDirection? = nil,
-        amount: String? = nil,
+        amount: NluAmount? = nil,
         level: UInt32? = nil,
-        brightnessMode: NluBrightnessMode? = nil,
+        preset: String? = nil,
         view: NluView? = nil,
         phoneAction: NluPhoneAction? = nil,
-        systemAction: NluSystemAction? = nil,
-        uri: String? = nil
+        webappName: String? = nil,
+        uri: String? = nil,
+        contextUri: String? = nil
     ) {
-        self.artist = artist
-        self.track = track
-        self.album = album
+        self.target = target
+        self.targetType = targetType
         self.playlist = playlist
-        self.podcast = podcast
-        self.episode = episode
-        self.mood = mood
         self.genre = genre
+        self.mood = mood
         self.era = era
         self.popularityFilter = popularityFilter
-        self.entityType = entityType
-        self.query = query
-        self.webappName = webappName
-        self.preset = preset
+        self.position = position
+        self.count = count
+        self.scope = scope
         self.enabled = enabled
+        self.mute = mute
         self.repeatMode = repeatMode
         self.seconds = seconds
         self.speed = speed
         self.direction = direction
         self.amount = amount
         self.level = level
-        self.brightnessMode = brightnessMode
+        self.preset = preset
         self.view = view
         self.phoneAction = phoneAction
-        self.systemAction = systemAction
+        self.webappName = webappName
         self.uri = uri
+        self.contextUri = contextUri
     }
 
     public func toWire() -> NluSlots {
         NluSlots(
-            artist: artist,
-            track: track,
-            album: album,
+            target: target,
+            targetType: targetType,
             playlist: playlist,
-            podcast: podcast,
-            episode: episode,
-            mood: mood,
             genre: genre,
+            mood: mood,
             era: era,
             popularityFilter: popularityFilter,
-            entityType: entityType,
-            query: query,
-            webappName: webappName,
-            preset: preset,
+            position: position,
+            count: count,
+            scope: scope,
             enabled: enabled,
+            mute: mute,
             repeatMode: repeatMode,
             seconds: seconds,
             speed: speed,
             direction: direction,
             amount: amount,
             level: level,
-            brightnessMode: brightnessMode,
+            preset: preset,
             view: view,
             phoneAction: phoneAction,
-            systemAction: systemAction,
-            uri: uri
+            webappName: webappName,
+            uri: uri,
+            contextUri: contextUri
         )
     }
 
     public static func fromWire(_ s: NluSlots) -> NluMutableSlots {
         NluMutableSlots(
-            artist: s.artist,
-            track: s.track,
-            album: s.album,
+            target: s.target,
+            targetType: s.targetType,
             playlist: s.playlist,
-            podcast: s.podcast,
-            episode: s.episode,
-            mood: s.mood,
             genre: s.genre,
+            mood: s.mood,
             era: s.era,
             popularityFilter: s.popularityFilter,
-            entityType: s.entityType,
-            query: s.query,
-            webappName: s.webappName,
-            preset: s.preset,
+            position: s.position,
+            count: s.count,
+            scope: s.scope,
             enabled: s.enabled,
+            mute: s.mute,
             repeatMode: s.repeatMode,
             seconds: s.seconds,
             speed: s.speed,
             direction: s.direction,
             amount: s.amount,
             level: s.level,
-            brightnessMode: s.brightnessMode,
+            preset: s.preset,
             view: s.view,
             phoneAction: s.phoneAction,
-            systemAction: s.systemAction,
-            uri: s.uri
+            webappName: s.webappName,
+            uri: s.uri,
+            contextUri: s.contextUri
         )
     }
 }

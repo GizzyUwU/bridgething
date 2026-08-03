@@ -2,6 +2,7 @@ import BridgethingCompanion
 import BridgethingGateway
 import BridgethingGlue
 import BridgethingLyrics
+import BridgethingNluKit
 import BridgethingSchema
 import BridgethingSession
 import CryptoKit
@@ -68,6 +69,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var otaEventsTask: Task<Void, Never>?
     private var deviceMetaTask: Task<Void, Never>?
     private var webappDocTask: Task<Void, Never>?
+    private var voiceModelTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
     private var connectTasks: [String: Task<Void, Never>] = [:]
@@ -86,6 +88,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onWebappsChanged: (@Sendable (BridgethingDeviceWebappsEntry) -> Void)?
     private var onWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
+    private var onVoiceModelStateChanged: (@Sendable (BridgethingVoiceModelState) -> Void)?
     private var onOtaRunChanged: (@Sendable (BridgethingOtaRun) -> Void)?
     private var onOtaAvailableChanged: (@Sendable (BridgethingOtaAvailable) -> Void)?
     private var onOtaPollChanged: (@Sendable (BridgethingOtaPollStatus) -> Void)?
@@ -96,11 +99,24 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public init() {
         observeAppLifecycle()
         registerReloadDetach()
+        observeVoiceModel()
     }
 
     deinit {
         let center = NotificationCenter.default
         for token in lifecycleObservers { center.removeObserver(token) }
+        voiceModelTask?.cancel()
+    }
+
+    private func observeVoiceModel() {
+        let changes = Self.nluBundleStore.stateChanges
+        voiceModelTask = Task { [weak self] in
+            for await state in changes {
+                guard let self else { return }
+                let callback = self.stateLock.withLock { self.onVoiceModelStateChanged }
+                callback?(Self.toRNVoiceModelState(state))
+            }
+        }
     }
 
     private func observeAppLifecycle() {
@@ -126,6 +142,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             foregroundGen &+= 1
             return foregroundGen
         }
+        Task { await Self.nluBundleStore.ensure() }
         Task { [weak self] in
             guard let self else { return }
             let snapshot = await self.snapshot()
@@ -156,6 +173,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             onWebappsChanged = nil
             onWebappDocChanged = nil
             onDeviceMetaChanged = nil
+            onVoiceModelStateChanged = nil
             onOtaRunChanged = nil
             onOtaAvailableChanged = nil
             onOtaPollChanged = nil
@@ -174,7 +192,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             lyricsResolver: Self.lyricsResolver,
             host: host,
             capabilities: Self.loadCompanionCapabilityFlags(),
-            voice: Self.makeVoiceDispatcher()
+            voice: await Self.makeVoiceDispatcher()
         )
         stateLock.lock(); self.companion = companion; stateLock.unlock()
 
@@ -190,6 +208,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         if localDesired { await companion.setLocalLogStreaming(true) }
 
         try await companion.start()
+
+        Task { await Self.nluBundleStore.ensure() }
 
         let events = companion.gateway.events
         let task = Task { [weak self] in
@@ -410,6 +430,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             nowPlaying: nowPlaying,
             deviceMeta: deviceMetaEntries,
             capabilityFlags: Self.loadCapabilityFlags(),
+            voiceModel: await voiceModelState(),
             otaPollConfig: Self.loadOtaPollConfig(),
             webapps: webappEntries,
             otaRuns: (ota?.retainedRuns() ?? []).map(toRNOtaRun),
@@ -698,8 +719,35 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func setCapabilityFlags(flags: BridgethingCapabilityFlags) async {
         Self.saveCapabilityFlags(flags)
+        await Self.nluBundleStore.setEnabled(flags.voiceModel)
         let companion = stateLock.withLock { self.companion }
         await companion?.setCapabilityFlags(Self.toCompanionFlags(flags))
+    }
+
+    public func voiceModelState() async -> BridgethingVoiceModelState {
+        Self.toRNVoiceModelState(await Self.nluBundleStore.state)
+    }
+
+    private static func toRNVoiceModelState(_ state: NluBundleState) -> BridgethingVoiceModelState {
+        switch state {
+        case .absent:
+            BridgethingVoiceModelState(
+                status: .absent, receivedBytes: 0, totalBytes: 0, version: nil, error: nil
+            )
+        case let .downloading(received, total):
+            BridgethingVoiceModelState(
+                status: .downloading, receivedBytes: Double(received), totalBytes: Double(total),
+                version: nil, error: nil
+            )
+        case let .ready(version):
+            BridgethingVoiceModelState(
+                status: .ready, receivedBytes: 0, totalBytes: 0, version: version, error: nil
+            )
+        case let .failed(reason):
+            BridgethingVoiceModelState(
+                status: .failed, receivedBytes: 0, totalBytes: 0, version: nil, error: reason
+            )
+        }
     }
 
     // MARK: - OTA
@@ -870,6 +918,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         static let capsNetFetch = "bridgething.caps.netFetch"
         static let capsNetWs = "bridgething.caps.netWs"
         static let capsAudioTts = "bridgething.caps.audioTts"
+        static let capsVoiceModel = "bridgething.caps.voiceModel"
         static let autoResume = "bridgething.autoresume"
         static let otaConfigured = "bridgething.ota.configured"
         static let otaInterval = "bridgething.ota.intervalSeconds"
@@ -882,7 +931,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private static func loadCapabilityFlags() -> BridgethingCapabilityFlags {
         guard defaults.bool(forKey: PrefKey.capsConfigured) else {
             return BridgethingCapabilityFlags(
-                geo: true, notifications: true, netFetch: true, netWs: true, audioTts: true
+                geo: true, notifications: true, netFetch: true, netWs: true, audioTts: true,
+                voiceModel: true
             )
         }
         return BridgethingCapabilityFlags(
@@ -890,7 +940,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             notifications: defaults.bool(forKey: PrefKey.capsNotifications),
             netFetch: defaults.bool(forKey: PrefKey.capsNetFetch),
             netWs: defaults.bool(forKey: PrefKey.capsNetWs),
-            audioTts: defaults.bool(forKey: PrefKey.capsAudioTts)
+            audioTts: defaults.bool(forKey: PrefKey.capsAudioTts),
+            voiceModel: defaults.bool(forKey: PrefKey.capsVoiceModel)
         )
     }
 
@@ -901,22 +952,38 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         defaults.set(f.netFetch, forKey: PrefKey.capsNetFetch)
         defaults.set(f.netWs, forKey: PrefKey.capsNetWs)
         defaults.set(f.audioTts, forKey: PrefKey.capsAudioTts)
+        defaults.set(f.voiceModel, forKey: PrefKey.capsVoiceModel)
     }
 
     private static func loadCompanionCapabilityFlags() -> CompanionCapabilityFlags {
         toCompanionFlags(loadCapabilityFlags())
     }
 
-    /// No intent model ships yet, so the deterministic fast path is the whole
-    /// resolver and catalog lookups have nothing to decorate.
-    private static func makeVoiceDispatcher() -> (any VoiceCapturing)? {
+    private static let nluBundleStore = NluBundleStore(
+        enabled: loadCapabilityFlags().voiceModel
+    ) { dir in
+        _ = try NluBundleInference.load(bundleDir: dir)
+    }
+
+    private static func makeVoiceDispatcher() async -> (any VoiceCapturing)? {
         guard #available(iOS 26.0, *) else { return nil }
-        return VoiceDispatcher(recognizer: NluSpeechRecognizer(), controller: VoiceController())
+        return VoiceDispatcher(recognizer: NluSpeechRecognizer(), controller: await makeVoiceController())
+    }
+
+    private static func makeVoiceController() async -> VoiceController {
+        guard let bundle = await nluBundleStore.liveBundle,
+              let inference = try? NluBundleInference.load(bundleDir: bundle, deferModel: true)
+        else { return VoiceController() }
+        return VoiceController(
+            client: inference,
+            config: .init(useFastPath: true, rejection: inference.rejection ?? .init())
+        )
     }
 
     private static func toCompanionFlags(_ f: BridgethingCapabilityFlags) -> CompanionCapabilityFlags {
         CompanionCapabilityFlags(
-            geo: f.geo, notifications: f.notifications, netFetch: f.netFetch, netWs: f.netWs, audioTts: f.audioTts
+            geo: f.geo, notifications: f.notifications, netFetch: f.netFetch, netWs: f.netWs,
+            audioTts: f.audioTts, voiceModel: f.voiceModel
         )
     }
 
@@ -1018,6 +1085,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void) {
         stateLock.withLock { onDeviceMetaChanged = callback }
+    }
+
+    public func setOnVoiceModelStateChanged(_ callback: @escaping @Sendable (BridgethingVoiceModelState) -> Void) {
+        stateLock.withLock { onVoiceModelStateChanged = callback }
     }
 
 

@@ -45,10 +45,12 @@ class AndroidNotificationBackendTest {
     }
 
     @Test
-    fun invokeWithNoResolvedActionIsNoOp() = runBlocking {
-        val backend = AndroidNotificationBackend(resolveAction = { _, _ -> null })
-        backend.invokePositive("missing")
-        backend.invokeNegative("missing")
+    fun invokeWithNoResolvedActionIsNoOp() {
+        runBlocking {
+            val backend = AndroidNotificationBackend(resolveAction = { _, _ -> null })
+            backend.invokePositive("missing")
+            backend.invokeNegative("missing")
+        }
     }
 
     private companion object {

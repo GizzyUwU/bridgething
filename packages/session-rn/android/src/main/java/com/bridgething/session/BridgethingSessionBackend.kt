@@ -23,6 +23,7 @@ import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
+import com.margelo.nitro.bridgething.session.BridgethingVoiceModelState
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappSlot
@@ -70,6 +71,8 @@ public interface BridgethingSessionBackend {
     public suspend fun deleteWebappDoc(deviceId: String, id: String, key: String)
 
     public suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags)
+
+    public suspend fun voiceModelState(): BridgethingVoiceModelState
 
     public suspend fun setDeviceAutoResume(deviceId: String, enabled: Boolean)
     public suspend fun isDeviceAutoResumeEnabled(deviceId: String): Boolean
@@ -123,6 +126,7 @@ public interface BridgethingSessionBackend {
     public fun setOnWebappsChanged(callback: (BridgethingDeviceWebappsEntry) -> Unit)
     public fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
+    public fun setOnVoiceModelStateChanged(callback: (BridgethingVoiceModelState) -> Unit)
     public fun setOnOtaRunChanged(callback: (BridgethingOtaRun) -> Unit)
 
     public fun setOnOtaAvailableChanged(callback: (BridgethingOtaAvailable) -> Unit)

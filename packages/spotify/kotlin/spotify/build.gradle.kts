@@ -37,6 +37,7 @@ kotlin {
 
 dependencies {
   api(project(":packages:glue:kotlin:glue"))
+  api(project(":packages:companion:kotlin:companion"))
   api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
   api("net.java.dev.jna:jna:5.17.0@aar")
   api("io.ktor:ktor-client-core:3.0.0")

@@ -5,6 +5,7 @@ import {
   type BridgethingNowPlaying,
   type BridgethingProviderInfo,
   type BridgethingSessionPeer,
+  type BridgethingVoiceModelState,
 } from '@bridgething/session-react-native';
 import { Alert, Platform } from 'react-native';
 import { create } from 'zustand';
@@ -46,7 +47,14 @@ export type SessionState = {
   hostInfo: BridgethingHostInfo | null;
   ledger: Record<string, DeviceLedgerEntry>;
   capabilityFlags: typeof DEFAULT_CAPABILITY_FLAGS;
+  voiceModel: BridgethingVoiceModelState;
   otaPollConfig: typeof DEFAULT_OTA_POLL_CONFIG | null;
+};
+
+const VOICE_MODEL_ABSENT: BridgethingVoiceModelState = {
+  status: 'absent',
+  receivedBytes: 0,
+  totalBytes: 0,
 };
 
 const initial: SessionState = {
@@ -62,6 +70,7 @@ const initial: SessionState = {
   hostInfo: null,
   ledger: getLedger(),
   capabilityFlags: { ...DEFAULT_CAPABILITY_FLAGS },
+  voiceModel: VOICE_MODEL_ABSENT,
   otaPollConfig: null,
 };
 
@@ -111,6 +120,9 @@ export function registerSessionDomain(): void {
         case 'nowPlayingChanged':
           set({ nowPlaying: event.nowPlaying });
           return;
+        case 'voiceModelStateChanged':
+          set({ voiceModel: event.state });
+          return;
         case 'deviceMetaChanged':
           set(s => ({
             deviceMeta: { ...s.deviceMeta, [event.deviceId]: event.meta },
@@ -159,6 +171,7 @@ export function registerSessionDomain(): void {
         ),
         hostInfo: snapshot.hostInfo,
         capabilityFlags: snapshot.capabilityFlags,
+        voiceModel: snapshot.voiceModel,
         otaPollConfig: snapshot.otaPollConfig ?? null,
         ledger,
       });

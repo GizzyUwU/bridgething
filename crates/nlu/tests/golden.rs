@@ -1,0 +1,92 @@
+use std::{collections::BTreeMap, path::PathBuf};
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Fixture {
+  utterance: String,
+  input_ids: Vec<i32>,
+  attention_mask: Vec<i32>,
+  offset_starts: Vec<u32>,
+  offset_ends: Vec<u32>,
+  intent_logits: Vec<f32>,
+  bio_logits: Vec<f32>,
+  closed_logits: Vec<Vec<f32>>,
+  expected: Expected,
+}
+
+#[derive(Deserialize)]
+struct Expected {
+  intent: String,
+  slots: BTreeMap<String, String>,
+}
+
+fn bundle() -> Option<PathBuf> {
+  std::env::var("BRIDGETHING_NLU_BUNDLE").ok().map(PathBuf::from)
+}
+
+fn fixtures(dir: &PathBuf) -> Vec<Fixture> {
+  std::fs::read_to_string(dir.join("fixtures.jsonl"))
+    .expect("fixtures.jsonl in bundle dir")
+    .lines()
+    .filter(|l| !l.trim().is_empty())
+    .map(|l| serde_json::from_str(l).expect("fixture row parses"))
+    .collect()
+}
+
+#[test]
+fn tokenization_matches_the_training_side() {
+  let Some(dir) = bundle() else {
+    eprintln!("BRIDGETHING_NLU_BUNDLE unset; skipping");
+    return;
+  };
+  let decoder = nlu::NluDecoder::load(dir.to_string_lossy().into()).expect("bundle loads");
+  for fixture in fixtures(&dir) {
+    let tokens = decoder.tokenize(fixture.utterance.clone()).expect("tokenizes");
+    assert_eq!(tokens.input_ids, fixture.input_ids, "ids for {:?}", fixture.utterance);
+    assert_eq!(
+      tokens.attention_mask, fixture.attention_mask,
+      "mask for {:?}",
+      fixture.utterance
+    );
+    assert_eq!(
+      tokens.offset_starts, fixture.offset_starts,
+      "offset starts for {:?}",
+      fixture.utterance
+    );
+    assert_eq!(
+      tokens.offset_ends, fixture.offset_ends,
+      "offset ends for {:?}",
+      fixture.utterance
+    );
+  }
+}
+
+#[test]
+fn decode_matches_the_trainers_own_frames() {
+  let Some(dir) = bundle() else {
+    eprintln!("BRIDGETHING_NLU_BUNDLE unset; skipping");
+    return;
+  };
+  let decoder = nlu::NluDecoder::load(dir.to_string_lossy().into()).expect("bundle loads");
+  for fixture in fixtures(&dir) {
+    let tokens = decoder.tokenize(fixture.utterance.clone()).expect("tokenizes");
+    let frame = decoder
+      .decode(
+        fixture.utterance.clone(),
+        tokens,
+        fixture.intent_logits.clone(),
+        fixture.bio_logits.clone(),
+        fixture.closed_logits.clone(),
+      )
+      .expect("decodes");
+    assert_eq!(
+      frame.intent, fixture.expected.intent,
+      "intent for {:?}",
+      fixture.utterance
+    );
+    let got: BTreeMap<String, String> = frame.slots.into_iter().map(|s| (s.name, s.value)).collect();
+    assert_eq!(got, fixture.expected.slots, "slots for {:?}", fixture.utterance);
+  }
+}

@@ -48,6 +48,8 @@ import com.margelo.nitro.bridgething.session.BridgethingRepeatMode
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealthKind
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
+import com.margelo.nitro.bridgething.session.BridgethingVoiceModelState
+import com.margelo.nitro.bridgething.session.BridgethingVoiceModelStatus
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappSlot
@@ -61,6 +63,7 @@ import com.bridgething.companion.CompanionCapabilityFlags
 import com.bridgething.companion.CompanionLogLevel
 import com.bridgething.companion.DeviceLogRing
 import com.bridgething.companion.HostInfo
+import com.bridgething.companion.ModelBundleState
 import com.bridgething.companion.OtaCompositeVersion
 import com.bridgething.companion.OtaDiscoverManifest
 import com.bridgething.companion.OtaPhaseSnapshot
@@ -155,11 +158,17 @@ public class HybridBridgethingSessionImpl(
         )
         public var lyricsResolver: LyricsResolver = LrclibResolver()
 
+        private const val PREFS_NAME = "bridgething.session"
+        private const val VOICE_MODEL_KEY = "caps.voiceModel"
         private const val WEBAPPS_READ_ATTEMPTS = 3
         private const val REQUEST_DIALER_ROLE = 0xBA02
         private const val AUTO_RESUME_PREFIX = "autoresume."
         private const val CONNECTED_PROVIDERS_KEY = "connectedProviders"
         private const val PROVIDER_PRIORITY_KEY = "providerPriority"
+
+        internal fun voiceModelEnabled(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(VOICE_MODEL_KEY, true)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -217,18 +226,31 @@ public class HybridBridgethingSessionImpl(
     private var onDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
 
     @Volatile
+    private var onVoiceModelStateChanged: ((BridgethingVoiceModelState) -> Unit)? = null
+
+    @Volatile
     private var onOtaRunChanged: ((BridgethingOtaRun) -> Unit)? = null
     private var onOtaAvailableChanged: ((BridgethingOtaAvailable) -> Unit)? = null
     private var onOtaPollChanged: ((BridgethingOtaPollStatus) -> Unit)? = null
     private var onResumed: ((BridgethingSessionSnapshot) -> Unit)? = null
 
     private val prefs by lazy {
-        context.applicationContext.getSharedPreferences("bridgething.session", Context.MODE_PRIVATE)
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     @Volatile
     private var logStreamingDesired: Boolean = false
     private var localLogStreamingDesired: Boolean = false
+
+    init {
+        scope.launch {
+            VoiceModels.states(context).collect { state ->
+                safeEmit {
+                    if (CompanionHolder.foreground) onVoiceModelStateChanged?.invoke(toRnVoiceModelState(state))
+                }
+            }
+        }
+    }
 
     override suspend fun start() {
         val c = CompanionHolder.ensureStarted(context)
@@ -263,6 +285,7 @@ public class HybridBridgethingSessionImpl(
             }
         }
 
+        scope.launch { VoiceModels.ensure(context) }
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
         runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
         runCatching { applyDeviceAutoResume() }
@@ -436,6 +459,7 @@ public class HybridBridgethingSessionImpl(
             nowPlaying = lastNowPlaying,
             deviceMeta = deviceMetaEntries.toTypedArray(),
             capabilityFlags = loadCapabilityFlags(),
+            voiceModel = voiceModelState(),
             otaPollConfig = loadOtaPollConfig(),
             webapps = webappEntries.toTypedArray(),
             otaRuns = (c?.ota?.retainedRuns() ?: emptyList()).map { toRnOtaRun(it) }.toTypedArray(),
@@ -650,6 +674,7 @@ public class HybridBridgethingSessionImpl(
     }
 
     private suspend fun applyCapabilityFlags(flags: BridgethingCapabilityFlags) {
+        VoiceModels.setEnabled(context, flags.voiceModel)
         stateLock.withLock { companion }?.setCapabilityFlags(
             CompanionCapabilityFlags(
                 geo = flags.geo,
@@ -657,7 +682,42 @@ public class HybridBridgethingSessionImpl(
                 netFetch = flags.netFetch,
                 netWs = flags.netWs,
                 audioTts = flags.audioTts,
+                voiceModel = flags.voiceModel,
             )
+        )
+    }
+
+    override suspend fun voiceModelState(): BridgethingVoiceModelState =
+        toRnVoiceModelState(VoiceModels.state(context))
+
+    private fun toRnVoiceModelState(state: ModelBundleState): BridgethingVoiceModelState = when (state) {
+        is ModelBundleState.Absent -> BridgethingVoiceModelState(
+            status = BridgethingVoiceModelStatus.ABSENT,
+            receivedBytes = 0.0,
+            totalBytes = 0.0,
+            version = null,
+            error = null,
+        )
+        is ModelBundleState.Downloading -> BridgethingVoiceModelState(
+            status = BridgethingVoiceModelStatus.DOWNLOADING,
+            receivedBytes = state.received.toDouble(),
+            totalBytes = state.total.toDouble(),
+            version = null,
+            error = null,
+        )
+        is ModelBundleState.Ready -> BridgethingVoiceModelState(
+            status = BridgethingVoiceModelStatus.READY,
+            receivedBytes = 0.0,
+            totalBytes = 0.0,
+            version = state.version,
+            error = null,
+        )
+        is ModelBundleState.Failed -> BridgethingVoiceModelState(
+            status = BridgethingVoiceModelStatus.FAILED,
+            receivedBytes = 0.0,
+            totalBytes = 0.0,
+            version = null,
+            error = state.reason,
         )
     }
 
@@ -818,6 +878,7 @@ public class HybridBridgethingSessionImpl(
         if (!prefs.getBoolean("caps.configured", false)) {
             return BridgethingCapabilityFlags(
                 geo = true, notifications = true, netFetch = true, netWs = true, audioTts = true,
+                voiceModel = true,
             )
         }
         return BridgethingCapabilityFlags(
@@ -826,6 +887,7 @@ public class HybridBridgethingSessionImpl(
             netFetch = prefs.getBoolean("caps.netFetch", true),
             netWs = prefs.getBoolean("caps.netWs", true),
             audioTts = prefs.getBoolean("caps.audioTts", true),
+            voiceModel = prefs.getBoolean(VOICE_MODEL_KEY, true),
         )
     }
 
@@ -837,6 +899,7 @@ public class HybridBridgethingSessionImpl(
             .putBoolean("caps.netFetch", f.netFetch)
             .putBoolean("caps.netWs", f.netWs)
             .putBoolean("caps.audioTts", f.audioTts)
+            .putBoolean(VOICE_MODEL_KEY, f.voiceModel)
             .apply()
     }
 
@@ -1006,6 +1069,7 @@ public class HybridBridgethingSessionImpl(
     override fun setOnWebappsChanged(callback: (BridgethingDeviceWebappsEntry) -> Unit) { onWebappsChanged = callback }
     override fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit) { onWebappDocChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
+    override fun setOnVoiceModelStateChanged(callback: (BridgethingVoiceModelState) -> Unit) { onVoiceModelStateChanged = callback }
     override fun setOnOtaRunChanged(callback: (BridgethingOtaRun) -> Unit) { onOtaRunChanged = callback }
 
     override fun setOnOtaAvailableChanged(callback: (BridgethingOtaAvailable) -> Unit) { onOtaAvailableChanged = callback }
@@ -1059,6 +1123,7 @@ public class HybridBridgethingSessionImpl(
 
     public fun resumeForeground() {
         val gen = foregroundGen.incrementAndGet()
+        scope.launch { VoiceModels.ensure(context) }
         scope.launch {
             val snap = snapshot()
             if (foregroundGen.get() != gen) return@launch

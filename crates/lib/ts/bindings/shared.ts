@@ -35,8 +35,7 @@ export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized
 /**
  * Art render sizes a webapp declares so the companion warms exactly the
  * pixels it renders: hero (now-playing / detail views) and thumb (queue /
- * grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
- * which is also the stock webapp's profile.
+ * grid). Omitted in a manifest falls back to the canonical `{248, 96}`
  */
 export type ArtProfile = { heroPx: number; thumbPx: number };
 
@@ -73,9 +72,7 @@ export type AudioError =
 export type BoolField = { key: string; label: string; default: boolean | null };
 
 /**
- * Bridge-side identity announce. Daemon sends one of these to every
- * gateway on connect so the companion knows what daemon it's talking to
- * and can opt out of unsupported surfaces.
+ * Bridge-side identity announce
  */
 export type BridgeThingMeta = {
   bridgethingVersion: string;
@@ -531,9 +528,7 @@ export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
 
 export type NluAlternate = { intent: string; slots: NluSlots | null };
 
-export type NluBrightnessMode = 'auto' | 'manual';
-
-export type NluConfidence = { intent: string; slots: string | null };
+export type NluAmount = 'small' | 'medium' | 'large';
 
 export type NluDirection = 'up' | 'down';
 
@@ -541,54 +536,62 @@ export type NluPhoneAction = 'answer' | 'decline' | 'end' | 'hold' | 'unhold' | 
 
 export type NluPlaybackSpeed = '1' | '1.2' | '1.5' | '2';
 
+export type NluPopularityFilter = 'top5' | 'top10' | 'popular' | 'recent' | 'new' | 'random';
+
 export type NluRepeatMode = 'off' | 'all' | 'one';
 
 export type NluResolvedIntent = {
   intent: string;
   slots: NluSlots;
   transcript: string;
-  confidence: NluConfidence | null;
   alternates: Array<NluAlternate> | null;
 };
 
+export type NluScope = 'previousTrack' | 'restart';
+
 export type NluSlots = {
-  artist: string | null;
-  track: string | null;
-  album: string | null;
+  target: string | null;
+  targetType: NluTargetType | null;
   playlist: string | null;
-  podcast: string | null;
-  episode: string | null;
-  mood: string | null;
   genre: string | null;
+  mood: string | null;
   era: string | null;
-  popularityFilter: string | null;
-  entityType: string | null;
-  query: string | null;
-  webappName: string | null;
-  preset: string | null;
+  popularityFilter: NluPopularityFilter | null;
+  position: number | null;
+  count: number | null;
+  scope: NluScope | null;
   enabled: boolean | null;
+  mute: boolean | null;
   repeatMode: NluRepeatMode | null;
   seconds: number | null;
   speed: NluPlaybackSpeed | null;
   direction: NluDirection | null;
-  amount: string | null;
+  amount: NluAmount | null;
   level: number | null;
-  brightnessMode: NluBrightnessMode | null;
+  preset: string | null;
   view: NluView | null;
   phoneAction: NluPhoneAction | null;
-  systemAction: NluSystemAction | null;
+  webappName: string | null;
   uri: string | null;
+  contextUri: string | null;
 };
 
-/**
- * Which arm of the companion's resolver produced an intent. Carried so a
- * surface can tell a deterministic match from a model prediction.
- */
 export type NluStage = 'fastPath' | 'model' | 'rejectedNoIntent' | 'rejectedClarify' | 'noModel';
 
-export type NluSystemAction = 'reboot' | 'powerOff';
+export type NluTargetType = 'artist' | 'track' | 'album' | 'playlist' | 'podcast' | 'episode' | 'station';
 
-export type NluView = 'library' | 'presets' | 'songs' | 'savedEpisodes' | 'newEpisodes' | 'queue' | 'thisArtist';
+export type NluView =
+  | 'nowPlaying'
+  | 'artist'
+  | 'album'
+  | 'playlist'
+  | 'playlists'
+  | 'library'
+  | 'songs'
+  | 'presets'
+  | 'queue'
+  | 'savedEpisodes'
+  | 'newEpisodes';
 
 /**
  * One notification surfaced from the connected companion's notification
@@ -675,8 +678,7 @@ export type NumberField = {
 export type OtaError = { code: OtaErrorCode; msg: string };
 
 /**
- * Terminal error from the OTA orchestrator. After an `OtaError` the
- * orchestrator is back to idle and a fresh `OtaBegin` may be sent.
+ * Terminal error from the OTA orchestrator
  */
 export type OtaErrorCode =
   | 'unknownUpdate'
@@ -694,50 +696,18 @@ export type OtaErrorCode =
 export type OtaFinished = { kind: OtaKind; updateId: string };
 
 /**
- * What the streamed bytes are going to be applied as.
- *
- * `Image` streams a `.swu` through libswupdate + slot flip + reboot.
- * `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
- * the bandaid bind-mount, restarts the service. `BuiltinWebapp`
- * streams a zip bundle of hub or stock, validates the manifest id is
- * one of the reserved built-ins, atomic-rotates the bundle dir on the
- * bandaid bind-mount, restarts the service. `InstalledWebapp` streams
- * a zip bundle of a third-party (non-reserved) webapp and installs it
- * into the writable registry; it neither stages on the bandaid nor
- * restarts, and is never part of an `OtaActivate` batch.
- *
- * Companions key reboot expectations off this: image means the device
- * power-cycles; daemon and builtin-webapp mean the daemon process
- * restarts and the gateway link drops and reconnects; installed-webapp
- * and wakeword-model apply in place with no restart.
+ * What the streamed bytes are going to be applied as
  */
 export type OtaKind = 'image' | 'daemon' | 'builtinWebapp' | 'installedWebapp' | 'wakewordModel';
 
 /**
  * Stage of the OTA orchestrator. The phase set is shared between
- * kinds, with non-image kinds emitting a subset.
- *
- * Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
- * -> `Confirming` (try-counter reset) -> `Reboot`.
- *
- * Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
- * where `Writing`/100 means the piece is validated and staged on the
- * bandaid (not yet live). The atomic rotate and the single `systemctl
- * restart` happen later, on `OtaActivate`, which emits the terminal
- * `Reboot` for the whole batch. `Confirming` is image-only.
- *
- * InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
- * bundle installs into the writable registry. There is no `Writing`/100,
- * no `Confirming`, and no `Reboot`; the terminal signal is the
- * `WebappInstalled` event (or an `OtaError`).
+ * kinds, with non-image kinds emitting a subset
  */
 export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
 
 /**
- * Per-phase progress tick. `percent` is 0-100 within the current
- * libswupdate step, which resets at each step boundary, so it is not a
- * monotonic overall metric on its own. `eta_ms` is best-effort remaining
- * time for the phase when the orchestrator can compute it.
+ * Per-phase progress tick
  */
 export type OtaProgress = {
   phase: OtaPhase;
@@ -1089,24 +1059,18 @@ export type QueueItem = {
 
 /**
  * Where in the queue a `queue({ uri })` should land. `Append` (default)
- * goes at the end; `Next` is play-next; `Index` is an explicit position.
+ * goes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot
+ * in the upcoming list.
  */
 export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'index'; data: number };
 
 /**
- * Resolved range the companion is about to serve. `start` and `length`
- * echo the corresponding `RangeSpec`; the bytes follow in the reply's
- * `TransferBody`.
+ * Resolved range the companion is about to serve
  */
 export type RangePart = { start: number; length: number };
 
 /**
- * Half-open byte range the daemon's range proxy asks the companion
- * to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
- * inclusive, `length` bytes. The proxy caps the multi-range count at
- * the daemon edge (loopback) - companions see whatever swupdate's
- * delta downloader emits. Offsets are u32 because OTA artifacts are
- * bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
+ * Half-open byte range the daemon's range proxy asks the companion to serve
  */
 export type RangeSpec = { start: number; length: number };
 
@@ -1289,9 +1253,6 @@ export type TunnelError =
   | { type: 'permissionDenied' }
   | { type: 'unavailable' };
 
-/**
- * What opened a capture session.
- */
 export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
 
 /**
@@ -1309,8 +1270,7 @@ export type VoiceDispatchErrorCode =
   | 'internal';
 
 /**
- * Where the daemon actually routed a successful dispatch. Carried back
- * to the companion so it can render the right confirmation UI.
+ * Where the daemon actually routed a successful dispatch
  */
 export type VoiceDispatchTarget = 'playback' | 'device' | 'phone' | 'display' | 'webappSwitch';
 

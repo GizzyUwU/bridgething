@@ -1,0 +1,299 @@
+use std::time::Duration;
+
+use earshot::Detector;
+
+pub const FRAME_SAMPLES: usize = 256;
+pub const SAMPLE_RATE_HZ: f64 = 16_000.0;
+
+const FRAME: Duration = Duration::from_nanos((FRAME_SAMPLES as f64 / SAMPLE_RATE_HZ * 1e9) as u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnEnd {
+  SilenceAfterSpeech,
+  NoOnset,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+  pub threshold: f32,
+  pub onset: Duration,
+  pub min_speech: Duration,
+  pub hangover: Duration,
+}
+
+impl Default for Config {
+  fn default() -> Self {
+    Self {
+      threshold: 0.6,
+      onset: Duration::from_millis(3000),
+      min_speech: Duration::from_millis(160),
+      hangover: Duration::from_millis(1200),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+  Armed,
+  Speaking,
+  Closed,
+}
+
+pub struct VoiceEndpointer {
+  config: Config,
+  detector: Box<Detector>,
+  pending: Vec<f32>,
+  scratch: [f32; FRAME_SAMPLES],
+  phase: Phase,
+  speech_seen: bool,
+  armed_frames: usize,
+  voiced_run: usize,
+  quiet_run: usize,
+  onset_frames: usize,
+  min_speech_frames: usize,
+  hangover_frames: usize,
+}
+
+impl VoiceEndpointer {
+  pub fn new(config: Config) -> Self {
+    Self {
+      detector: Detector::default_boxed(),
+      pending: Vec::with_capacity(FRAME_SAMPLES * 2),
+      scratch: [0.0; FRAME_SAMPLES],
+      phase: Phase::Armed,
+      speech_seen: false,
+      armed_frames: 0,
+      voiced_run: 0,
+      quiet_run: 0,
+      onset_frames: frames_in(config.onset),
+      min_speech_frames: frames_in(config.min_speech).max(1),
+      hangover_frames: frames_in(config.hangover).max(1),
+      config,
+    }
+  }
+
+  pub fn speech_seen(&self) -> bool {
+    self.speech_seen
+  }
+
+  pub fn observe(&mut self, samples: &[f32]) -> Option<TurnEnd> {
+    if self.phase == Phase::Closed {
+      return None;
+    }
+    let mut verdict = None;
+    self.pending.extend_from_slice(samples);
+    let mut consumed = 0;
+    while verdict.is_none() && consumed + FRAME_SAMPLES <= self.pending.len() {
+      self
+        .scratch
+        .copy_from_slice(&self.pending[consumed..consumed + FRAME_SAMPLES]);
+      consumed += FRAME_SAMPLES;
+      let voiced = self.score_frame() >= self.config.threshold;
+      verdict = self.advance(voiced);
+    }
+    self.pending.drain(..consumed);
+    verdict
+  }
+
+  fn score_frame(&mut self) -> f32 {
+    for sample in &mut self.scratch {
+      *sample = sample.clamp(-1.0, 1.0);
+    }
+    self.detector.predict_f32(&self.scratch)
+  }
+
+  fn advance(&mut self, voiced: bool) -> Option<TurnEnd> {
+    match self.phase {
+      Phase::Armed => {
+        self.armed_frames += 1;
+        self.voiced_run = if voiced { self.voiced_run + 1 } else { 0 };
+        if self.voiced_run >= self.min_speech_frames {
+          self.phase = Phase::Speaking;
+          self.speech_seen = true;
+          self.quiet_run = 0;
+          return None;
+        }
+        if self.armed_frames >= self.onset_frames && self.voiced_run == 0 {
+          self.phase = Phase::Closed;
+          return Some(TurnEnd::NoOnset);
+        }
+        None
+      }
+      Phase::Speaking => {
+        self.quiet_run = if voiced { 0 } else { self.quiet_run + 1 };
+        if self.quiet_run >= self.hangover_frames {
+          self.phase = Phase::Closed;
+          return Some(TurnEnd::SilenceAfterSpeech);
+        }
+        None
+      }
+      Phase::Closed => None,
+    }
+  }
+}
+
+fn frames_in(duration: Duration) -> usize {
+  duration.div_duration_f64(FRAME).ceil() as usize
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  const TEST_THRESHOLD: f32 = 0.45;
+
+  fn config() -> Config {
+    Config {
+      threshold: TEST_THRESHOLD,
+      onset: Duration::from_millis(500),
+      min_speech: Duration::from_millis(112),
+      hangover: Duration::from_millis(160),
+    }
+  }
+
+  fn voiced_frames(count: usize) -> Vec<f32> {
+    const F0_HZ: f64 = 120.0;
+    const FORMANTS: [(f64, f64); 3] = [(500.0, 1.0), (1500.0, 0.6), (2600.0, 0.35)];
+    let mut out = Vec::with_capacity(count * FRAME_SAMPLES);
+    for n in 0..count * FRAME_SAMPLES {
+      let t = n as f64 / SAMPLE_RATE_HZ;
+      let mut value = 0.0;
+      for (centre, gain) in FORMANTS {
+        for harmonic in 1..=40 {
+          let hz = F0_HZ * harmonic as f64;
+          value += gain * (-((hz - centre) / 260.0).powi(2)).exp() * (std::f64::consts::TAU * hz * t).sin();
+        }
+      }
+      let syllables = (std::f64::consts::TAU * 4.0 * t).sin().mul_add(0.4, 0.6);
+      out.push((value * syllables * 0.2) as f32);
+    }
+    out
+  }
+
+  fn quiet_frames(count: usize) -> Vec<f32> {
+    vec![0.0; count * FRAME_SAMPLES]
+  }
+
+  fn scores(samples: &[f32]) -> (f32, f32) {
+    let mut endpointer = VoiceEndpointer::new(config());
+    let (mut low, mut high) = (f32::MAX, f32::MIN);
+    for frame in samples.chunks_exact(FRAME_SAMPLES) {
+      endpointer.scratch.copy_from_slice(frame);
+      let score = endpointer.score_frame();
+      low = low.min(score);
+      high = high.max(score);
+    }
+    (low, high)
+  }
+
+  #[test]
+  fn the_fixtures_straddle_the_test_threshold() {
+    let (quietest_voice, _) = scores(&voiced_frames(300));
+    let (_, loudest_quiet) = scores(&quiet_frames(300));
+    assert!(
+      quietest_voice > TEST_THRESHOLD,
+      "the voice fixture dipped to {quietest_voice}"
+    );
+    assert!(
+      loudest_quiet < TEST_THRESHOLD,
+      "the silence fixture rose to {loudest_quiet}"
+    );
+  }
+
+  fn feed(endpointer: &mut VoiceEndpointer, samples: &[f32]) -> Option<TurnEnd> {
+    let mut end = None;
+    for frame in samples.chunks(FRAME_SAMPLES) {
+      end = end.or(endpointer.observe(frame));
+    }
+    end
+  }
+
+  #[test]
+  fn a_silent_turn_closes_when_the_onset_window_runs_out() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    assert_eq!(feed(&mut endpointer, &quiet_frames(60)), Some(TurnEnd::NoOnset));
+    assert!(!endpointer.speech_seen());
+  }
+
+  #[test]
+  fn the_onset_window_is_honoured_to_the_frame() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    let window = frames_in(config().onset);
+    assert_eq!(feed(&mut endpointer, &quiet_frames(window - 1)), None);
+    assert_eq!(feed(&mut endpointer, &quiet_frames(1)), Some(TurnEnd::NoOnset));
+  }
+
+  #[test]
+  fn speech_then_silence_closes_on_the_hangover() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    assert_eq!(feed(&mut endpointer, &voiced_frames(20)), None);
+    assert!(endpointer.speech_seen());
+    assert_eq!(
+      feed(&mut endpointer, &quiet_frames(40)),
+      Some(TurnEnd::SilenceAfterSpeech)
+    );
+  }
+
+  #[test]
+  fn silence_shorter_than_the_hangover_does_not_end_the_turn() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    feed(&mut endpointer, &voiced_frames(20));
+    let pause = frames_in(config().hangover) - 1;
+    assert_eq!(feed(&mut endpointer, &quiet_frames(pause)), None);
+    assert_eq!(feed(&mut endpointer, &voiced_frames(20)), None);
+    assert_eq!(
+      feed(&mut endpointer, &quiet_frames(40)),
+      Some(TurnEnd::SilenceAfterSpeech)
+    );
+  }
+
+  #[test]
+  fn speech_arriving_late_still_beats_the_onset_window() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    let window = frames_in(config().onset);
+    assert_eq!(feed(&mut endpointer, &quiet_frames(window - 8)), None);
+    assert_eq!(feed(&mut endpointer, &voiced_frames(20)), None);
+    assert!(endpointer.speech_seen());
+  }
+
+  #[test]
+  fn a_single_voiced_frame_is_too_short_to_open_a_turn() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    let click = voiced_frames(1);
+    feed(&mut endpointer, &click);
+    assert!(!endpointer.speech_seen(), "one frame is below the debounce");
+    assert_eq!(feed(&mut endpointer, &quiet_frames(60)), Some(TurnEnd::NoOnset));
+  }
+
+  #[test]
+  fn a_closed_turn_never_reports_twice() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    feed(&mut endpointer, &voiced_frames(20));
+    assert_eq!(
+      feed(&mut endpointer, &quiet_frames(40)),
+      Some(TurnEnd::SilenceAfterSpeech)
+    );
+    assert_eq!(feed(&mut endpointer, &quiet_frames(200)), None);
+    assert_eq!(feed(&mut endpointer, &voiced_frames(20)), None);
+  }
+
+  #[test]
+  fn samples_shorter_than_a_frame_accumulate_across_calls() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    let quiet = quiet_frames(60);
+    let mut end = None;
+    for chunk in quiet.chunks(100) {
+      end = end.or(endpointer.observe(chunk));
+    }
+    assert_eq!(end, Some(TurnEnd::NoOnset));
+  }
+
+  #[test]
+  fn a_partial_trailing_frame_is_kept_for_the_next_call() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2]);
+    assert_eq!(endpointer.armed_frames, 0, "half a frame is not a decision");
+    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2]);
+    assert_eq!(endpointer.armed_frames, 1);
+  }
+}

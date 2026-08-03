@@ -137,6 +137,17 @@ export type BridgethingCapabilityFlags = {
   netFetch: boolean;
   netWs: boolean;
   audioTts: boolean;
+  voiceModel: boolean;
+};
+
+export type BridgethingVoiceModelStatus = 'absent' | 'downloading' | 'ready' | 'failed';
+
+export type BridgethingVoiceModelState = {
+  status: BridgethingVoiceModelStatus;
+  receivedBytes: number;
+  totalBytes: number;
+  version?: string;
+  error?: string;
 };
 
 export type BridgethingOtaPollConfig = {
@@ -284,6 +295,7 @@ export type BridgethingSessionSnapshot = {
   nowPlaying?: BridgethingNowPlaying;
   deviceMeta: BridgethingDeviceMetaEntry[];
   capabilityFlags: BridgethingCapabilityFlags;
+  voiceModel: BridgethingVoiceModelState;
   otaPollConfig?: BridgethingOtaPollConfig;
   webapps: BridgethingDeviceWebappsEntry[];
   otaRuns: BridgethingOtaRun[];
@@ -355,6 +367,8 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
+  voiceModelState(): Promise<BridgethingVoiceModelState>;
+
   setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void>;
   isDeviceAutoResumeEnabled(deviceId: string): Promise<boolean>;
 
@@ -408,6 +422,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
     callback: (deviceId: string, webappId: string, key: string, value: string | null) => void,
   ): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
+  setOnVoiceModelStateChanged(callback: (state: BridgethingVoiceModelState) => void): void;
 
   dismissOtaRun(deviceId: string): Promise<void>;
 

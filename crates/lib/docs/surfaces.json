@@ -912,7 +912,7 @@
     {
       "name": "voice",
       "title": "Voice",
-      "description": "Daemon -> webapp voice/NLU surface: mic state-change events, per-turn\npipeline activity, resolved display intents, and the reply to\n`voice.stateGet`.",
+      "description": "Daemon -> webapp voice/NLU surface",
       "events": [
         {
           "method": "onStateChanged",
@@ -944,6 +944,9 @@
         },
         {
           "method": "pushToTalk"
+        },
+        {
+          "method": "release"
         },
         {
           "method": "muteMic",
@@ -1132,7 +1135,7 @@
     },
     "ArtProfile": {
       "kind": "struct",
-      "description": "Art render sizes a webapp declares so the companion warms exactly the\npixels it renders: hero (now-playing / detail views) and thumb (queue /\ngrid). Omitted in a manifest falls back to the canonical `{248, 96}`,\nwhich is also the stock webapp's profile.",
+      "description": "Art render sizes a webapp declares so the companion warms exactly the\npixels it renders: hero (now-playing / detail views) and thumb (queue /\ngrid). Omitted in a manifest falls back to the canonical `{248, 96}`",
       "fields": [
         {
           "name": "heroPx",
@@ -1376,7 +1379,7 @@
     },
     "BridgeThingMeta": {
       "kind": "struct",
-      "description": "Bridge-side identity announce. Daemon sends one of these to every\ngateway on connect so the companion knows what daemon it's talking to\nand can opt out of unsupported surfaces.",
+      "description": "Bridge-side identity announce",
       "fields": [
         {
           "name": "bridgethingVersion",
@@ -3240,8 +3243,7 @@
       "fields": [
         {
           "name": "preserve",
-          "type": "boolean",
-          "description": "When true and a capture session is already in progress, let it\nkeep running instead of cutting it short."
+          "type": "boolean"
         }
       ]
     },
@@ -3251,8 +3253,7 @@
       "fields": [
         {
           "name": "preserve",
-          "type": "boolean",
-          "description": "Accepted for symmetry with `MicMute`; the daemon ignores it on\nunmute."
+          "type": "boolean"
         }
       ]
     },
@@ -3548,14 +3549,17 @@
         }
       ]
     },
-    "NluBrightnessMode": {
+    "NluAmount": {
       "kind": "enum",
       "variants": [
         {
-          "name": "Auto"
+          "name": "Small"
         },
         {
-          "name": "Manual"
+          "name": "Medium"
+        },
+        {
+          "name": "Large"
         }
       ]
     },
@@ -3619,6 +3623,29 @@
         }
       ]
     },
+    "NluPopularityFilter": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Top5"
+        },
+        {
+          "name": "Top10"
+        },
+        {
+          "name": "Popular"
+        },
+        {
+          "name": "Recent"
+        },
+        {
+          "name": "New"
+        },
+        {
+          "name": "Random"
+        }
+      ]
+    },
     "NluRepeatMode": {
       "kind": "enum",
       "variants": [
@@ -3633,23 +3660,30 @@
         }
       ]
     },
+    "NluScope": {
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "PreviousTrack"
+        },
+        {
+          "name": "Restart"
+        }
+      ]
+    },
     "NluSlots": {
       "kind": "struct",
       "fields": [
         {
-          "name": "artist",
+          "name": "target",
           "type": "string",
           "optional": true
         },
         {
-          "name": "track",
-          "type": "string",
-          "optional": true
-        },
-        {
-          "name": "album",
-          "type": "string",
-          "optional": true
+          "name": "targetType",
+          "type": "NluTargetType",
+          "optional": true,
+          "type_ref": "NluTargetType"
         },
         {
           "name": "playlist",
@@ -3657,22 +3691,12 @@
           "optional": true
         },
         {
-          "name": "podcast",
-          "type": "string",
-          "optional": true
-        },
-        {
-          "name": "episode",
+          "name": "genre",
           "type": "string",
           "optional": true
         },
         {
           "name": "mood",
-          "type": "string",
-          "optional": true
-        },
-        {
-          "name": "genre",
           "type": "string",
           "optional": true
         },
@@ -3683,31 +3707,33 @@
         },
         {
           "name": "popularityFilter",
-          "type": "string",
+          "type": "NluPopularityFilter",
+          "optional": true,
+          "type_ref": "NluPopularityFilter"
+        },
+        {
+          "name": "position",
+          "type": "number",
           "optional": true
         },
         {
-          "name": "entityType",
-          "type": "string",
+          "name": "count",
+          "type": "number",
           "optional": true
         },
         {
-          "name": "query",
-          "type": "string",
-          "optional": true
-        },
-        {
-          "name": "webappName",
-          "type": "string",
-          "optional": true
-        },
-        {
-          "name": "preset",
-          "type": "string",
-          "optional": true
+          "name": "scope",
+          "type": "NluScope",
+          "optional": true,
+          "type_ref": "NluScope"
         },
         {
           "name": "enabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "mute",
           "type": "boolean",
           "optional": true
         },
@@ -3736,8 +3762,9 @@
         },
         {
           "name": "amount",
-          "type": "string",
-          "optional": true
+          "type": "NluAmount",
+          "optional": true,
+          "type_ref": "NluAmount"
         },
         {
           "name": "level",
@@ -3745,10 +3772,9 @@
           "optional": true
         },
         {
-          "name": "brightnessMode",
-          "type": "NluBrightnessMode",
-          "optional": true,
-          "type_ref": "NluBrightnessMode"
+          "name": "preset",
+          "type": "string",
+          "optional": true
         },
         {
           "name": "view",
@@ -3763,13 +3789,17 @@
           "type_ref": "NluPhoneAction"
         },
         {
-          "name": "systemAction",
-          "type": "NluSystemAction",
-          "optional": true,
-          "type_ref": "NluSystemAction"
+          "name": "webappName",
+          "type": "string",
+          "optional": true
         },
         {
           "name": "uri",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "contextUri",
           "type": "string",
           "optional": true
         }
@@ -3777,7 +3807,6 @@
     },
     "NluStage": {
       "kind": "enum",
-      "description": "Which arm of the companion's resolver produced an intent. Carried so a\nsurface can tell a deterministic match from a model prediction.",
       "variants": [
         {
           "name": "FastPath"
@@ -3792,19 +3821,33 @@
           "name": "RejectedClarify"
         },
         {
-          "name": "NoModel",
-          "description": "The fast path missed and no model is configured, so nothing could\nclassify the utterance. Distinct from a model that ran and rejected."
+          "name": "NoModel"
         }
       ]
     },
-    "NluSystemAction": {
+    "NluTargetType": {
       "kind": "enum",
       "variants": [
         {
-          "name": "Reboot"
+          "name": "Artist"
         },
         {
-          "name": "PowerOff"
+          "name": "Track"
+        },
+        {
+          "name": "Album"
+        },
+        {
+          "name": "Playlist"
+        },
+        {
+          "name": "Podcast"
+        },
+        {
+          "name": "Episode"
+        },
+        {
+          "name": "Station"
         }
       ]
     },
@@ -3812,25 +3855,37 @@
       "kind": "enum",
       "variants": [
         {
+          "name": "NowPlaying"
+        },
+        {
+          "name": "Artist"
+        },
+        {
+          "name": "Album"
+        },
+        {
+          "name": "Playlist"
+        },
+        {
+          "name": "Playlists"
+        },
+        {
           "name": "Library"
+        },
+        {
+          "name": "Songs"
         },
         {
           "name": "Presets"
         },
         {
-          "name": "Songs"
+          "name": "Queue"
         },
         {
           "name": "SavedEpisodes"
         },
         {
           "name": "NewEpisodes"
-        },
-        {
-          "name": "Queue"
-        },
-        {
-          "name": "ThisArtist"
         }
       ]
     },
@@ -4094,11 +4149,11 @@
     },
     "OtaErrorCode": {
       "kind": "enum",
-      "description": "Terminal error from the OTA orchestrator. After an `OtaError` the\norchestrator is back to idle and a fresh `OtaBegin` may be sent.",
+      "description": "Terminal error from the OTA orchestrator",
       "variants": [
         {
           "name": "UnknownUpdate",
-          "description": "Companion sent fragments for an `update_id` that was never begun\n(or was abandoned mid-stream)."
+          "description": "Companion sent fragments for an `update_id` that was never begun"
         },
         {
           "name": "OffsetMismatch",
@@ -4147,7 +4202,7 @@
     },
     "OtaKind": {
       "kind": "enum",
-      "description": "What the streamed bytes are going to be applied as.\n\n`Image` streams a `.swu` through libswupdate + slot flip + reboot.\n`Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on\nthe bandaid bind-mount, restarts the service. `BuiltinWebapp`\nstreams a zip bundle of hub or stock, validates the manifest id is\none of the reserved built-ins, atomic-rotates the bundle dir on the\nbandaid bind-mount, restarts the service. `InstalledWebapp` streams\na zip bundle of a third-party (non-reserved) webapp and installs it\ninto the writable registry; it neither stages on the bandaid nor\nrestarts, and is never part of an `OtaActivate` batch.\n\nCompanions key reboot expectations off this: image means the device\npower-cycles; daemon and builtin-webapp mean the daemon process\nrestarts and the gateway link drops and reconnects; installed-webapp\nand wakeword-model apply in place with no restart.",
+      "description": "What the streamed bytes are going to be applied as",
       "variants": [
         {
           "name": "Image"
@@ -4162,14 +4217,13 @@
           "name": "InstalledWebapp"
         },
         {
-          "name": "WakewordModel",
-          "description": "Wake word phrase classifier. Applies in place and the detector reloads\nwithout a restart; the embedding stack rides in the daemon binary."
+          "name": "WakewordModel"
         }
       ]
     },
     "OtaPhase": {
       "kind": "enum",
-      "description": "Stage of the OTA orchestrator. The phase set is shared between\nkinds, with non-image kinds emitting a subset.\n\nImage: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)\n-> `Confirming` (try-counter reset) -> `Reboot`.\n\nDaemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,\nwhere `Writing`/100 means the piece is validated and staged on the\nbandaid (not yet live). The atomic rotate and the single `systemctl\nrestart` happen later, on `OtaActivate`, which emits the terminal\n`Reboot` for the whole batch. `Confirming` is image-only.\n\nInstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the\nbundle installs into the writable registry. There is no `Writing`/100,\nno `Confirming`, and no `Reboot`; the terminal signal is the\n`WebappInstalled` event (or an `OtaError`).",
+      "description": "Stage of the OTA orchestrator. The phase set is shared between\nkinds, with non-image kinds emitting a subset",
       "variants": [
         {
           "name": "Streaming"
@@ -4190,7 +4244,7 @@
     },
     "OtaProgress": {
       "kind": "struct",
-      "description": "Per-phase progress tick. `percent` is 0-100 within the current\nlibswupdate step, which resets at each step boundary, so it is not a\nmonotonic overall metric on its own. `eta_ms` is best-effort remaining\ntime for the phase when the orchestrator can compute it.",
+      "description": "Per-phase progress tick",
       "fields": [
         {
           "name": "phase",
@@ -5077,7 +5131,7 @@
     },
     "QueuePosition": {
       "kind": "enum",
-      "description": "Where in the queue a `queue({ uri })` should land. `Append` (default)\ngoes at the end; `Next` is play-next; `Index` is an explicit position.",
+      "description": "Where in the queue a `queue({ uri })` should land. `Append` (default)\ngoes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot\nin the upcoming list.",
       "tag": "type",
       "content": "data",
       "variants": [
@@ -5672,7 +5726,7 @@
     },
     "VoiceActivity": {
       "kind": "struct",
-      "description": "One step of a voice turn, as it happens. Fields fill in as the turn\nprogresses, so a `done` carries everything the earlier phases did.",
+      "description": "One step of a voice turn, as it happens",
       "fields": [
         {
           "name": "phase",
@@ -5693,8 +5747,7 @@
         {
           "name": "score",
           "type": "number",
-          "optional": true,
-          "description": "Wake word confidence, present only on a wake-word-opened turn."
+          "optional": true
         },
         {
           "name": "transcript",
@@ -5748,7 +5801,6 @@
     },
     "VoiceCaptureReason": {
       "kind": "enum",
-      "description": "What opened a capture session.",
       "variants": [
         {
           "name": "PushToTalk"
@@ -5804,15 +5856,15 @@
     },
     "VoiceDispatchTarget": {
       "kind": "enum",
-      "description": "Where the daemon actually routed a successful dispatch. Carried back\nto the companion so it can render the right confirmation UI.",
+      "description": "Where the daemon actually routed a successful dispatch",
       "variants": [
         {
           "name": "Playback",
-          "description": "Transport / playback effect, routed through the daemon's transport\ncontroller or a player command to the companion."
+          "description": "Transport / playback effect"
         },
         {
           "name": "Device",
-          "description": "A daemon-local device setting (brightness, discoverable, power)."
+          "description": "A daemon-local device action (discoverable, preset save, cancel)."
         },
         {
           "name": "Phone",
@@ -5865,18 +5917,16 @@
     },
     "VoicePhase": {
       "kind": "enum",
-      "description": "Where a voice turn is in the pipeline. `Done` and `Failed` are terminal\nand only ever appear on a `VoiceActivity`; the state a surface reads back\nfrom `voice.stateGet` settles to `Idle` instead of holding an outcome.",
+      "description": "Where a voice turn is in the pipeline",
       "variants": [
         {
           "name": "Idle"
         },
         {
-          "name": "Listening",
-          "description": "Capture is open and audio is going up to the companion."
+          "name": "Listening"
         },
         {
-          "name": "Thinking",
-          "description": "Capture closed on end of speech; the companion is recognizing and resolving."
+          "name": "Thinking"
         },
         {
           "name": "Done"
@@ -5896,8 +5946,7 @@
         },
         {
           "name": "capturing",
-          "type": "boolean",
-          "description": "True while a capture session is actively recording."
+          "type": "boolean"
         },
         {
           "name": "phase",

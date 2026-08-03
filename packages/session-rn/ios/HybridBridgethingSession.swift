@@ -45,6 +45,8 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
+    func voiceModelState() async -> BridgethingVoiceModelState
+
     func setDeviceAutoResume(deviceId: String, enabled: Bool) async
     func isDeviceAutoResumeEnabled(deviceId: String) async -> Bool
 
@@ -97,6 +99,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappsChanged(_ callback: @escaping @Sendable (BridgethingDeviceWebappsEntry) -> Void)
     func setOnWebappDocChanged(_ callback: @escaping @Sendable (String, String, String, String?) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
+    func setOnVoiceModelStateChanged(_ callback: @escaping @Sendable (BridgethingVoiceModelState) -> Void)
     func setOnOtaRunChanged(_ callback: @escaping @Sendable (BridgethingOtaRun) -> Void)
     func setOnOtaAvailableChanged(_ callback: @escaping @Sendable (BridgethingOtaAvailable) -> Void)
     func setOnOtaPollChanged(_ callback: @escaping @Sendable (BridgethingOtaPollStatus) -> Void)
@@ -117,6 +120,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingWebappsChanged: (@Sendable (BridgethingDeviceWebappsEntry) -> Void)?
     private static var pendingWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
+    private static var pendingVoiceModelStateChanged: (@Sendable (BridgethingVoiceModelState) -> Void)?
     private static var pendingOtaRunChanged: (@Sendable (BridgethingOtaRun) -> Void)?
     private static var pendingOtaAvailableChanged: (@Sendable (BridgethingOtaAvailable) -> Void)?
     private static var pendingOtaPollChanged: (@Sendable (BridgethingOtaPollStatus) -> Void)?
@@ -135,6 +139,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let webappsCb = pendingWebappsChanged
         let webappDocCb = pendingWebappDocChanged
         let deviceMetaCb = pendingDeviceMetaChanged
+        let voiceModelCb = pendingVoiceModelStateChanged
         let otaRunCb = pendingOtaRunChanged
         let otaAvailCb = pendingOtaAvailableChanged
         let otaPollCb = pendingOtaPollChanged
@@ -149,6 +154,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingWebappsChanged = nil
         pendingWebappDocChanged = nil
         pendingDeviceMetaChanged = nil
+        pendingVoiceModelStateChanged = nil
         pendingOtaRunChanged = nil
         pendingOtaAvailableChanged = nil
         pendingOtaPollChanged = nil
@@ -165,6 +171,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let webappsCb { backend.setOnWebappsChanged(webappsCb) }
         if let webappDocCb { backend.setOnWebappDocChanged(webappDocCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
+        if let voiceModelCb { backend.setOnVoiceModelStateChanged(voiceModelCb) }
         if let otaRunCb { backend.setOnOtaRunChanged(otaRunCb) }
         if let otaAvailCb { backend.setOnOtaAvailableChanged(otaAvailCb) }
         if let otaPollCb { backend.setOnOtaPollChanged(otaPollCb) }
@@ -412,6 +419,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func setCapabilityFlags(flags: BridgethingCapabilityFlags) throws -> Promise<Void> {
         Promise.async {
             await (try Self.backend()).setCapabilityFlags(flags: flags)
+        }
+    }
+
+    public func voiceModelState() throws -> Promise<BridgethingVoiceModelState> {
+        Promise.async {
+            await (try Self.backend()).voiceModelState()
         }
     }
 
@@ -663,6 +676,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingDeviceMetaChanged = wrapped }
         Self.stateLock.unlock()
         backend?.setOnDeviceMetaChanged(wrapped)
+    }
+
+    public func setOnVoiceModelStateChanged(callback: @escaping (BridgethingVoiceModelState) -> Void) throws {
+        let wrapped: @Sendable (BridgethingVoiceModelState) -> Void = { state in callback(state) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingVoiceModelStateChanged = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnVoiceModelStateChanged(wrapped)
     }
 
     public func setOnOtaRunChanged(callback: @escaping (BridgethingOtaRun) -> Void) throws {

@@ -2,13 +2,6 @@ import BridgethingGateway
 import BridgethingSchema
 import Foundation
 
-#if canImport(CryptoKit)
-    import CryptoKit
-#endif
-#if canImport(FoundationNetworking)
-    import FoundationNetworking
-#endif
-
 public enum OtaPhaseSnapshot: Sendable, Equatable {
     case idle
     case downloading(asset: String, received: UInt64, total: UInt64, ratePerSec: Double?)
@@ -107,6 +100,7 @@ public enum OtaPollEvent: Sendable, Equatable {
 }
 
 public actor OtaService {
+    private let fetcher = ArtifactFetcher()
     private var localZcks: [String: URL] = [:]
     private var rangeServerTask: Task<Void, Never>?
     private var metaTask: Task<Void, Never>?
@@ -145,7 +139,7 @@ public actor OtaService {
 
     private struct DaemonPatchPlan {
         let url: URL
-        let digest: OtaArtifactDigest
+        let digest: ArtifactDigest
         let sourceSha256: String?
         let resultSha256: String
         let resultSize: UInt64
@@ -158,7 +152,7 @@ public actor OtaService {
         let filename: String
         let version: String
         let assetLabel: String
-        let expected: OtaArtifactDigest?
+        let expected: ArtifactDigest?
         var patch: DaemonPatchPlan? = nil
     }
 
@@ -443,7 +437,7 @@ public actor OtaService {
                 into: webappCacheDirectory(),
                 filename: "webapp",
                 asset: url.lastPathComponent,
-                expected: OtaArtifactDigest(size: size, sha256: sha256),
+                expected: ArtifactDigest(size: size, sha256: sha256),
                 progress: progress
             )
         } catch {
@@ -531,7 +525,7 @@ public actor OtaService {
 
         let sha256: String
         do {
-            sha256 = try await hashFile(bundlePath)
+            sha256 = try await ArtifactFetcher.sha256(of: bundlePath)
         } catch {
             return .failed(reason: "sha256 failed: \(error.localizedDescription)")
         }
@@ -659,7 +653,7 @@ public actor OtaService {
     }
 
     public func discoverManifest(rootURL: URL) async throws -> OtaDiscoverManifest {
-        try await fetchManifest(url: rootURL.appendingPathComponent("manifest.json"))
+        try await fetcher.json(OtaDiscoverManifest.self, from: rootURL.appendingPathComponent("manifest.json"))
     }
 
     public func applyVersion(deviceId: String, channel: String, version: String, rootURL: URL) async {
@@ -802,7 +796,7 @@ public actor OtaService {
         let manifestURL = config.rootURL.appendingPathComponent("manifest.json")
         let manifest: OtaDiscoverManifest
         do {
-            manifest = try await fetchManifest(url: manifestURL)
+            manifest = try await fetcher.json(OtaDiscoverManifest.self, from: manifestURL)
         } catch {
             emit(.manifestPollFailed(reason: error.localizedDescription))
             return
@@ -1229,43 +1223,24 @@ public actor OtaService {
         return base.appendingPathComponent("bridgething-ota", isDirectory: true)
     }
 
-    private func fetchManifest(url: URL) async throws -> OtaDiscoverManifest {
-        var req = URLRequest(url: url)
-        req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.timeoutInterval = 30
-        let (data, response) = try await URLSession.shared.data(for: req)
-        if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
-            throw OtaServiceError.manifestHttpStatus(http.statusCode)
-        }
-        let decoder = JSONDecoder()
-        return try decoder.decode(OtaDiscoverManifest.self, from: data)
-    }
-
     private func downloadIfNeeded(
         url: URL,
         into directory: URL,
         filename: String,
         asset: String,
-        expected: OtaArtifactDigest?,
+        expected: ArtifactDigest?,
         progress: AsyncStream<OtaPhaseSnapshot>.Continuation?
     ) async throws -> URL {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let cacheName = expected.map { "\(filename)-\($0.sha256)" } ?? filename
-        let target = directory.appendingPathComponent(cacheName)
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: target.path),
-           let size = (attrs[.size] as? NSNumber)?.uint64Value {
-            if let expected {
-                if size == expected.size { return target }
-            } else if size > 0 {
-                return target
-            }
-            try? FileManager.default.removeItem(at: target)
-        }
-
         let tracker = RateTracker()
         let knownTotal = expected?.size ?? 0
         progress?.yield(.downloading(asset: asset, received: 0, total: knownTotal, ratePerSec: nil))
-        let downloader = ProgressDownloader { received, reported in
+        return try await fetcher.downloadIfNeeded(
+            url: url,
+            into: directory,
+            filename: filename,
+            asset: asset,
+            expected: expected
+        ) { received, reported in
             tracker.record(received)
             progress?.yield(.downloading(
                 asset: asset,
@@ -1274,28 +1249,6 @@ public actor OtaService {
                 ratePerSec: tracker.ratePerSec()
             ))
         }
-        let (tmp, response) = try await downloader.download(url: url)
-        if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
-            try? FileManager.default.removeItem(at: tmp)
-            throw OtaServiceError.artifactHttpStatus(http.statusCode)
-        }
-        if let expected {
-            let size = (try FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber)?.uint64Value ?? 0
-            guard size == expected.size else {
-                try? FileManager.default.removeItem(at: tmp)
-                throw OtaServiceError.digestMismatch(asset: asset, field: "size")
-            }
-            let sha = try await hashFile(tmp)
-            guard sha == expected.sha256 else {
-                try? FileManager.default.removeItem(at: tmp)
-                throw OtaServiceError.digestMismatch(asset: asset, field: "sha256")
-            }
-        }
-        if FileManager.default.fileExists(atPath: target.path) {
-            try FileManager.default.removeItem(at: target)
-        }
-        try FileManager.default.moveItem(at: tmp, to: target)
-        return target
     }
 
     // MARK: - inbound range serving
@@ -1452,7 +1405,7 @@ public actor OtaService {
 
         let sha256: String
         do {
-            sha256 = try await hashFile(artifactPath)
+            sha256 = try await ArtifactFetcher.sha256(of: artifactPath)
         } catch {
             return (.failed(reason: "sha256 failed: \(error.localizedDescription)"), "")
         }
@@ -1699,86 +1652,16 @@ public actor OtaService {
         emitStreaming(totalSize)
     }
 
-    private func hashFile(_ url: URL) async throws -> String {
-        #if canImport(CryptoKit)
-            let fh = try FileHandle(forReadingFrom: url)
-            defer { try? fh.close() }
-            var h = SHA256()
-            while true {
-                let data = try fh.read(upToCount: 64 * 1024) ?? Data()
-                if data.isEmpty { break }
-                h.update(data: data)
-            }
-            return h.finalize().map { String(format: "%02x", $0) }.joined()
-        #else
-            throw OtaServiceError.cryptoUnavailable
-        #endif
-    }
-
 }
 
 private enum OtaServiceError: Error, CustomStringConvertible, LocalizedError {
     case unexpectedEof(at: UInt64, total: UInt64)
-    case cryptoUnavailable
-    case manifestHttpStatus(Int)
-    case artifactHttpStatus(Int)
-    case digestMismatch(asset: String, field: String)
-    case downloadIncomplete
 
     var description: String {
         switch self {
         case let .unexpectedEof(at: a, total: t): "EOF at \(a)/\(t) before last chunk"
-        case .cryptoUnavailable: "CryptoKit unavailable on this platform"
-        case let .manifestHttpStatus(code): "manifest fetch returned HTTP \(code)"
-        case let .artifactHttpStatus(code): "artifact fetch returned HTTP \(code)"
-        case let .digestMismatch(asset, field): "\(asset) \(field) does not match the manifest; refusing to install"
-        case .downloadIncomplete: "download finished without producing a file"
         }
     }
 
     var errorDescription: String? { description }
-}
-
-private final class ProgressDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let onProgress: @Sendable (UInt64, UInt64) -> Void
-    private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
-    private var staged: URL?
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-
-    init(onProgress: @escaping @Sendable (UInt64, UInt64) -> Void) { self.onProgress = onProgress }
-
-    func download(url: URL) async throws -> (URL, URLResponse) {
-        try await withCheckedThrowingContinuation { cont in
-            continuation = cont
-            session.downloadTask(with: url).resume()
-        }
-    }
-
-    func urlSession(
-        _: URLSession,
-        downloadTask _: URLSessionDownloadTask,
-        didWriteData _: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        onProgress(UInt64(max(totalBytesWritten, 0)), UInt64(max(totalBytesExpectedToWrite, 0)))
-    }
-
-    func urlSession(_: URLSession, downloadTask _: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent("ota-dl-\(UUID().uuidString)")
-        staged = (try? FileManager.default.moveItem(at: location, to: dest)) == nil ? nil : dest
-    }
-
-    func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        defer { session.finishTasksAndInvalidate() }
-        let cont = continuation
-        continuation = nil
-        if let error {
-            cont?.resume(throwing: error)
-        } else if let staged, let response = task.response {
-            cont?.resume(returning: (staged, response))
-        } else {
-            cont?.resume(throwing: OtaServiceError.downloadIncomplete)
-        }
-    }
 }

@@ -89,7 +89,7 @@ class OtaManifestTest {
         """.trimIndent()
         val artifacts = json.decodeFromString(OtaReleaseArtifacts.serializer(), raw)
         assertEquals("cc", artifacts.daemonPatches["0.8.3"]?.sourceSha256)
-        assertEquals(OtaArtifactDigest(10, "bb"), artifacts.daemonPatches["0.8.3"]?.digest)
+        assertEquals(ArtifactDigest(10, "bb"), artifacts.daemonPatches["0.8.3"]?.digest)
         assertNull(artifacts.daemonPatches["0.8.2"]?.sourceSha256)
     }
 

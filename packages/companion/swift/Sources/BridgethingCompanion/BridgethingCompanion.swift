@@ -60,19 +60,22 @@ public struct CompanionCapabilityFlags: Sendable {
     public var netFetch: Bool
     public var netWs: Bool
     public var audioTts: Bool
+    public var voiceModel: Bool
 
     public init(
         geo: Bool = true,
         notifications: Bool = false,
         netFetch: Bool = true,
         netWs: Bool = true,
-        audioTts: Bool = true
+        audioTts: Bool = true,
+        voiceModel: Bool = true
     ) {
         self.geo = geo
         self.notifications = notifications
         self.netFetch = netFetch
         self.netWs = netWs
         self.audioTts = audioTts
+        self.voiceModel = voiceModel
     }
 }
 
@@ -275,6 +278,10 @@ public actor BridgethingCompanion {
     public func audibleGlue() -> (any BridgethingGlue)? {
         guard let id = nowPlayingHub.currentSource() else { return nil }
         return glues[id]
+    }
+
+    public func voiceCatalogResolver() -> (any VoiceCatalogResolving)? {
+        (libraryGlue() as? any VoiceCatalogProviding)?.voiceResolver()
     }
 
     private func orderedGlueIds() -> [String] {
@@ -635,6 +642,10 @@ public actor BridgethingCompanion {
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }
+            await voiceDispatcher?.setCatalogResolver { [weak self] in
+                guard let self else { return nil }
+                return await voiceCatalogResolver()
+            }
             await voiceDispatcher?.start(gateway: gateway)
         })
         tasks.append(Task { [weak self] in

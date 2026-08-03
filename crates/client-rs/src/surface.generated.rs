@@ -713,6 +713,9 @@ impl<'a> VoiceSurface<'a> {
   pub async fn push_to_talk(&self) -> Result<(), SdkError> {
     self.0.command(ClientToBridgeVoiceMsgCommand::PushToTalk).await
   }
+  pub async fn release(&self) -> Result<(), SdkError> {
+    self.0.command(ClientToBridgeVoiceMsgCommand::Release).await
+  }
   pub async fn mute_mic(&self, payload: MicMute) -> Result<(), SdkError> {
     self.0.command(ClientToBridgeVoiceMsgCommand::MuteMic(payload)).await
   }

@@ -1160,9 +1160,11 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func product() async throws  -> ProductState
     
-    func queueUri(uri: String) async throws 
+    func queueUri(uri: String, position: QueuePosition) async throws 
     
     func resolveContext(uri: String) async throws  -> BrowseItem
+    
+    func resolveVoice(req: VoiceResolveRequest) async throws  -> VoiceResolved
     
     func resume() async throws 
     
@@ -1486,13 +1488,13 @@ open func product()async throws  -> ProductState  {
         )
 }
     
-open func queueUri(uri: String)async throws   {
+open func queueUri(uri: String, position: QueuePosition)async throws   {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_spotify_fn_method_spotifyclient_queue_uri(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(uri)
+                    FfiConverterString.lower(uri),FfiConverterTypeQueuePosition_lower(position)
                 )
             },
             pollFunc: ffi_spotify_rust_future_poll_void,
@@ -1517,6 +1519,23 @@ open func resolveContext(uri: String)async throws  -> BrowseItem  {
             freeFunc: ffi_spotify_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBrowseItem_lift,
             errorHandler: FfiConverterTypeError_lift
+        )
+}
+    
+open func resolveVoice(req: VoiceResolveRequest)async throws  -> VoiceResolved  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_resolve_voice(
+                    self.uniffiCloneHandle(),
+                    FfiConverterTypeVoiceResolveRequest_lower(req)
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_rust_buffer,
+            completeFunc: ffi_spotify_rust_future_complete_rust_buffer,
+            freeFunc: ffi_spotify_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeVoiceResolved_lift,
+            errorHandler: FfiConverterTypeVoiceResolveError_lift
         )
 }
     
@@ -2798,10 +2817,13 @@ public struct PlayerState: Equatable, Hashable {
     public var canToggleShuffle: Bool
     public var canRepeatContext: Bool
     public var canRepeatTrack: Bool
+    public var canSetQueue: Bool
+    public var canInsertIntoNextTracks: Bool
+    public var canAddToQueue: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(track: Track?, contextUri: String, contextName: String, isPaused: Bool, positionMs: UInt32, durationMs: UInt32, shuffle: Bool, `repeat`: RepeatMode, playingRemotely: Bool, remoteDeviceId: String, onRemoteSpeaker: Bool, canSeek: Bool, canSkipNext: Bool, canSkipPrev: Bool, canToggleShuffle: Bool, canRepeatContext: Bool, canRepeatTrack: Bool) {
+    public init(track: Track?, contextUri: String, contextName: String, isPaused: Bool, positionMs: UInt32, durationMs: UInt32, shuffle: Bool, `repeat`: RepeatMode, playingRemotely: Bool, remoteDeviceId: String, onRemoteSpeaker: Bool, canSeek: Bool, canSkipNext: Bool, canSkipPrev: Bool, canToggleShuffle: Bool, canRepeatContext: Bool, canRepeatTrack: Bool, canSetQueue: Bool, canInsertIntoNextTracks: Bool, canAddToQueue: Bool) {
         self.track = track
         self.contextUri = contextUri
         self.contextName = contextName
@@ -2819,6 +2841,9 @@ public struct PlayerState: Equatable, Hashable {
         self.canToggleShuffle = canToggleShuffle
         self.canRepeatContext = canRepeatContext
         self.canRepeatTrack = canRepeatTrack
+        self.canSetQueue = canSetQueue
+        self.canInsertIntoNextTracks = canInsertIntoNextTracks
+        self.canAddToQueue = canAddToQueue
     }
 
     
@@ -2853,7 +2878,10 @@ public struct FfiConverterTypePlayerState: FfiConverterRustBuffer {
                 canSkipPrev: FfiConverterBool.read(from: &buf), 
                 canToggleShuffle: FfiConverterBool.read(from: &buf), 
                 canRepeatContext: FfiConverterBool.read(from: &buf), 
-                canRepeatTrack: FfiConverterBool.read(from: &buf)
+                canRepeatTrack: FfiConverterBool.read(from: &buf), 
+                canSetQueue: FfiConverterBool.read(from: &buf), 
+                canInsertIntoNextTracks: FfiConverterBool.read(from: &buf), 
+                canAddToQueue: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -2875,6 +2903,9 @@ public struct FfiConverterTypePlayerState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.canToggleShuffle, into: &buf)
         FfiConverterBool.write(value.canRepeatContext, into: &buf)
         FfiConverterBool.write(value.canRepeatTrack, into: &buf)
+        FfiConverterBool.write(value.canSetQueue, into: &buf)
+        FfiConverterBool.write(value.canInsertIntoNextTracks, into: &buf)
+        FfiConverterBool.write(value.canAddToQueue, into: &buf)
     }
 }
 
@@ -3023,14 +3054,18 @@ public struct SearchResults: Equatable, Hashable {
     public var albums: [BrowseItem]
     public var artists: [BrowseItem]
     public var playlists: [BrowseItem]
+    public var shows: [BrowseItem]
+    public var episodes: [BrowseItem]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(tracks: [BrowseItem], albums: [BrowseItem], artists: [BrowseItem], playlists: [BrowseItem]) {
+    public init(tracks: [BrowseItem], albums: [BrowseItem], artists: [BrowseItem], playlists: [BrowseItem], shows: [BrowseItem], episodes: [BrowseItem]) {
         self.tracks = tracks
         self.albums = albums
         self.artists = artists
         self.playlists = playlists
+        self.shows = shows
+        self.episodes = episodes
     }
 
     
@@ -3052,7 +3087,9 @@ public struct FfiConverterTypeSearchResults: FfiConverterRustBuffer {
                 tracks: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
                 albums: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
                 artists: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
-                playlists: FfiConverterSequenceTypeBrowseItem.read(from: &buf)
+                playlists: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
+                shows: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
+                episodes: FfiConverterSequenceTypeBrowseItem.read(from: &buf)
         )
     }
 
@@ -3061,6 +3098,8 @@ public struct FfiConverterTypeSearchResults: FfiConverterRustBuffer {
         FfiConverterSequenceTypeBrowseItem.write(value.albums, into: &buf)
         FfiConverterSequenceTypeBrowseItem.write(value.artists, into: &buf)
         FfiConverterSequenceTypeBrowseItem.write(value.playlists, into: &buf)
+        FfiConverterSequenceTypeBrowseItem.write(value.shows, into: &buf)
+        FfiConverterSequenceTypeBrowseItem.write(value.episodes, into: &buf)
     }
 }
 
@@ -3225,6 +3264,204 @@ public func FfiConverterTypeTrack_lift(_ buf: RustBuffer) throws -> Track {
 #endif
 public func FfiConverterTypeTrack_lower(_ value: Track) -> RustBuffer {
     return FfiConverterTypeTrack.lower(value)
+}
+
+
+public struct VoiceAlternative: Equatable, Hashable {
+    public var uri: String
+    public var display: String
+    public var kind: VoiceTargetKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(uri: String, display: String, kind: VoiceTargetKind) {
+        self.uri = uri
+        self.display = display
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension VoiceAlternative: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceAlternative: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceAlternative {
+        return
+            try VoiceAlternative(
+                uri: FfiConverterString.read(from: &buf), 
+                display: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeVoiceTargetKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VoiceAlternative, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.uri, into: &buf)
+        FfiConverterString.write(value.display, into: &buf)
+        FfiConverterTypeVoiceTargetKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceAlternative_lift(_ buf: RustBuffer) throws -> VoiceAlternative {
+    return try FfiConverterTypeVoiceAlternative.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceAlternative_lower(_ value: VoiceAlternative) -> RustBuffer {
+    return FfiConverterTypeVoiceAlternative.lower(value)
+}
+
+
+public struct VoiceResolveRequest: Equatable, Hashable {
+    public var target: String?
+    public var targetType: VoiceTargetKind?
+    public var mood: String?
+    public var genre: String?
+    public var era: String?
+    public var popularityFilter: VoicePopularity?
+    public var position: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(target: String?, targetType: VoiceTargetKind?, mood: String?, genre: String?, era: String?, popularityFilter: VoicePopularity?, position: UInt32?) {
+        self.target = target
+        self.targetType = targetType
+        self.mood = mood
+        self.genre = genre
+        self.era = era
+        self.popularityFilter = popularityFilter
+        self.position = position
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension VoiceResolveRequest: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceResolveRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceResolveRequest {
+        return
+            try VoiceResolveRequest(
+                target: FfiConverterOptionString.read(from: &buf), 
+                targetType: FfiConverterOptionTypeVoiceTargetKind.read(from: &buf), 
+                mood: FfiConverterOptionString.read(from: &buf), 
+                genre: FfiConverterOptionString.read(from: &buf), 
+                era: FfiConverterOptionString.read(from: &buf), 
+                popularityFilter: FfiConverterOptionTypeVoicePopularity.read(from: &buf), 
+                position: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VoiceResolveRequest, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.target, into: &buf)
+        FfiConverterOptionTypeVoiceTargetKind.write(value.targetType, into: &buf)
+        FfiConverterOptionString.write(value.mood, into: &buf)
+        FfiConverterOptionString.write(value.genre, into: &buf)
+        FfiConverterOptionString.write(value.era, into: &buf)
+        FfiConverterOptionTypeVoicePopularity.write(value.popularityFilter, into: &buf)
+        FfiConverterOptionUInt32.write(value.position, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolveRequest_lift(_ buf: RustBuffer) throws -> VoiceResolveRequest {
+    return try FfiConverterTypeVoiceResolveRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolveRequest_lower(_ value: VoiceResolveRequest) -> RustBuffer {
+    return FfiConverterTypeVoiceResolveRequest.lower(value)
+}
+
+
+public struct VoiceResolved: Equatable, Hashable {
+    public var uri: String
+    public var contextUri: String?
+    public var display: String
+    public var kind: VoiceTargetKind
+    public var alternatives: [VoiceAlternative]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(uri: String, contextUri: String?, display: String, kind: VoiceTargetKind, alternatives: [VoiceAlternative]) {
+        self.uri = uri
+        self.contextUri = contextUri
+        self.display = display
+        self.kind = kind
+        self.alternatives = alternatives
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension VoiceResolved: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceResolved: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceResolved {
+        return
+            try VoiceResolved(
+                uri: FfiConverterString.read(from: &buf), 
+                contextUri: FfiConverterOptionString.read(from: &buf), 
+                display: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeVoiceTargetKind.read(from: &buf), 
+                alternatives: FfiConverterSequenceTypeVoiceAlternative.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VoiceResolved, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.uri, into: &buf)
+        FfiConverterOptionString.write(value.contextUri, into: &buf)
+        FfiConverterString.write(value.display, into: &buf)
+        FfiConverterTypeVoiceTargetKind.write(value.kind, into: &buf)
+        FfiConverterSequenceTypeVoiceAlternative.write(value.alternatives, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolved_lift(_ buf: RustBuffer) throws -> VoiceResolved {
+    return try FfiConverterTypeVoiceResolved.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolved_lower(_ value: VoiceResolved) -> RustBuffer {
+    return FfiConverterTypeVoiceResolved.lower(value)
 }
 
 // Note that we don't yet support `indirect` for enums.
@@ -3739,6 +3976,87 @@ public func FfiConverterTypeLibraryScope_lower(_ value: LibraryScope) -> RustBuf
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * where a queued uri lands. `at` indexes the upcoming list a caller was shown, which is
+ * the delimiter-free projection `queue` builds, not raw `next_tracks`.
+ */
+
+public enum QueuePosition: Equatable, Hashable {
+    
+    case append
+    case next
+    case index(at: UInt32
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension QueuePosition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeQueuePosition: FfiConverterRustBuffer {
+    typealias SwiftType = QueuePosition
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> QueuePosition {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .append
+        
+        case 2: return .next
+        
+        case 3: return .index(at: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: QueuePosition, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .append:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .next:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .index(at):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt32.write(at, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueuePosition_lift(_ buf: RustBuffer) throws -> QueuePosition {
+    return try FfiConverterTypeQueuePosition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueuePosition_lower(_ value: QueuePosition) -> RustBuffer {
+    return FfiConverterTypeQueuePosition.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum RepeatMode: Equatable, Hashable {
     
@@ -3808,6 +4126,293 @@ public func FfiConverterTypeRepeatMode_lift(_ buf: RustBuffer) throws -> RepeatM
 #endif
 public func FfiConverterTypeRepeatMode_lower(_ value: RepeatMode) -> RustBuffer {
     return FfiConverterTypeRepeatMode.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum VoicePopularity: Equatable, Hashable {
+    
+    case top5
+    case top10
+    case popular
+    case recent
+    case new
+    case random
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VoicePopularity: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoicePopularity: FfiConverterRustBuffer {
+    typealias SwiftType = VoicePopularity
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoicePopularity {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .top5
+        
+        case 2: return .top10
+        
+        case 3: return .popular
+        
+        case 4: return .recent
+        
+        case 5: return .new
+        
+        case 6: return .random
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VoicePopularity, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .top5:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .top10:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .popular:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .recent:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .new:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .random:
+            writeInt(&buf, Int32(6))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoicePopularity_lift(_ buf: RustBuffer) throws -> VoicePopularity {
+    return try FfiConverterTypeVoicePopularity.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoicePopularity_lower(_ value: VoicePopularity) -> RustBuffer {
+    return FfiConverterTypeVoicePopularity.lower(value)
+}
+
+
+
+public enum VoiceResolveError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    case NoMatch(message: String)
+    
+    case NoAnchorContext(message: String)
+    
+    case Spotify(message: String)
+    
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension VoiceResolveError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceResolveError: FfiConverterRustBuffer {
+    typealias SwiftType = VoiceResolveError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceResolveError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .NoMatch(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .NoAnchorContext(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .Spotify(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VoiceResolveError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .NoMatch(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .NoAnchorContext(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+        case .Spotify(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
+
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolveError_lift(_ buf: RustBuffer) throws -> VoiceResolveError {
+    return try FfiConverterTypeVoiceResolveError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceResolveError_lower(_ value: VoiceResolveError) -> RustBuffer {
+    return FfiConverterTypeVoiceResolveError.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum VoiceTargetKind: Equatable, Hashable {
+    
+    case track
+    case album
+    case artist
+    case playlist
+    case show
+    case episode
+    case station
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VoiceTargetKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceTargetKind: FfiConverterRustBuffer {
+    typealias SwiftType = VoiceTargetKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceTargetKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .track
+        
+        case 2: return .album
+        
+        case 3: return .artist
+        
+        case 4: return .playlist
+        
+        case 5: return .show
+        
+        case 6: return .episode
+        
+        case 7: return .station
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VoiceTargetKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .track:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .album:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .artist:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .playlist:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .show:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .episode:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .station:
+            writeInt(&buf, Int32(7))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceTargetKind_lift(_ buf: RustBuffer) throws -> VoiceTargetKind {
+    return try FfiConverterTypeVoiceTargetKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceTargetKind_lower(_ value: VoiceTargetKind) -> RustBuffer {
+    return FfiConverterTypeVoiceTargetKind.lower(value)
 }
 
 
@@ -4564,6 +5169,54 @@ fileprivate struct FfiConverterOptionTypeTrack: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeVoicePopularity: FfiConverterRustBuffer {
+    typealias SwiftType = VoicePopularity?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVoicePopularity.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVoicePopularity.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeVoiceTargetKind: FfiConverterRustBuffer {
+    typealias SwiftType = VoiceTargetKind?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVoiceTargetKind.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVoiceTargetKind.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceBool: FfiConverterRustBuffer {
     typealias SwiftType = [Bool]
 
@@ -4760,6 +5413,31 @@ fileprivate struct FfiConverterSequenceTypeTrack: FfiConverterRustBuffer {
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeVoiceAlternative: FfiConverterRustBuffer {
+    typealias SwiftType = [VoiceAlternative]
+
+    public static func write(_ value: [VoiceAlternative], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeVoiceAlternative.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VoiceAlternative] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [VoiceAlternative]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeVoiceAlternative.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
@@ -4876,10 +5554,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_product() != 12043) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_spotifyclient_queue_uri() != 20637) {
+    if (uniffi_spotify_checksum_method_spotifyclient_queue_uri() != 30870) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_resolve_context() != 59118) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_spotifyclient_resolve_voice() != 16170) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {

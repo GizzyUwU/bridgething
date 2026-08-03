@@ -20,8 +20,7 @@ public struct Album: Codable, Sendable {
 
 /// Art render sizes a webapp declares so the companion warms exactly the
 /// pixels it renders: hero (now-playing / detail views) and thumb (queue /
-/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
-/// which is also the stock webapp's profile.
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`
 public struct ArtProfile: Codable, Sendable {
 	public let heroPx: UInt32
 	public let thumbPx: UInt32
@@ -310,9 +309,7 @@ public struct BoolField: Codable, Sendable {
 	}
 }
 
-/// Bridge-side identity announce. Daemon sends one of these to every
-/// gateway on connect so the companion knows what daemon it's talking to
-/// and can opt out of unsupported surfaces.
+/// Bridge-side identity announce
 public struct BridgeThingMeta: Codable, Sendable {
 	public let bridgethingVersion: String
 	public let libbridgethingVersion: String
@@ -2438,6 +2435,30 @@ public struct NetWsSend: Codable, Sendable {
 	}
 }
 
+public enum NluTargetType: String, Codable, Sendable {
+	case artist
+	case track
+	case album
+	case playlist
+	case podcast
+	case episode
+	case station
+}
+
+public enum NluPopularityFilter: String, Codable, Sendable {
+	case top5
+	case top10
+	case popular
+	case recent
+	case new
+	case random
+}
+
+public enum NluScope: String, Codable, Sendable {
+	case previousTrack
+	case restart
+}
+
 public enum NluRepeatMode: String, Codable, Sendable {
 	case off
 	case all
@@ -2456,19 +2477,24 @@ public enum NluDirection: String, Codable, Sendable {
 	case down
 }
 
-public enum NluBrightnessMode: String, Codable, Sendable {
-	case auto
-	case manual
+public enum NluAmount: String, Codable, Sendable {
+	case small
+	case medium
+	case large
 }
 
 public enum NluView: String, Codable, Sendable {
+	case nowPlaying
+	case artist
+	case album
+	case playlist
+	case playlists
 	case library
-	case presets
 	case songs
+	case presets
+	case queue
 	case savedEpisodes
 	case newEpisodes
-	case queue
-	case thisArtist
 }
 
 public enum NluPhoneAction: String, Codable, Sendable {
@@ -2483,66 +2509,57 @@ public enum NluPhoneAction: String, Codable, Sendable {
 	case unmute
 }
 
-public enum NluSystemAction: String, Codable, Sendable {
-	case reboot
-	case powerOff
-}
-
 public struct NluSlots: Codable, Sendable {
-	public let artist: String?
-	public let track: String?
-	public let album: String?
+	public let target: String?
+	public let targetType: NluTargetType?
 	public let playlist: String?
-	public let podcast: String?
-	public let episode: String?
-	public let mood: String?
 	public let genre: String?
+	public let mood: String?
 	public let era: String?
-	public let popularityFilter: String?
-	public let entityType: String?
-	public let query: String?
-	public let webappName: String?
-	public let preset: String?
+	public let popularityFilter: NluPopularityFilter?
+	public let position: UInt32?
+	public let count: UInt32?
+	public let scope: NluScope?
 	public let enabled: Bool?
+	public let mute: Bool?
 	public let repeatMode: NluRepeatMode?
 	public let seconds: Int32?
 	public let speed: NluPlaybackSpeed?
 	public let direction: NluDirection?
-	public let amount: String?
+	public let amount: NluAmount?
 	public let level: UInt32?
-	public let brightnessMode: NluBrightnessMode?
+	public let preset: String?
 	public let view: NluView?
 	public let phoneAction: NluPhoneAction?
-	public let systemAction: NluSystemAction?
+	public let webappName: String?
 	public let uri: String?
+	public let contextUri: String?
 
-	public init(artist: String?, track: String?, album: String?, playlist: String?, podcast: String?, episode: String?, mood: String?, genre: String?, era: String?, popularityFilter: String?, entityType: String?, query: String?, webappName: String?, preset: String?, enabled: Bool?, repeatMode: NluRepeatMode?, seconds: Int32?, speed: NluPlaybackSpeed?, direction: NluDirection?, amount: String?, level: UInt32?, brightnessMode: NluBrightnessMode?, view: NluView?, phoneAction: NluPhoneAction?, systemAction: NluSystemAction?, uri: String?) {
-		self.artist = artist
-		self.track = track
-		self.album = album
+	public init(target: String?, targetType: NluTargetType?, playlist: String?, genre: String?, mood: String?, era: String?, popularityFilter: NluPopularityFilter?, position: UInt32?, count: UInt32?, scope: NluScope?, enabled: Bool?, mute: Bool?, repeatMode: NluRepeatMode?, seconds: Int32?, speed: NluPlaybackSpeed?, direction: NluDirection?, amount: NluAmount?, level: UInt32?, preset: String?, view: NluView?, phoneAction: NluPhoneAction?, webappName: String?, uri: String?, contextUri: String?) {
+		self.target = target
+		self.targetType = targetType
 		self.playlist = playlist
-		self.podcast = podcast
-		self.episode = episode
-		self.mood = mood
 		self.genre = genre
+		self.mood = mood
 		self.era = era
 		self.popularityFilter = popularityFilter
-		self.entityType = entityType
-		self.query = query
-		self.webappName = webappName
-		self.preset = preset
+		self.position = position
+		self.count = count
+		self.scope = scope
 		self.enabled = enabled
+		self.mute = mute
 		self.repeatMode = repeatMode
 		self.seconds = seconds
 		self.speed = speed
 		self.direction = direction
 		self.amount = amount
 		self.level = level
-		self.brightnessMode = brightnessMode
+		self.preset = preset
 		self.view = view
 		self.phoneAction = phoneAction
-		self.systemAction = systemAction
+		self.webappName = webappName
 		self.uri = uri
+		self.contextUri = contextUri
 	}
 }
 
@@ -2556,28 +2573,16 @@ public struct NluAlternate: Codable, Sendable {
 	}
 }
 
-public struct NluConfidence: Codable, Sendable {
-	public let intent: String
-	public let slots: String?
-
-	public init(intent: String, slots: String?) {
-		self.intent = intent
-		self.slots = slots
-	}
-}
-
 public struct NluResolvedIntent: Codable, Sendable {
 	public let intent: String
 	@WireDefault<WireDefaultNluResolvedIntentSlots> public var slots: NluSlots
 	public let transcript: String
-	public let confidence: NluConfidence?
 	public let alternates: [NluAlternate]?
 
-	public init(intent: String, slots: NluSlots, transcript: String, confidence: NluConfidence?, alternates: [NluAlternate]?) {
+	public init(intent: String, slots: NluSlots, transcript: String, alternates: [NluAlternate]?) {
 		self.intent = intent
 		self.slots = slots
 		self.transcript = transcript
-		self.confidence = confidence
 		self.alternates = alternates
 	}
 }
@@ -2890,12 +2895,7 @@ public struct OtaActivate: Codable, Sendable {
 	}
 }
 
-/// Half-open byte range the daemon's range proxy asks the companion
-/// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
-/// inclusive, `length` bytes. The proxy caps the multi-range count at
-/// the daemon edge (loopback) - companions see whatever swupdate's
-/// delta downloader emits. Offsets are u32 because OTA artifacts are
-/// bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
+/// Half-open byte range the daemon's range proxy asks the companion to serve
 public struct RangeSpec: Codable, Sendable {
 	public let start: UInt32
 	public let length: UInt32
@@ -2934,9 +2934,7 @@ public struct OtaAssetRangeRejected: Codable, Sendable {
 	}
 }
 
-/// Resolved range the companion is about to serve. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
-/// `TransferBody`.
+/// Resolved range the companion is about to serve
 public struct RangePart: Codable, Sendable {
 	public let start: UInt32
 	public let length: UInt32
@@ -2959,29 +2957,12 @@ public struct OtaAssetRangeReply: Codable, Sendable {
 	}
 }
 
-/// What the streamed bytes are going to be applied as.
-/// 
-/// `Image` streams a `.swu` through libswupdate + slot flip + reboot.
-/// `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
-/// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
-/// streams a zip bundle of hub or stock, validates the manifest id is
-/// one of the reserved built-ins, atomic-rotates the bundle dir on the
-/// bandaid bind-mount, restarts the service. `InstalledWebapp` streams
-/// a zip bundle of a third-party (non-reserved) webapp and installs it
-/// into the writable registry; it neither stages on the bandaid nor
-/// restarts, and is never part of an `OtaActivate` batch.
-/// 
-/// Companions key reboot expectations off this: image means the device
-/// power-cycles; daemon and builtin-webapp mean the daemon process
-/// restarts and the gateway link drops and reconnects; installed-webapp
-/// and wakeword-model apply in place with no restart.
+/// What the streamed bytes are going to be applied as
 public enum OtaKind: String, Codable, Sendable {
 	case image
 	case daemon
 	case builtinWebapp
 	case installedWebapp
-	/// Wake word phrase classifier. Applies in place and the detector reloads
-	/// without a restart; the embedding stack rides in the daemon binary.
 	case wakewordModel
 }
 
@@ -3050,11 +3031,9 @@ public struct OtaBeginRejected: Codable, Sendable {
 	}
 }
 
-/// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
+/// Terminal error from the OTA orchestrator
 public enum OtaErrorCode: String, Codable, Sendable {
 	/// Companion sent fragments for an `update_id` that was never begun
-	/// (or was abandoned mid-stream).
 	case unknownUpdate
 	/// A fragment's offset did not match the daemon's `received`.
 	case offsetMismatch
@@ -3094,21 +3073,7 @@ public struct OtaFinished: Codable, Sendable {
 }
 
 /// Stage of the OTA orchestrator. The phase set is shared between
-/// kinds, with non-image kinds emitting a subset.
-/// 
-/// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
-/// -> `Confirming` (try-counter reset) -> `Reboot`.
-/// 
-/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
-/// where `Writing`/100 means the piece is validated and staged on the
-/// bandaid (not yet live). The atomic rotate and the single `systemctl
-/// restart` happen later, on `OtaActivate`, which emits the terminal
-/// `Reboot` for the whole batch. `Confirming` is image-only.
-/// 
-/// InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
-/// bundle installs into the writable registry. There is no `Writing`/100,
-/// no `Confirming`, and no `Reboot`; the terminal signal is the
-/// `WebappInstalled` event (or an `OtaError`).
+/// kinds, with non-image kinds emitting a subset
 public enum OtaPhase: String, Codable, Sendable {
 	case streaming
 	case verifying
@@ -3117,10 +3082,7 @@ public enum OtaPhase: String, Codable, Sendable {
 	case reboot
 }
 
-/// Per-phase progress tick. `percent` is 0-100 within the current
-/// libswupdate step, which resets at each step boundary, so it is not a
-/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
-/// time for the phase when the orchestrator can compute it.
+/// Per-phase progress tick
 public struct OtaProgress: Codable, Sendable {
 	public let phase: OtaPhase
 	public let percent: UInt8
@@ -3993,7 +3955,8 @@ public struct QueueSnapshot: Codable, Sendable {
 }
 
 /// Where in the queue a `queue({ uri })` should land. `Append` (default)
-/// goes at the end; `Next` is play-next; `Index` is an explicit position.
+/// goes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot
+/// in the upcoming list.
 public enum QueuePosition: Codable, Sendable {
 	case append
 	case next
@@ -4461,11 +4424,8 @@ public struct TunnelErrorConnectFailedInner: Codable, Sendable {
 	}
 }
 public enum TunnelError: Codable, Sendable {
-	/// Companion couldn't reach the host (DNS / TCP RST / network unreachable).
 	case connectFailed(TunnelErrorConnectFailedInner)
-	/// Companion refused to open a tunnel (e.g. user-denied policy).
 	case permissionDenied
-	/// Tunnel surface unavailable on this companion.
 	case unavailable
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -4536,15 +4496,11 @@ public struct TunnelOpenReply: Codable, Sendable {
 	public init() {}
 }
 
-/// Which arm of the companion's resolver produced an intent. Carried so a
-/// surface can tell a deterministic match from a model prediction.
 public enum NluStage: String, Codable, Sendable {
 	case fastPath
 	case model
 	case rejectedNoIntent
 	case rejectedClarify
-	/// The fast path missed and no model is configured, so nothing could
-	/// classify the utterance. Distinct from a model that ran and rejected.
 	case noModel
 }
 
@@ -4579,13 +4535,11 @@ public struct VoiceDispatchFailed: Codable, Sendable {
 	}
 }
 
-/// Where the daemon actually routed a successful dispatch. Carried back
-/// to the companion so it can render the right confirmation UI.
+/// Where the daemon actually routed a successful dispatch
 public enum VoiceDispatchTarget: String, Codable, Sendable {
-	/// Transport / playback effect, routed through the daemon's transport
-	/// controller or a player command to the companion.
+	/// Transport / playback effect
 	case playback
-	/// A daemon-local device setting (brightness, discoverable, power).
+	/// A daemon-local device action (discoverable, preset save, cancel).
 	case device
 	/// Phone call control over the companion's phone surface.
 	case phone
@@ -4607,31 +4561,34 @@ public struct VoiceDispatched: Codable, Sendable {
 	}
 }
 
+public enum VoiceCodec: String, Codable, Sendable {
+	case opus
+}
+
 public struct VoiceFormat: Codable, Sendable {
+	public let codec: VoiceCodec
 	public let sampleRateHz: UInt32
 	public let channels: UInt16
-	public let bitsPerSample: UInt16
 
-	public init(sampleRateHz: UInt32, channels: UInt16, bitsPerSample: UInt16) {
+	public init(codec: VoiceCodec, sampleRateHz: UInt32, channels: UInt16) {
+		self.codec = codec
 		self.sampleRateHz = sampleRateHz
 		self.channels = channels
-		self.bitsPerSample = bitsPerSample
 	}
 }
 
 public struct VoiceFrame: Codable, Sendable {
 	@MsgpackUuid public var streamId: UUID
 	public let seq: UInt32
-	public let pcm: Data
+	public let packet: Data
 
-	public init(streamId: UUID, seq: UInt32, pcm: Data) {
+	public init(streamId: UUID, seq: UInt32, packet: Data) {
 		self.streamId = streamId
 		self.seq = seq
-		self.pcm = pcm
+		self.packet = packet
 	}
 }
 
-/// What opened a capture session.
 public enum VoiceCaptureReason: String, Codable, Sendable {
 	case pushToTalk
 	case assistant
@@ -8371,7 +8328,7 @@ public enum WireDefaultSurfaceAvailabilityPlaybackTargets: WireDefaultProvider {
 }
 
 public enum WireDefaultNluResolvedIntentSlots: WireDefaultProvider {
-	public static var wireDefault: NluSlots { NluSlots(artist: nil, track: nil, album: nil, playlist: nil, podcast: nil, episode: nil, mood: nil, genre: nil, era: nil, popularityFilter: nil, entityType: nil, query: nil, webappName: nil, preset: nil, enabled: nil, repeatMode: nil, seconds: nil, speed: nil, direction: nil, amount: nil, level: nil, brightnessMode: nil, view: nil, phoneAction: nil, systemAction: nil, uri: nil) }
+	public static var wireDefault: NluSlots { NluSlots(target: nil, targetType: nil, playlist: nil, genre: nil, mood: nil, era: nil, popularityFilter: nil, position: nil, count: nil, scope: nil, enabled: nil, mute: nil, repeatMode: nil, seconds: nil, speed: nil, direction: nil, amount: nil, level: nil, preset: nil, view: nil, phoneAction: nil, webappName: nil, uri: nil, contextUri: nil) }
 }
 
 public enum WireDefaultOverlayProfileNotifications: WireDefaultProvider {

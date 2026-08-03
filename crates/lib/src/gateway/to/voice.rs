@@ -8,13 +8,22 @@ use uuid::Uuid;
 use crate::{VoiceDispatchErrorCode, VoiceDispatchTarget};
 
 #[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub enum VoiceCodec {
+  #[default]
+  Opus,
+}
+
+#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceFormat {
+  pub codec: VoiceCodec,
   pub sample_rate_hz: u32,
   pub channels: u16,
-  pub bits_per_sample: u16,
 }
 
 #[typeshare]
@@ -40,7 +49,7 @@ pub struct VoiceFrame {
   #[debug(skip)]
   #[ts(type = "Uint8Array")]
   #[typeshare(serialized_as = "Vec<u8>")]
-  pub pcm: bytes::Bytes,
+  pub packet: bytes::Bytes,
 }
 
 #[typeshare]

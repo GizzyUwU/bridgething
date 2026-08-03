@@ -8,6 +8,7 @@ pub mod httpx;
 pub mod logging;
 pub mod model;
 pub mod proto;
+pub mod resolver;
 pub mod spclient;
 pub mod store;
 pub mod transport;

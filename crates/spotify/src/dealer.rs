@@ -11,6 +11,7 @@ use librespot_protocol::{
     PutStateRequest, SetVolumeCommand,
   },
   devices::DeviceType,
+  player::ProvidedTrack,
 };
 use protobuf::{Message, MessageField};
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -25,6 +26,9 @@ use crate::{
   transport::{TungsteniteTransport, WsEvent, WsInbox, WsTransport},
   util::now_ms,
 };
+
+const QUEUE_PROVIDER: &str = "queue";
+const IS_QUEUED: &str = "is_queued";
 
 #[derive(Clone)]
 pub struct Dealer {
@@ -350,6 +354,27 @@ impl DealerWriter {
       .await
   }
 
+  pub async fn set_queue(
+    &self,
+    target: &str,
+    next: &[ProvidedTrack],
+    prev: &[ProvidedTrack],
+    revision: &str,
+  ) -> Result<(u16, String)> {
+    let encode = |ts: &[ProvidedTrack]| ts.iter().map(provided_track_json).collect::<Vec<_>>();
+    self
+      .player_command(
+        target,
+        json!({
+          "endpoint": "set_queue",
+          "next_tracks": encode(next),
+          "prev_tracks": encode(prev),
+          "queue_revision": revision,
+        }),
+      )
+      .await
+  }
+
   pub async fn dj_signal(&self, target: &str) -> Result<(u16, String)> {
     self
       .player_command(target, json!({"endpoint": "signal", "signal_id": "jump"}))
@@ -428,6 +453,73 @@ fn decode_payload(p: &str, gzipped: bool) -> Result<Vec<u8>> {
 
 pub fn cluster_playing(cluster: &Cluster) -> bool {
   cluster.player_state.is_playing && !cluster.player_state.is_paused
+}
+
+pub fn queued_track(uri: &str) -> ProvidedTrack {
+  let mut track = ProvidedTrack::new();
+  track.uri = uri.to_string();
+  track.provider = QUEUE_PROVIDER.to_string();
+  track.metadata.insert(IS_QUEUED.to_string(), "true".to_string());
+  track
+}
+
+pub fn is_queued(track: &ProvidedTrack) -> bool {
+  track.provider == QUEUE_PROVIDER || track.metadata.get(IS_QUEUED).is_some_and(|v| v == "true")
+}
+
+pub fn provided_track_json(track: &ProvidedTrack) -> Value {
+  let mut out = serde_json::Map::new();
+  let mut string_field = |key: &str, value: &str| {
+    if !value.is_empty() {
+      out.insert(key.to_string(), json!(value));
+    }
+  };
+  string_field("uri", &track.uri);
+  string_field("uid", &track.uid);
+  string_field("provider", &track.provider);
+  string_field("album_uri", &track.album_uri);
+  string_field("artist_uri", &track.artist_uri);
+  if !track.metadata.is_empty() {
+    out.insert("metadata".to_string(), json!(track.metadata));
+  }
+  for (key, list) in [
+    ("removed", &track.removed),
+    ("blocked", &track.blocked),
+    ("disallow_reasons", &track.disallow_reasons),
+  ] {
+    if !list.is_empty() {
+      out.insert(key.to_string(), json!(list));
+    }
+  }
+  Value::Object(out)
+}
+
+pub fn provided_track_from_json(value: &Value) -> ProvidedTrack {
+  let string_field = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+  let list_field = |key: &str| {
+    value
+      .get(key)
+      .and_then(Value::as_array)
+      .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+      .unwrap_or_default()
+  };
+  let mut track = ProvidedTrack::new();
+  track.uri = string_field("uri");
+  track.uid = string_field("uid");
+  track.provider = string_field("provider");
+  track.album_uri = string_field("album_uri");
+  track.artist_uri = string_field("artist_uri");
+  track.removed = list_field("removed");
+  track.blocked = list_field("blocked");
+  track.disallow_reasons = list_field("disallow_reasons");
+  if let Some(md) = value.get("metadata").and_then(Value::as_object) {
+    for (k, v) in md {
+      if let Some(v) = v.as_str() {
+        track.metadata.insert(k.clone(), v.to_string());
+      }
+    }
+  }
+  track
 }
 
 fn is_phone(info: &DeviceInfo) -> bool {
@@ -568,5 +660,43 @@ mod tests {
     let mut both = cluster("x", true, &[]);
     both.player_state.mut_or_insert_default().is_paused = true;
     assert!(!cluster_playing(&both));
+  }
+
+  #[test]
+  fn queued_track_carries_both_markers_a_receiver_looks_at() {
+    let t = queued_track("spotify:track:a");
+    assert_eq!(t.provider, "queue");
+    assert_eq!(t.metadata.get("is_queued").map(String::as_str), Some("true"));
+    assert!(is_queued(&t));
+
+    let mut context_track = ProvidedTrack::new();
+    context_track.uri = "spotify:track:b".to_string();
+    context_track.provider = "context".to_string();
+    assert!(!is_queued(&context_track));
+  }
+
+  #[test]
+  fn provided_track_json_omits_defaults_and_round_trips() {
+    let mut t = ProvidedTrack::new();
+    t.uri = "spotify:track:a".to_string();
+    t.uid = "q0".to_string();
+    t.provider = "queue".to_string();
+    t.album_uri = "spotify:album:z".to_string();
+    t.disallow_reasons.push("no_prev".to_string());
+    t.metadata.insert("title".to_string(), "A".to_string());
+
+    let encoded = provided_track_json(&t);
+    let obj = encoded.as_object().unwrap();
+    assert!(!obj.contains_key("artist_uri"));
+    assert!(!obj.contains_key("removed"));
+    assert_eq!(obj["metadata"]["title"], "A");
+
+    let decoded = provided_track_from_json(&encoded);
+    assert_eq!(decoded.uri, t.uri);
+    assert_eq!(decoded.uid, t.uid);
+    assert_eq!(decoded.provider, t.provider);
+    assert_eq!(decoded.album_uri, t.album_uri);
+    assert_eq!(decoded.disallow_reasons, t.disallow_reasons);
+    assert_eq!(decoded.metadata, t.metadata);
   }
 }

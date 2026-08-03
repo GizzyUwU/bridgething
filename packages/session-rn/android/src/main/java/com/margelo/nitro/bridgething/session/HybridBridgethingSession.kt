@@ -24,6 +24,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingWebappsChanged: ((BridgethingDeviceWebappsEntry) -> Unit)? = null
         private var pendingWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
+        private var pendingVoiceModelStateChanged: ((BridgethingVoiceModelState) -> Unit)? = null
         private var pendingOtaRunChanged: ((BridgethingOtaRun) -> Unit)? = null
         private var pendingOtaAvailableChanged: ((BridgethingOtaAvailable) -> Unit)? = null
         private var pendingOtaPollChanged: ((BridgethingOtaPollStatus) -> Unit)? = null
@@ -49,6 +50,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     webapps = pendingWebappsChanged,
                     webappDoc = pendingWebappDocChanged,
                     deviceMeta = pendingDeviceMetaChanged,
+                    voiceModel = pendingVoiceModelStateChanged,
                     otaRun = pendingOtaRunChanged,
                     otaAvailable = pendingOtaAvailableChanged,
                     otaPoll = pendingOtaPollChanged,
@@ -64,6 +66,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingWebappsChanged = null
                 pendingWebappDocChanged = null
                 pendingDeviceMetaChanged = null
+                pendingVoiceModelStateChanged = null
                 pendingOtaRunChanged = null
                 pendingOtaAvailableChanged = null
                 pendingOtaPollChanged = null
@@ -80,6 +83,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.webapps?.let(b::setOnWebappsChanged)
             replay.webappDoc?.let(b::setOnWebappDocChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
+            replay.voiceModel?.let(b::setOnVoiceModelStateChanged)
             replay.otaRun?.let(b::setOnOtaRunChanged)
             replay.otaAvailable?.let(b::setOnOtaAvailableChanged)
             replay.otaPoll?.let(b::setOnOtaPollChanged)
@@ -104,6 +108,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val webapps: ((BridgethingDeviceWebappsEntry) -> Unit)?,
         val webappDoc: ((String, String, String, String?) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
+        val voiceModel: ((BridgethingVoiceModelState) -> Unit)?,
         val otaRun: ((BridgethingOtaRun) -> Unit)?,
         val otaAvailable: ((BridgethingOtaAvailable) -> Unit)?,
         val otaPoll: ((BridgethingOtaPollStatus) -> Unit)?,
@@ -240,6 +245,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<Unit> = Promise.async {
         backend?.setCapabilityFlags(flags)
+    }
+
+    override fun voiceModelState(): Promise<BridgethingVoiceModelState> = Promise.async {
+        require().voiceModelState()
     }
 
     override fun setDeviceAutoResume(deviceId: String, enabled: Boolean): Promise<Unit> = Promise.async {
@@ -400,6 +409,12 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnDeviceMetaChanged(callback: (deviceId: String, meta: BridgethingDeviceMeta) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnDeviceMetaChanged) { pendingDeviceMetaChanged = it }
+    }
+
+    override fun setOnVoiceModelStateChanged(callback: (state: BridgethingVoiceModelState) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnVoiceModelStateChanged) {
+            pendingVoiceModelStateChanged = it
+        }
     }
 
     override fun setOnOtaRunChanged(callback: (run: BridgethingOtaRun) -> Unit) {

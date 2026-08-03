@@ -15,3 +15,7 @@ public struct NluInferenceOutput: Sendable {
 public protocol NluInferring: Sendable {
     func infer(transcript: String) async throws -> NluInferenceOutput
 }
+
+public protocol NluPrewarmable: Sendable {
+    func prewarm() async
+}

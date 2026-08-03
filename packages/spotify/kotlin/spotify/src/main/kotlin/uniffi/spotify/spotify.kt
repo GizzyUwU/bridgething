@@ -863,6 +863,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resolve_context(
     ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_resolve_voice(
+    ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resume(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resume_on_connect(
@@ -999,9 +1001,11 @@ external fun uniffi_spotify_fn_method_spotifyclient_play(`ptr`: Long,`uri`: Rust
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_product(`ptr`: Long,
 ): Long
-external fun uniffi_spotify_fn_method_spotifyclient_queue_uri(`ptr`: Long,`uri`: RustBuffer.ByValue,
+external fun uniffi_spotify_fn_method_spotifyclient_queue_uri(`ptr`: Long,`uri`: RustBuffer.ByValue,`position`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_resolve_context(`ptr`: Long,`uri`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_resolve_voice(`ptr`: Long,`req`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_resume(`ptr`: Long,
 ): Long
@@ -1245,10 +1249,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_product() != 12043) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_spotifyclient_queue_uri() != 20637) {
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_queue_uri() != 30870) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resolve_context() != 59118) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_resolve_voice() != 16170) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {
@@ -2826,9 +2833,11 @@ public interface SpotifyClientInterface {
     
     suspend fun `product`(): ProductState
     
-    suspend fun `queueUri`(`uri`: kotlin.String)
+    suspend fun `queueUri`(`uri`: kotlin.String, `position`: QueuePosition)
     
     suspend fun `resolveContext`(`uri`: kotlin.String): BrowseItem
+    
+    suspend fun `resolveVoice`(`req`: VoiceResolveRequest): VoiceResolved
     
     suspend fun `resume`()
     
@@ -3240,12 +3249,12 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `queueUri`(`uri`: kotlin.String) {
+    override suspend fun `queueUri`(`uri`: kotlin.String, `position`: QueuePosition) {
         return uniffiRustCallAsync(
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_queue_uri(
                 uniffiHandle,
-                FfiConverterString.lower(`uri`),
+                FfiConverterString.lower(`uri`),FfiConverterTypeQueuePosition.lower(`position`),
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -3277,6 +3286,27 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { FfiConverterTypeBrowseItem.lift(it) },
         // Error FFI converter
         Exception.ErrorHandler,
+    )
+    }
+
+    
+    @Throws(VoiceResolveException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `resolveVoice`(`req`: VoiceResolveRequest) : VoiceResolved {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_resolve_voice(
+                uniffiHandle,
+                FfiConverterTypeVoiceResolveRequest.lower(`req`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeVoiceResolved.lift(it) },
+        // Error FFI converter
+        VoiceResolveException.ErrorHandler,
     )
     }
 
@@ -4759,6 +4789,12 @@ data class PlayerState (
     var `canRepeatContext`: kotlin.Boolean
     , 
     var `canRepeatTrack`: kotlin.Boolean
+    , 
+    var `canSetQueue`: kotlin.Boolean
+    , 
+    var `canInsertIntoNextTracks`: kotlin.Boolean
+    , 
+    var `canAddToQueue`: kotlin.Boolean
     
 ){
     
@@ -4792,6 +4828,9 @@ public object FfiConverterTypePlayerState: FfiConverterRustBuffer<PlayerState> {
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -4812,7 +4851,10 @@ public object FfiConverterTypePlayerState: FfiConverterRustBuffer<PlayerState> {
             FfiConverterBoolean.allocationSize(value.`canSkipPrev`) +
             FfiConverterBoolean.allocationSize(value.`canToggleShuffle`) +
             FfiConverterBoolean.allocationSize(value.`canRepeatContext`) +
-            FfiConverterBoolean.allocationSize(value.`canRepeatTrack`)
+            FfiConverterBoolean.allocationSize(value.`canRepeatTrack`) +
+            FfiConverterBoolean.allocationSize(value.`canSetQueue`) +
+            FfiConverterBoolean.allocationSize(value.`canInsertIntoNextTracks`) +
+            FfiConverterBoolean.allocationSize(value.`canAddToQueue`)
     )
 
     override fun write(value: PlayerState, buf: ByteBuffer) {
@@ -4833,6 +4875,9 @@ public object FfiConverterTypePlayerState: FfiConverterRustBuffer<PlayerState> {
             FfiConverterBoolean.write(value.`canToggleShuffle`, buf)
             FfiConverterBoolean.write(value.`canRepeatContext`, buf)
             FfiConverterBoolean.write(value.`canRepeatTrack`, buf)
+            FfiConverterBoolean.write(value.`canSetQueue`, buf)
+            FfiConverterBoolean.write(value.`canInsertIntoNextTracks`, buf)
+            FfiConverterBoolean.write(value.`canAddToQueue`, buf)
     }
 }
 
@@ -4942,6 +4987,10 @@ data class SearchResults (
     var `artists`: List<BrowseItem>
     , 
     var `playlists`: List<BrowseItem>
+    , 
+    var `shows`: List<BrowseItem>
+    , 
+    var `episodes`: List<BrowseItem>
     
 ){
     
@@ -4962,6 +5011,8 @@ public object FfiConverterTypeSearchResults: FfiConverterRustBuffer<SearchResult
             FfiConverterSequenceTypeBrowseItem.read(buf),
             FfiConverterSequenceTypeBrowseItem.read(buf),
             FfiConverterSequenceTypeBrowseItem.read(buf),
+            FfiConverterSequenceTypeBrowseItem.read(buf),
+            FfiConverterSequenceTypeBrowseItem.read(buf),
         )
     }
 
@@ -4969,7 +5020,9 @@ public object FfiConverterTypeSearchResults: FfiConverterRustBuffer<SearchResult
             FfiConverterSequenceTypeBrowseItem.allocationSize(value.`tracks`) +
             FfiConverterSequenceTypeBrowseItem.allocationSize(value.`albums`) +
             FfiConverterSequenceTypeBrowseItem.allocationSize(value.`artists`) +
-            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`playlists`)
+            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`playlists`) +
+            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`shows`) +
+            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`episodes`)
     )
 
     override fun write(value: SearchResults, buf: ByteBuffer) {
@@ -4977,6 +5030,8 @@ public object FfiConverterTypeSearchResults: FfiConverterRustBuffer<SearchResult
             FfiConverterSequenceTypeBrowseItem.write(value.`albums`, buf)
             FfiConverterSequenceTypeBrowseItem.write(value.`artists`, buf)
             FfiConverterSequenceTypeBrowseItem.write(value.`playlists`, buf)
+            FfiConverterSequenceTypeBrowseItem.write(value.`shows`, buf)
+            FfiConverterSequenceTypeBrowseItem.write(value.`episodes`, buf)
     }
 }
 
@@ -5103,6 +5158,165 @@ public object FfiConverterTypeTrack: FfiConverterRustBuffer<Track> {
             FfiConverterBoolean.write(value.`isEpisode`, buf)
             FfiConverterBoolean.write(value.`saved`, buf)
             FfiConverterBoolean.write(value.`queued`, buf)
+    }
+}
+
+
+
+data class VoiceAlternative (
+    var `uri`: kotlin.String
+    , 
+    var `display`: kotlin.String
+    , 
+    var `kind`: VoiceTargetKind
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceAlternative: FfiConverterRustBuffer<VoiceAlternative> {
+    override fun read(buf: ByteBuffer): VoiceAlternative {
+        return VoiceAlternative(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeVoiceTargetKind.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VoiceAlternative) = (
+            FfiConverterString.allocationSize(value.`uri`) +
+            FfiConverterString.allocationSize(value.`display`) +
+            FfiConverterTypeVoiceTargetKind.allocationSize(value.`kind`)
+    )
+
+    override fun write(value: VoiceAlternative, buf: ByteBuffer) {
+            FfiConverterString.write(value.`uri`, buf)
+            FfiConverterString.write(value.`display`, buf)
+            FfiConverterTypeVoiceTargetKind.write(value.`kind`, buf)
+    }
+}
+
+
+
+data class VoiceResolveRequest (
+    var `target`: kotlin.String?
+    , 
+    var `targetType`: VoiceTargetKind?
+    , 
+    var `mood`: kotlin.String?
+    , 
+    var `genre`: kotlin.String?
+    , 
+    var `era`: kotlin.String?
+    , 
+    var `popularityFilter`: VoicePopularity?
+    , 
+    var `position`: kotlin.UInt?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceResolveRequest: FfiConverterRustBuffer<VoiceResolveRequest> {
+    override fun read(buf: ByteBuffer): VoiceResolveRequest {
+        return VoiceResolveRequest(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeVoiceTargetKind.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeVoicePopularity.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VoiceResolveRequest) = (
+            FfiConverterOptionalString.allocationSize(value.`target`) +
+            FfiConverterOptionalTypeVoiceTargetKind.allocationSize(value.`targetType`) +
+            FfiConverterOptionalString.allocationSize(value.`mood`) +
+            FfiConverterOptionalString.allocationSize(value.`genre`) +
+            FfiConverterOptionalString.allocationSize(value.`era`) +
+            FfiConverterOptionalTypeVoicePopularity.allocationSize(value.`popularityFilter`) +
+            FfiConverterOptionalUInt.allocationSize(value.`position`)
+    )
+
+    override fun write(value: VoiceResolveRequest, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`target`, buf)
+            FfiConverterOptionalTypeVoiceTargetKind.write(value.`targetType`, buf)
+            FfiConverterOptionalString.write(value.`mood`, buf)
+            FfiConverterOptionalString.write(value.`genre`, buf)
+            FfiConverterOptionalString.write(value.`era`, buf)
+            FfiConverterOptionalTypeVoicePopularity.write(value.`popularityFilter`, buf)
+            FfiConverterOptionalUInt.write(value.`position`, buf)
+    }
+}
+
+
+
+data class VoiceResolved (
+    var `uri`: kotlin.String
+    , 
+    var `contextUri`: kotlin.String?
+    , 
+    var `display`: kotlin.String
+    , 
+    var `kind`: VoiceTargetKind
+    , 
+    var `alternatives`: List<VoiceAlternative>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceResolved: FfiConverterRustBuffer<VoiceResolved> {
+    override fun read(buf: ByteBuffer): VoiceResolved {
+        return VoiceResolved(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeVoiceTargetKind.read(buf),
+            FfiConverterSequenceTypeVoiceAlternative.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VoiceResolved) = (
+            FfiConverterString.allocationSize(value.`uri`) +
+            FfiConverterOptionalString.allocationSize(value.`contextUri`) +
+            FfiConverterString.allocationSize(value.`display`) +
+            FfiConverterTypeVoiceTargetKind.allocationSize(value.`kind`) +
+            FfiConverterSequenceTypeVoiceAlternative.allocationSize(value.`alternatives`)
+    )
+
+    override fun write(value: VoiceResolved, buf: ByteBuffer) {
+            FfiConverterString.write(value.`uri`, buf)
+            FfiConverterOptionalString.write(value.`contextUri`, buf)
+            FfiConverterString.write(value.`display`, buf)
+            FfiConverterTypeVoiceTargetKind.write(value.`kind`, buf)
+            FfiConverterSequenceTypeVoiceAlternative.write(value.`alternatives`, buf)
     }
 }
 
@@ -5462,6 +5676,97 @@ public object FfiConverterTypeLibraryScope: FfiConverterRustBuffer<LibraryScope>
 
 
 
+/**
+ * where a queued uri lands. `at` indexes the upcoming list a caller was shown, which is
+ * the delimiter-free projection `queue` builds, not raw `next_tracks`.
+ */
+sealed class QueuePosition {
+    
+    object Append : QueuePosition()
+    
+    
+    object Next : QueuePosition()
+    
+    
+    data class Index(
+        val `at`: kotlin.UInt) : QueuePosition()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeQueuePosition : FfiConverterRustBuffer<QueuePosition>{
+    override fun read(buf: ByteBuffer): QueuePosition {
+        return when(buf.getInt()) {
+            1 -> QueuePosition.Append
+            2 -> QueuePosition.Next
+            3 -> QueuePosition.Index(
+                FfiConverterUInt.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: QueuePosition) = when(value) {
+        is QueuePosition.Append -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is QueuePosition.Next -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is QueuePosition.Index -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUInt.allocationSize(value.`at`)
+            )
+        }
+    }
+
+    override fun write(value: QueuePosition, buf: ByteBuffer) {
+        when(value) {
+            is QueuePosition.Append -> {
+                buf.putInt(1)
+                Unit
+            }
+            is QueuePosition.Next -> {
+                buf.putInt(2)
+                Unit
+            }
+            is QueuePosition.Index -> {
+                buf.putInt(3)
+                FfiConverterUInt.write(value.`at`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 
 enum class RepeatMode {
     
@@ -5489,6 +5794,139 @@ public object FfiConverterTypeRepeatMode: FfiConverterRustBuffer<RepeatMode> {
     override fun allocationSize(value: RepeatMode) = 4UL
 
     override fun write(value: RepeatMode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class VoicePopularity {
+    
+    TOP5,
+    TOP10,
+    POPULAR,
+    RECENT,
+    NEW,
+    RANDOM;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoicePopularity: FfiConverterRustBuffer<VoicePopularity> {
+    override fun read(buf: ByteBuffer) = try {
+        VoicePopularity.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VoicePopularity) = 4UL
+
+    override fun write(value: VoicePopularity, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+
+sealed class VoiceResolveException(message: String): kotlin.Exception(message) {
+        
+        class NoMatch(message: String) : VoiceResolveException(message)
+        
+        class NoAnchorContext(message: String) : VoiceResolveException(message)
+        
+        class Spotify(message: String) : VoiceResolveException(message)
+        
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<VoiceResolveException> {
+        override fun lift(error_buf: RustBuffer.ByValue): VoiceResolveException = FfiConverterTypeVoiceResolveError.lift(error_buf)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceResolveError : FfiConverterRustBuffer<VoiceResolveException> {
+    override fun read(buf: ByteBuffer): VoiceResolveException {
+        
+            return when(buf.getInt()) {
+            1 -> VoiceResolveException.NoMatch(FfiConverterString.read(buf))
+            2 -> VoiceResolveException.NoAnchorContext(FfiConverterString.read(buf))
+            3 -> VoiceResolveException.Spotify(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+        
+    }
+
+    override fun allocationSize(value: VoiceResolveException): ULong {
+        return 4UL
+    }
+
+    override fun write(value: VoiceResolveException, buf: ByteBuffer) {
+        when(value) {
+            is VoiceResolveException.NoMatch -> {
+                buf.putInt(1)
+                Unit
+            }
+            is VoiceResolveException.NoAnchorContext -> {
+                buf.putInt(2)
+                Unit
+            }
+            is VoiceResolveException.Spotify -> {
+                buf.putInt(3)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+
+enum class VoiceTargetKind {
+    
+    TRACK,
+    ALBUM,
+    ARTIST,
+    PLAYLIST,
+    SHOW,
+    EPISODE,
+    STATION;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceTargetKind: FfiConverterRustBuffer<VoiceTargetKind> {
+    override fun read(buf: ByteBuffer) = try {
+        VoiceTargetKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VoiceTargetKind) = 4UL
+
+    override fun write(value: VoiceTargetKind, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -5948,6 +6386,70 @@ public object FfiConverterOptionalTypeTrack: FfiConverterRustBuffer<Track?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeVoicePopularity: FfiConverterRustBuffer<VoicePopularity?> {
+    override fun read(buf: ByteBuffer): VoicePopularity? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeVoicePopularity.read(buf)
+    }
+
+    override fun allocationSize(value: VoicePopularity?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeVoicePopularity.allocationSize(value)
+        }
+    }
+
+    override fun write(value: VoicePopularity?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeVoicePopularity.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeVoiceTargetKind: FfiConverterRustBuffer<VoiceTargetKind?> {
+    override fun read(buf: ByteBuffer): VoiceTargetKind? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeVoiceTargetKind.read(buf)
+    }
+
+    override fun allocationSize(value: VoiceTargetKind?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeVoiceTargetKind.allocationSize(value)
+        }
+    }
+
+    override fun write(value: VoiceTargetKind?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeVoiceTargetKind.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceBoolean: FfiConverterRustBuffer<List<kotlin.Boolean>> {
     override fun read(buf: ByteBuffer): List<kotlin.Boolean> {
         val len = buf.getInt()
@@ -6162,6 +6664,34 @@ public object FfiConverterSequenceTypeTrack: FfiConverterRustBuffer<List<Track>>
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeTrack.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeVoiceAlternative: FfiConverterRustBuffer<List<VoiceAlternative>> {
+    override fun read(buf: ByteBuffer): List<VoiceAlternative> {
+        val len = buf.getInt()
+        return List<VoiceAlternative>(len) {
+            FfiConverterTypeVoiceAlternative.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<VoiceAlternative>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeVoiceAlternative.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<VoiceAlternative>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeVoiceAlternative.write(it, buf)
         }
     }
 }

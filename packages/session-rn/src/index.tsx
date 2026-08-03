@@ -20,6 +20,7 @@ import type {
   BridgethingProviderInfo,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
+  BridgethingVoiceModelState,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingWebappSlot,
@@ -68,6 +69,8 @@ export type {
   BridgethingServiceHealthKind,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
+  BridgethingVoiceModelState,
+  BridgethingVoiceModelStatus,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingWebappSlot,
@@ -88,6 +91,7 @@ export type SessionEvent =
   | { type: 'webappsChanged'; entry: BridgethingDeviceWebappsEntry }
   | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
+  | { type: 'voiceModelStateChanged'; state: BridgethingVoiceModelState }
   | { type: 'otaRunChanged'; run: BridgethingOtaRun }
   | { type: 'otaAvailableChanged'; available: BridgethingOtaAvailable }
   | { type: 'otaPollChanged'; status: BridgethingOtaPollStatus }
@@ -264,6 +268,10 @@ export class BridgethingSession {
     await this.native.setCapabilityFlags(flags);
   }
 
+  async voiceModelState(): Promise<BridgethingVoiceModelState> {
+    return this.native.voiceModelState();
+  }
+
   async setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void> {
     await this.native.setDeviceAutoResume(deviceId, enabled);
   }
@@ -398,6 +406,9 @@ export class BridgethingSession {
     });
     this.native.setOnDeviceMetaChanged((deviceId, meta) => {
       this.dispatch({ type: 'deviceMetaChanged', deviceId, meta });
+    });
+    this.native.setOnVoiceModelStateChanged(state => {
+      this.dispatch({ type: 'voiceModelStateChanged', state });
     });
     this.native.setOnOtaRunChanged(run => {
       this.dispatch({ type: 'otaRunChanged', run });

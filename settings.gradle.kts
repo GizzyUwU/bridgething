@@ -24,6 +24,12 @@ project(":packages:glue:kotlin:glue").projectDir = file("packages/glue/kotlin/gl
 include(":packages:spotify:kotlin:spotify")
 project(":packages:spotify:kotlin:spotify").projectDir = file("packages/spotify/kotlin/spotify")
 
+include(":packages:nlu:kotlin:nlu")
+project(":packages:nlu:kotlin:nlu").projectDir = file("packages/nlu/kotlin/nlu")
+
+include(":packages:nlu:kotlin:nlukit")
+project(":packages:nlu:kotlin:nlukit").projectDir = file("packages/nlu/kotlin/nlukit")
+
 include(":packages:apple-music:kotlin:apple-music")
 project(":packages:apple-music:kotlin:apple-music").projectDir = file("packages/apple-music/kotlin/apple-music")
 
@@ -32,3 +38,6 @@ project(":packages:lyrics:kotlin:lyrics").projectDir = file("packages/lyrics/kot
 
 include(":packages:companion:kotlin:companion")
 project(":packages:companion:kotlin:companion").projectDir = file("packages/companion/kotlin/companion")
+
+include(":packages:asr:kotlin:whisper")
+project(":packages:asr:kotlin:whisper").projectDir = file("packages/asr/kotlin/whisper")

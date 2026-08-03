@@ -2,7 +2,6 @@ import Foundation
 
 public enum NluIntentCatalog {
     public static let surfaceNames: [String] = [
-        "ADD_TO_COLLECTION",
         "ADD_TO_PLAYLIST",
         "ADD_TO_QUEUE",
         "CANCEL_INTERACTION",
@@ -13,22 +12,18 @@ public enum NluIntentCatalog {
         "PAUSE",
         "PHONE_ACTION",
         "PLAY",
-        "PLAY_PRESET",
+        "PRESET_PLAY",
+        "PRESET_SAVE",
         "PREVIOUS",
-        "SAVE_TO_PRESET",
         "SEARCH",
         "SEEK_RELATIVE",
-        "SET_BRIGHTNESS",
         "SET_DISCOVERABLE",
-        "SET_MUTE",
         "SET_PLAYBACK_SPEED",
         "SET_REPEAT",
         "SET_SHUFFLE",
         "SET_VOLUME",
         "SHOW_VIEW",
-        "SYSTEM_ACTION",
         "THUMBS_UP",
-        "WHATS_PLAYING",
     ]
 
     public static let noIntent = "NO_INTENT"

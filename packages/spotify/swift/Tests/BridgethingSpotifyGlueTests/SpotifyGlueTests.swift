@@ -31,7 +31,7 @@ final class SpotifyGlueTests: XCTestCase {
         var observer: (any Spotify.Observer)?
         var root: [Spotify.Shelf] = []
         var page = Spotify.BrowsePage(items: [], total: 0, hasMore: false)
-        var searchResults = Spotify.SearchResults(tracks: [], albums: [], artists: [], playlists: [])
+        var searchResults = Spotify.SearchResults(tracks: [], albums: [], artists: [], playlists: [], shows: [], episodes: [])
         var contains: [Bool] = []
         var productState = Spotify.ProductState(product: "premium", catalogue: "premium", country: "US", isPremium: true, canUseSuperbird: true)
         var likedWrites: [(String, Bool)] = []
@@ -60,7 +60,10 @@ final class SpotifyGlueTests: XCTestCase {
         func seek(positionMs _: Int64) async throws {}
         func setShuffle(on _: Bool) async throws {}
         func setRepeat(mode _: Spotify.RepeatMode) async throws {}
-        func queueUri(uri _: String) async throws {}
+        var queueCalls: [(uri: String, position: Spotify.QueuePosition)] = []
+        func queueUri(uri: String, position: Spotify.QueuePosition) async throws {
+            queueCalls.append((uri, position))
+        }
         func play(uri: String, skipToUri: String?) async throws { playCalls.append((uri, skipToUri)) }
         func setVolume(percent: Double) async throws {
             volume = percent
@@ -83,6 +86,16 @@ final class SpotifyGlueTests: XCTestCase {
         func browse(nodeId _: String, limit _: UInt32, offset _: UInt32) async throws -> Spotify.BrowsePage { page }
         func search(query _: String, limit _: UInt32) async throws -> Spotify.SearchResults { searchResults }
         func resolveContext(uri _: String) async throws -> Spotify.BrowseItem { item("spotify:playlist:1", "Ctx") }
+        var voiceResolved = Spotify.VoiceResolved(
+            uri: "spotify:playlist:1", contextUri: nil, display: "Ctx", kind: .playlist, alternatives: []
+        )
+        var voiceResolveCalls: [Spotify.VoiceResolveRequest] = []
+        var voiceResolveFailure: (any Swift.Error)?
+        func resolveVoice(req: Spotify.VoiceResolveRequest) async throws -> Spotify.VoiceResolved {
+            voiceResolveCalls.append(req)
+            if let voiceResolveFailure { throw voiceResolveFailure }
+            return voiceResolved
+        }
         func favoritesContains(uris _: [String]) async throws -> [Bool] { contains }
         func favoritesSet(uri: String, liked: Bool) async throws { likedWrites.append((uri, liked)) }
         func favoritesList(limit _: UInt32, offset _: UInt32) async throws -> Spotify.BrowsePage { page }
@@ -207,7 +220,9 @@ final class SpotifyGlueTests: XCTestCase {
         fake.searchResults = Spotify.SearchResults(
             tracks: [track("spotify:track:1", "T")],
             albums: [item("spotify:album:1", "A")],
-            artists: [], playlists: []
+            artists: [], playlists: [],
+            shows: [item("spotify:show:1", "S", hasChildren: true)],
+            episodes: [item("spotify:episode:1", "E")]
         )
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
@@ -215,6 +230,24 @@ final class SpotifyGlueTests: XCTestCase {
         guard case let .library(.searchReply(reply)) = resp.data else { return XCTFail("expected searchReply") }
         XCTAssertEqual(reply.result.items.count, 2)
         XCTAssertEqual(reply.result.kinds, [.track, .album])
+    }
+
+    func testSearchMapsShowsAndEpisodesWhenKindsAreUnconstrained() async throws {
+        let fake = FakeClient()
+        fake.searchResults = Spotify.SearchResults(
+            tracks: [], albums: [], artists: [], playlists: [],
+            shows: [item("spotify:show:1", "Show")],
+            episodes: [item("spotify:episode:1", "Episode")]
+        )
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        let resp = try await h.driver.request(.library(.search(LibrarySearchRequest(query: "x", kinds: nil, limit: 10, offset: 0))), timeout: .seconds(5))
+        guard case let .library(.searchReply(reply)) = resp.data else { return XCTFail("expected searchReply") }
+        XCTAssertEqual(reply.result.kinds, [.show, .podcastEpisode])
+        guard case let .show(s) = reply.result.items.first else { return XCTFail("expected a show item") }
+        XCTAssertEqual(s.name, "Show")
+        guard case let .podcastEpisode(e) = reply.result.items.last else { return XCTFail("expected an episode item") }
+        XCTAssertEqual(e.uri, "spotify:episode:1")
     }
 
     // MARK: - now-playing + authority
@@ -547,6 +580,19 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertEqual(changed.scope, .playlists)
     }
 
+    func testQueueForwardsEveryPositionToTheClient() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+
+        try await h.glue.queue(QueueUri(uri: "spotify:track:a", position: .append))
+        try await h.glue.queue(QueueUri(uri: "spotify:track:b", position: .next))
+        try await h.glue.queue(QueueUri(uri: "spotify:track:c", position: .index(3)))
+
+        XCTAssertEqual(fake.queueCalls.map(\.uri), ["spotify:track:a", "spotify:track:b", "spotify:track:c"])
+        XCTAssertEqual(fake.queueCalls.map(\.position), [.append, .next, .index(at: 3)])
+    }
+
     func testSkipToIndexPlaysContextSkippingToQueueUri() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
@@ -632,6 +678,18 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertFalse(dbg.authorityPlaybackHeld, "logout must release playback authority")
     }
 
+    func testAttachedGlueSuppliesTheCompanionVoiceResolver() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        let attached = await h.companion.voiceCatalogResolver()
+        XCTAssertNotNil(attached, "an attached provider resolves voice targets")
+
+        await h.companion.detach(id: SpotifyGlue.name)
+        let detached = await h.companion.voiceCatalogResolver()
+        XCTAssertNil(detached, "a detached provider leaves voice slots unresolved")
+    }
+
     func testNowPlayingLikedComesFromRustSaved() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
@@ -684,6 +742,7 @@ private func state(_ t: Spotify.Track, remote: Bool = false) -> Spotify.PlayerSt
         positionMs: 0, durationMs: t.durationMs, shuffle: false, repeat: .off,
         playingRemotely: remote, remoteDeviceId: remote ? "speaker" : "", onRemoteSpeaker: remote,
         canSeek: true, canSkipNext: true, canSkipPrev: true, canToggleShuffle: true,
-        canRepeatContext: true, canRepeatTrack: true
+        canRepeatContext: true, canRepeatTrack: true,
+        canSetQueue: true, canInsertIntoNextTracks: true, canAddToQueue: true
     )
 }

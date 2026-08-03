@@ -259,7 +259,8 @@ pub struct PlayContext {
 }
 
 /// Where in the queue a `queue({ uri })` should land. `Append` (default)
-/// goes at the end; `Next` is play-next; `Index` is an explicit position.
+/// goes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot
+/// in the upcoming list.
 #[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

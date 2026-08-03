@@ -637,15 +637,17 @@ export type TunnelOpenReply = Record<symbol, never>;
 
 export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
 
+export type VoiceCodec = 'opus';
+
 export type VoiceDispatch = { resolved: NluResolvedIntent; stage: NluStage | null };
 
 export type VoiceDispatchFailed = { code: VoiceDispatchErrorCode; intent: string; msg: string };
 
 export type VoiceDispatched = { target: VoiceDispatchTarget; intent: string; webappId: string | null };
 
-export type VoiceFormat = { sampleRateHz: number; channels: number; bitsPerSample: number };
+export type VoiceFormat = { codec: VoiceCodec; sampleRateHz: number; channels: number };
 
-export type VoiceFrame = { streamId: string; seq: number; pcm: Uint8Array };
+export type VoiceFrame = { streamId: string; seq: number; packet: Uint8Array };
 
 export type VoiceMicOpen = { reason: VoiceCaptureReason };
 

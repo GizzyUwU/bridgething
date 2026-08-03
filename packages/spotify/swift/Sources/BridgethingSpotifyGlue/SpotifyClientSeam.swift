@@ -15,7 +15,7 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
     func seek(positionMs: Int64) async throws
     func setShuffle(on: Bool) async throws
     func setRepeat(mode: Spotify.RepeatMode) async throws
-    func queueUri(uri: String) async throws
+    func queueUri(uri: String, position: Spotify.QueuePosition) async throws
     func play(uri: String, skipToUri: String?) async throws
     func setVolume(percent: Double) async throws
     func volumeStep(deltaPercent: Double) async throws -> Double
@@ -27,6 +27,7 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
     func browse(nodeId: String, limit: UInt32, offset: UInt32) async throws -> BrowsePage
     func search(query: String, limit: UInt32) async throws -> SearchResults
     func resolveContext(uri: String) async throws -> Spotify.BrowseItem
+    func resolveVoice(req: Spotify.VoiceResolveRequest) async throws -> Spotify.VoiceResolved
     func favoritesContains(uris: [String]) async throws -> [Bool]
     func favoritesSet(uri: String, liked: Bool) async throws
     func favoritesList(limit: UInt32, offset: UInt32) async throws -> BrowsePage

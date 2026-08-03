@@ -24,6 +24,11 @@ android {
       isReturnDefaultValues = true
     }
   }
+
+  sourceSets {
+    getByName("test") { kotlin.srcDir("src/testShared/kotlin") }
+    getByName("androidTest") { kotlin.srcDir("src/testShared/kotlin") }
+  }
 }
 
 kotlin {
@@ -48,6 +53,8 @@ dependencies {
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
   testImplementation("io.mockk:mockk:1.13.13")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+  androidTestImplementation(project(":packages:asr:kotlin:whisper"))
+  androidTestImplementation(project(":packages:nlu:kotlin:nlukit"))
   androidTestImplementation("androidx.test.ext:junit:1.2.1")
   androidTestImplementation("androidx.test:runner:1.6.2")
   androidTestImplementation("androidx.test:core-ktx:1.6.1")
@@ -55,4 +62,8 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
   useJUnitPlatform()
+  System.getenv("BRIDGETHING_ASR_EVAL")?.let {
+    environment("BRIDGETHING_ASR_EVAL", it)
+    testLogging.showStandardStreams = true
+  }
 }

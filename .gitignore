@@ -4,12 +4,15 @@
 adapters/node/native
 
 # swift
-/.build
+.build/
+Frameworks/
 
 # gradle
 /.gradle
 /local.properties
 crates/lib/kotlin/schema/bin/
+jniLibs/
+.cxx/
 
 # nix
 result

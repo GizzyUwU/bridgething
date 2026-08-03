@@ -120,6 +120,8 @@ dependencies {
     implementation project(":packages:lyrics:kotlin:lyrics")
     implementation project(":packages:spotify:kotlin:spotify")
     implementation project(":packages:apple-music:kotlin:apple-music")
+    implementation project(":packages:nlu:kotlin:nlukit")
+    implementation project(":packages:asr:kotlin:whisper")
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "androidx.security:security-crypto:1.1.0"
     implementation "androidx.core:core:1.17.0"

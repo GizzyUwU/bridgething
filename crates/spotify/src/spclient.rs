@@ -4,6 +4,7 @@ use std::{
 };
 
 use librespot_protocol::{
+  autoplay_context_request::AutoplayContextRequest,
   extended_metadata::{
     BatchedEntityRequest, BatchedEntityRequestHeader, BatchedExtensionResponse, EntityRequest, ExtensionQuery,
   },
@@ -16,7 +17,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 
 use crate::{
   error::{Error, Result},
-  http::{SPCLIENT, SpHttp, random_hex},
+  http::{PROTO_CT, SPCLIENT, SpHttp, random_hex},
   httpx::{HttpMethod, with_query},
   proto::custom::{
     casita_home::HomeResponse,
@@ -76,6 +77,19 @@ impl SpClient {
     Ok(T::parse_from_bytes(&resp.body)?)
   }
 
+  async fn get_json(&self, url: String, query: &[(&str, String)], what: &str) -> Result<serde_json::Value> {
+    tracing::debug!(%what, "spclient: get json");
+    let headers = self.http.headers(true).await?;
+    let resp = self
+      .http
+      .send(HttpMethod::Get, with_query(url, query)?, headers, Vec::new(), 0)
+      .await?;
+    if !resp.ok() {
+      return Err(Error::status(what, resp.status, resp.text()));
+    }
+    Ok(serde_json::from_slice(&resp.body)?)
+  }
+
   async fn post_proto<T: Message>(&self, url: String, body: Vec<u8>, what: &str) -> Result<T> {
     tracing::debug!(%what, "spclient: post");
     let headers = self.http.headers(false).await?;
@@ -87,21 +101,42 @@ impl SpClient {
   }
 
   pub async fn product_state(&self) -> Result<serde_json::Value> {
-    let headers = self.http.headers(true).await?;
+    self
+      .get_json(format!("{SPCLIENT}/melody/v1/product_state"), &[], "product_state")
+      .await
+  }
+
+  pub async fn context_resolve(&self, uri: &str) -> Result<serde_json::Value> {
+    self
+      .get_json(format!("{SPCLIENT}/context-resolve/v1/{uri}"), &[], "context-resolve")
+      .await
+  }
+
+  pub async fn autoplay_context(&self, context_uri: &str, recent_tracks: &[String]) -> Result<serde_json::Value> {
+    let mut req = AutoplayContextRequest::new();
+    req.context_uri = Some(context_uri.to_string());
+    req.recent_track_uri = recent_tracks.to_vec();
+    let mut headers = self.http.headers(true).await?;
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(PROTO_CT));
     let resp = self
       .http
       .send(
-        HttpMethod::Get,
-        format!("{SPCLIENT}/melody/v1/product_state"),
+        HttpMethod::Post,
+        format!("{SPCLIENT}/context-resolve/v1/autoplay"),
         headers,
-        Vec::new(),
+        req.write_to_bytes()?,
         0,
       )
       .await?;
     if !resp.ok() {
-      return Err(Error::status("product_state", resp.status, resp.text()));
+      return Err(Error::status("context-resolve-autoplay", resp.status, resp.text()));
     }
     Ok(serde_json::from_slice(&resp.body)?)
+  }
+
+  pub async fn context_page(&self, page_uri: &str) -> Result<serde_json::Value> {
+    let path = page_uri.trim_start_matches("hm:/");
+    self.get_json(format!("{SPCLIENT}{path}"), &[], "context-page").await
   }
 
   pub async fn get_home(&self, locale: &str) -> Result<HomeResponse> {

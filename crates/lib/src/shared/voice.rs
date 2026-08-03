@@ -7,16 +7,6 @@ use typeshare::typeshare;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
-pub struct NluConfidence {
-  pub intent: String,
-  pub slots: Option<String>,
-}
-
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
 pub struct NluAlternate {
   pub intent: String,
   pub slots: Option<NluSlots>,
@@ -28,32 +18,76 @@ pub struct NluAlternate {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NluSlots {
-  pub artist: Option<String>,
-  pub track: Option<String>,
-  pub album: Option<String>,
+  pub target: Option<String>,
+  pub target_type: Option<NluTargetType>,
   pub playlist: Option<String>,
-  pub podcast: Option<String>,
-  pub episode: Option<String>,
-  pub mood: Option<String>,
   pub genre: Option<String>,
+  pub mood: Option<String>,
   pub era: Option<String>,
-  pub popularity_filter: Option<String>,
-  pub entity_type: Option<String>,
-  pub query: Option<String>,
-  pub webapp_name: Option<String>,
-  pub preset: Option<String>,
+  pub popularity_filter: Option<NluPopularityFilter>,
+  pub position: Option<u32>,
+  pub count: Option<u32>,
+  pub scope: Option<NluScope>,
   pub enabled: Option<bool>,
+  pub mute: Option<bool>,
   pub repeat_mode: Option<NluRepeatMode>,
   pub seconds: Option<i32>,
   pub speed: Option<NluPlaybackSpeed>,
   pub direction: Option<NluDirection>,
-  pub amount: Option<String>,
+  pub amount: Option<NluAmount>,
   pub level: Option<u32>,
-  pub brightness_mode: Option<NluBrightnessMode>,
+  pub preset: Option<String>,
   pub view: Option<NluView>,
   pub phone_action: Option<NluPhoneAction>,
-  pub system_action: Option<NluSystemAction>,
+  pub webapp_name: Option<String>,
   pub uri: Option<String>,
+  pub context_uri: Option<String>,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluTargetType {
+  Artist,
+  Track,
+  Album,
+  Playlist,
+  Podcast,
+  Episode,
+  Station,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluPopularityFilter {
+  Top5,
+  Top10,
+  Popular,
+  Recent,
+  New,
+  Random,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluScope {
+  PreviousTrack,
+  Restart,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum NluAmount {
+  Small,
+  Medium,
+  Large,
 }
 
 #[typeshare]
@@ -94,23 +128,18 @@ pub enum NluDirection {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
-pub enum NluBrightnessMode {
-  Auto,
-  Manual,
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
 pub enum NluView {
+  NowPlaying,
+  Artist,
+  Album,
+  Playlist,
+  Playlists,
   Library,
-  Presets,
   Songs,
+  Presets,
+  Queue,
   SavedEpisodes,
   NewEpisodes,
-  Queue,
-  ThisArtist,
 }
 
 #[typeshare]
@@ -130,15 +159,6 @@ pub enum NluPhoneAction {
 }
 
 #[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
-pub enum NluSystemAction {
-  Reboot,
-  PowerOff,
-}
-
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -148,7 +168,6 @@ pub struct NluResolvedIntent {
   #[serde(default)]
   pub slots: NluSlots,
   pub transcript: String,
-  pub confidence: Option<NluConfidence>,
   pub alternates: Option<Vec<NluAlternate>>,
 }
 
@@ -196,7 +215,7 @@ pub enum VoiceDispatchErrorCode {
 pub enum VoiceDispatchTarget {
   /// Transport / playback effect
   Playback,
-  /// A daemon-local device setting (brightness, discoverable, power).
+  /// A daemon-local device action (discoverable, preset save, cancel).
   Device,
   /// Phone call control over the companion's phone surface.
   Phone,

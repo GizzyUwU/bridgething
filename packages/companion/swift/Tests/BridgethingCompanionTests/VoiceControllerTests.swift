@@ -40,13 +40,26 @@ struct VoiceControllerTests {
     func acceptedIntentKeepsSlots() async throws {
         let client = FakeNluInference(
             logits: ["PLAY": 9],
-            slots: .init(artist: "girl in red", track: "you stupid bitch")
+            slots: .init(target: "you stupid bitch by girl in red", targetType: .track)
         )
-        let resolution = try await VoiceController(client: client).resolve(transcript: "play that girl in red song")
+        let resolution = try await VoiceController(client: client).resolve(transcript: "play you stupid bitch by girl in red")
         #expect(resolution.stage == .model)
         #expect(resolution.resolved.intent == "PLAY")
-        #expect(resolution.resolved.slots.artist == "girl in red")
-        #expect(resolution.resolved.slots.track == "you stupid bitch")
+        #expect(resolution.resolved.slots.target == "you stupid bitch by girl in red")
+        #expect(resolution.resolved.slots.targetType == .track)
+    }
+
+    @Test("prewarm reaches a client that can be warmed")
+    func prewarmForwardsToClient() async throws {
+        let client = PrewarmableNluInference()
+        await VoiceController(client: client).prewarm()
+        #expect(client.warmed.count == 1)
+    }
+
+    @Test("prewarm is a no-op for a client with nothing to warm")
+    func prewarmIgnoresPlainClient() async throws {
+        await VoiceController(client: FakeNluInference(failWithCall: true)).prewarm()
+        await VoiceController().prewarm()
     }
 
     @Test("an out-of-domain utterance resolves to NO_INTENT")
@@ -61,7 +74,7 @@ struct VoiceControllerTests {
     func ambiguous() async throws {
         let client = FakeNluInference(
             logits: ["PLAY": 4.0, "SEARCH": 3.95],
-            slots: .init(query: "pink")
+            slots: .init(target: "pink")
         )
         let resolution = try await VoiceController(client: client).resolve(transcript: "pink")
         #expect(resolution.stage == .rejectedClarify)

@@ -9,6 +9,8 @@ use librespot_protocol::{
 
 use crate::util::{gid_to_base62, image_hex};
 
+const DELIMITER_URI: &str = "spotify:delimiter";
+
 #[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct Artist {
   pub uri: String,
@@ -50,6 +52,16 @@ pub enum LibraryScope {
   Playlists,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum QueuePosition {
+  #[default]
+  Append,
+  Next,
+  Index {
+    at: u32,
+  },
+}
+
 #[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct PlayerState {
   pub track: Option<Track>,
@@ -69,6 +81,9 @@ pub struct PlayerState {
   pub can_toggle_shuffle: bool,
   pub can_repeat_context: bool,
   pub can_repeat_track: bool,
+  pub can_set_queue: bool,
+  pub can_insert_into_next_tracks: bool,
+  pub can_add_to_queue: bool,
 }
 
 #[derive(Debug, Clone, Default, uniffi::Record)]
@@ -145,6 +160,8 @@ pub struct SearchResults {
   pub albums: Vec<BrowseItem>,
   pub artists: Vec<BrowseItem>,
   pub playlists: Vec<BrowseItem>,
+  pub shows: Vec<BrowseItem>,
+  pub episodes: Vec<BrowseItem>,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -301,13 +318,16 @@ pub fn player_state(cluster: &Cluster) -> PlayerState {
     can_toggle_shuffle: r.disallow_toggling_shuffle_reasons.is_empty(),
     can_repeat_context: r.disallow_toggling_repeat_context_reasons.is_empty(),
     can_repeat_track: r.disallow_toggling_repeat_track_reasons.is_empty(),
+    can_set_queue: r.disallow_set_queue_reasons.is_empty(),
+    can_insert_into_next_tracks: r.disallow_inserting_into_next_tracks_reasons.is_empty(),
+    can_add_to_queue: r.disallow_add_to_queue_reasons.is_empty(),
     track,
   }
 }
 
 pub fn queue(cluster: &Cluster) -> Queue {
   let ps = &cluster.player_state;
-  let content = |pt: &&ProvidedTrack| pt.uri != "spotify:delimiter";
+  let content = |pt: &&ProvidedTrack| pt.uri != DELIMITER_URI;
   Queue {
     previous: ps.prev_tracks.iter().filter(content).map(track_from_provided).collect(),
     current: if ps.track.uri.is_empty() {
@@ -317,6 +337,20 @@ pub fn queue(cluster: &Cluster) -> Queue {
     },
     next: ps.next_tracks.iter().filter(content).map(track_from_provided).collect(),
   }
+}
+
+pub fn raw_next_index(next_tracks: &[ProvidedTrack], filtered_index: u32) -> usize {
+  let mut seen = 0u32;
+  for (raw, track) in next_tracks.iter().enumerate() {
+    if track.uri == DELIMITER_URI {
+      continue;
+    }
+    if seen == filtered_index {
+      return raw;
+    }
+    seen += 1;
+  }
+  next_tracks.len()
 }
 
 fn device_kind(kind: DeviceType) -> DeviceKind {
@@ -617,6 +651,123 @@ mod tests {
     assert_eq!(q.next[0].name, "A");
     assert_eq!(q.next[0].duration_ms, 1000);
     assert!(q.next.iter().all(|t| t.uri != "spotify:delimiter"));
+  }
+
+  fn delimiter() -> ProvidedTrack {
+    provided(DELIMITER_URI, &[])
+  }
+
+  fn uris(tracks: &[ProvidedTrack]) -> Vec<&str> {
+    tracks.iter().map(|t| t.uri.as_str()).collect()
+  }
+
+  fn spliced(raw: &[ProvidedTrack], filtered_index: u32) -> Vec<String> {
+    let mut next = raw.to_vec();
+    next.insert(raw_next_index(raw, filtered_index), provided("spotify:track:x", &[]));
+    let mut cluster = Cluster::new();
+    cluster.player_state.mut_or_insert_default().next_tracks = next;
+    queue(&cluster).next.into_iter().map(|t| t.uri).collect()
+  }
+
+  #[test]
+  fn raw_next_index_without_delimiters_is_the_identity_until_the_end() {
+    let list = [provided("spotify:track:a", &[]), provided("spotify:track:b", &[])];
+    assert_eq!(raw_next_index(&list, 0), 0);
+    assert_eq!(raw_next_index(&list, 1), 1);
+    assert_eq!(raw_next_index(&list, 2), 2, "one past the last track is the tail");
+    assert_eq!(raw_next_index(&list, 9), 2, "far past the end clamps to the tail");
+    assert_eq!(raw_next_index(&[], 0), 0);
+    assert_eq!(raw_next_index(&[], 7), 0);
+  }
+
+  #[test]
+  fn raw_next_index_skips_delimiters_wherever_they_sit() {
+    let leading = [delimiter(), provided("spotify:track:a", &[])];
+    assert_eq!(
+      raw_next_index(&leading, 0),
+      1,
+      "a leading delimiter shifts slot 0 right"
+    );
+    assert_eq!(raw_next_index(&leading, 1), 2);
+
+    let middle = [
+      provided("spotify:track:a", &[]),
+      delimiter(),
+      provided("spotify:track:b", &[]),
+    ];
+    assert_eq!(raw_next_index(&middle, 0), 0);
+    assert_eq!(raw_next_index(&middle, 1), 2, "slot 1 is past the interior delimiter");
+    assert_eq!(raw_next_index(&middle, 2), 3);
+
+    let trailing = [provided("spotify:track:a", &[]), delimiter()];
+    assert_eq!(raw_next_index(&trailing, 0), 0);
+    assert_eq!(raw_next_index(&trailing, 1), 2, "a trailing delimiter is never split");
+
+    let only_delimiters = [delimiter(), delimiter()];
+    assert_eq!(raw_next_index(&only_delimiters, 0), 2);
+    assert_eq!(raw_next_index(&only_delimiters, 3), 2);
+  }
+
+  #[test]
+  fn splice_at_raw_next_index_reads_back_at_the_requested_filtered_index() {
+    let lists = [
+      vec![],
+      vec![provided("spotify:track:a", &[])],
+      vec![delimiter(), provided("spotify:track:a", &[])],
+      vec![
+        provided("spotify:track:a", &[]),
+        delimiter(),
+        provided("spotify:track:b", &[]),
+      ],
+      vec![provided("spotify:track:a", &[]), delimiter()],
+      vec![
+        delimiter(),
+        provided("spotify:track:a", &[]),
+        provided("spotify:track:b", &[]),
+        delimiter(),
+        provided("spotify:track:c", &[]),
+      ],
+    ];
+    for list in lists {
+      let content = list.iter().filter(|t| t.uri != DELIMITER_URI).count() as u32;
+      for n in 0..=content {
+        let after = spliced(&list, n);
+        assert_eq!(
+          after.get(n as usize).map(String::as_str),
+          Some("spotify:track:x"),
+          "insert at filtered {n} of {:?} landed as {after:?}",
+          uris(&list)
+        );
+      }
+      let past_end = spliced(&list, content + 5);
+      assert_eq!(
+        past_end.last().map(String::as_str),
+        Some("spotify:track:x"),
+        "an index past the end appends to {:?}",
+        uris(&list)
+      );
+    }
+  }
+
+  #[test]
+  fn player_state_projects_the_queue_write_restrictions() {
+    let mut cluster = Cluster::new();
+    let ps = cluster.player_state.mut_or_insert_default();
+    ps.track.mut_or_insert_default().uri = "spotify:track:a".to_string();
+    let open = player_state(&cluster);
+    assert!(open.can_set_queue && open.can_insert_into_next_tracks && open.can_add_to_queue);
+
+    let r = cluster
+      .player_state
+      .mut_or_insert_default()
+      .restrictions
+      .mut_or_insert_default();
+    r.disallow_set_queue_reasons.push("no_set_queue".to_string());
+    r.disallow_inserting_into_next_tracks_reasons
+      .push("no_insert".to_string());
+    r.disallow_add_to_queue_reasons.push("no_add".to_string());
+    let closed = player_state(&cluster);
+    assert!(!closed.can_set_queue && !closed.can_insert_into_next_tracks && !closed.can_add_to_queue);
   }
 
   #[test]

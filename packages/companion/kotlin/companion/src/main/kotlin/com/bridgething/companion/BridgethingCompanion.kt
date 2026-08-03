@@ -141,6 +141,7 @@ public data class CompanionCapabilityFlags(
     val netFetch: Boolean = true,
     val netWs: Boolean = true,
     val audioTts: Boolean = true,
+    val voiceModel: Boolean = true,
 )
 
 public enum class AncsSetupKind {
@@ -166,6 +167,10 @@ public class BridgethingCompanion(
     notifications: NotificationBackend = NoOpNotificationBackend,
     phone: PhoneBackend = NoOpPhoneBackend,
     mediaSessions: MediaSessionGateway = NoOpMediaSessionGateway,
+    voiceRecognizer: NluSpeechRecognizing? = null,
+    voiceDecoder: VoicePacketDecoding = AndroidVoicePacketDecoder(),
+    nlu: NluInferring? = null,
+    nluRejection: NluRejectionPolicy? = null,
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
@@ -180,6 +185,16 @@ public class BridgethingCompanion(
     private val tunnelDispatcher = TunnelDispatcher()
     private val audioDispatcher = AudioDispatcher(backend = audio)
     private val phoneDispatcher = PhoneDispatcher(backend = phone)
+    private val voiceDispatcher: VoiceDispatcher? = voiceRecognizer?.let {
+        VoiceDispatcher(
+            recognizer = it,
+            decoder = voiceDecoder,
+            controller = VoiceController(
+                client = nlu,
+                config = VoiceController.Config(rejection = nluRejection ?: NluRejectionPolicy()),
+            ),
+        )
+    }
     @Volatile private var notificationsEnabled: Boolean = capabilities.notifications
     private val notificationDispatcher = NotificationDispatcher(notifications) { notificationsEnabled }
     private val geoController: GeoSource = geo
@@ -282,6 +297,7 @@ public class BridgethingCompanion(
         runCatching { netDispatcher.stop() }
         runCatching { tunnelDispatcher.stop() }
         runCatching { audioDispatcher.stop() }
+        runCatching { voiceDispatcher?.stop() }
         runCatching { phoneDispatcher.stop() }
         runCatching { notificationDispatcher.stop() }
         runCatching { ota.stop() }
@@ -582,6 +598,10 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { tunnelDispatcher.start(gateway) })
         audioDispatcher.setGlueProvider { audibleGlue() ?: libraryGlue() }
         dispatchers.add(scope.launch { audioDispatcher.start(gateway) })
+        voiceDispatcher?.let { voice ->
+            voice.setCatalogResolver { (libraryGlue() as? VoiceCatalogProviding)?.voiceResolver() }
+            dispatchers.add(scope.launch { voice.start(gateway) })
+        }
         dispatchers.add(scope.launch { phoneDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })

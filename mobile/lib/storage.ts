@@ -18,6 +18,7 @@ export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
   netFetch: true,
   netWs: true,
   audioTts: true,
+  voiceModel: true,
 };
 
 export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {

@@ -223,6 +223,14 @@ pub fn to_pcm16<E: Extend<u8>>(samples: &[f32], out: &mut E) {
   }
 }
 
+pub fn from_pcm16(bytes: &[u8], out: &mut Vec<f32>) {
+  out.extend(
+    bytes
+      .chunks_exact(2)
+      .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0),
+  );
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

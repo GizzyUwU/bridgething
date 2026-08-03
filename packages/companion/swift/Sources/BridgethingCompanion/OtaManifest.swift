@@ -30,11 +30,6 @@ public struct OtaManifestChannel: Decodable, Sendable, Equatable {
     }
 }
 
-public struct OtaArtifactDigest: Decodable, Sendable, Equatable {
-    public let size: UInt64
-    public let sha256: String
-}
-
 public struct OtaPatchDigest: Decodable, Sendable, Equatable {
     public let size: UInt64
     public let sha256: String
@@ -46,16 +41,16 @@ public struct OtaPatchDigest: Decodable, Sendable, Equatable {
         case sourceSha256 = "source_sha256"
     }
 
-    public var digest: OtaArtifactDigest { OtaArtifactDigest(size: size, sha256: sha256) }
+    public var digest: ArtifactDigest { ArtifactDigest(size: size, sha256: sha256) }
 }
 
 public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
-    public let daemon: OtaArtifactDigest?
-    public let daemonZst: OtaArtifactDigest?
-    public let imageSwu: OtaArtifactDigest?
-    public let imageZck: OtaArtifactDigest?
-    public let imageBootZck: OtaArtifactDigest?
-    public let webapps: [String: OtaArtifactDigest]
+    public let daemon: ArtifactDigest?
+    public let daemonZst: ArtifactDigest?
+    public let imageSwu: ArtifactDigest?
+    public let imageZck: ArtifactDigest?
+    public let imageBootZck: ArtifactDigest?
+    public let webapps: [String: ArtifactDigest]
     public let daemonPatches: [String: OtaPatchDigest]
 
     private enum CodingKeys: String, CodingKey {
@@ -70,12 +65,12 @@ public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        daemon = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .daemon)
-        daemonZst = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .daemonZst)
-        imageSwu = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageSwu)
-        imageZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageZck)
-        imageBootZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageBootZck)
-        webapps = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .webapps) ?? [:]
+        daemon = try container.decodeIfPresent(ArtifactDigest.self, forKey: .daemon)
+        daemonZst = try container.decodeIfPresent(ArtifactDigest.self, forKey: .daemonZst)
+        imageSwu = try container.decodeIfPresent(ArtifactDigest.self, forKey: .imageSwu)
+        imageZck = try container.decodeIfPresent(ArtifactDigest.self, forKey: .imageZck)
+        imageBootZck = try container.decodeIfPresent(ArtifactDigest.self, forKey: .imageBootZck)
+        webapps = try container.decodeIfPresent([String: ArtifactDigest].self, forKey: .webapps) ?? [:]
         daemonPatches = try container.decodeIfPresent([String: OtaPatchDigest].self, forKey: .daemonPatches) ?? [:]
     }
 }

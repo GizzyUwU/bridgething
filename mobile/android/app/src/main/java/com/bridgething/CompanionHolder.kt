@@ -60,6 +60,7 @@ public object CompanionHolder {
         val notificationBackend = AndroidNotificationBackend(
             resolveAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
         )
+        val voiceNlu = VoiceModels.inference(appCtx)
         val c = BridgethingCompanion(
             context = appCtx,
             adapter = transport,
@@ -72,6 +73,9 @@ public object CompanionHolder {
                 appCtx,
                 ComponentName(appCtx, BridgethingNotificationListener::class.java),
             ),
+            voiceRecognizer = VoiceModels.recognizer(appCtx),
+            nlu = voiceNlu?.client,
+            nluRejection = voiceNlu?.rejection,
         )
         c.start()
         companion = c

@@ -1,5 +1,5 @@
 use libbridgething::{
-  NluView,
+  NluTargetType, NluView,
   client::{ClientToBridgeVoiceMsg, MicMute, MicUnmute, VoiceDisplayIntent, VoiceIntent},
 };
 use serde::{Deserialize, Serialize};
@@ -115,8 +115,10 @@ pub fn voice_intent_to_stock(intent: &VoiceIntent) -> StockVoiceSend {
     "connect_action_taken": false,
   });
 
-  if let Some(entity_type) = intent.slots.entity_type.as_deref() {
-    custom["slots"] = serde_json::json!({ "requestedEntityType": [entity_type] });
+  if let Some(target_type) = intent.slots.target_type {
+    if let Ok(serde_json::Value::String(name)) = serde_json::to_value(target_type) {
+      custom["slots"] = serde_json::json!({ "requestedEntityType": [name] });
+    }
   }
   if let Ok(bridge_slots) = serde_json::to_value(&intent.slots) {
     custom["bridge_slots"] = bridge_slots;
@@ -128,24 +130,24 @@ pub fn voice_intent_to_stock(intent: &VoiceIntent) -> StockVoiceSend {
 }
 
 fn search_action(slots: &libbridgething::NluSlots) -> &'static str {
-  if slots.playlist.is_some() || slots.track.is_some() {
-    "SHOW_TRACKS"
-  } else if slots.podcast.is_some() {
-    "SHOW_PODCAST"
-  } else {
-    "UNKNOWN"
+  match slots.target_type {
+    Some(NluTargetType::Playlist) | Some(NluTargetType::Track) => "SHOW_TRACKS",
+    Some(NluTargetType::Podcast) | Some(NluTargetType::Episode) => "SHOW_PODCAST",
+    _ => "UNKNOWN",
   }
 }
 
 fn view_name(view: Option<NluView>) -> &'static str {
   match view {
-    Some(NluView::Library) => "SHOW_MY_LIBRARY",
+    Some(NluView::NowPlaying) => "SHOW_NOW_PLAYING",
+    Some(NluView::Artist) | Some(NluView::Album) => "SHOW_THIS_ARTIST",
+    Some(NluView::Playlist) => "SHOW_TRACKS",
+    Some(NluView::Playlists) | Some(NluView::Library) => "SHOW_MY_LIBRARY",
     Some(NluView::Presets) => "SHOW_MY_PRESETS",
     Some(NluView::Songs) => "SHOW_MY_SONGS",
     Some(NluView::SavedEpisodes) => "SHOW_MY_SAVED_EPISODES",
     Some(NluView::NewEpisodes) => "SHOW_MY_NEW_EPISODES",
     Some(NluView::Queue) => "SHOW_THE_QUEUE",
-    Some(NluView::ThisArtist) => "SHOW_THIS_ARTIST",
     None => "UNKNOWN",
   }
 }
@@ -185,13 +187,17 @@ mod tests {
   #[test]
   fn every_view_maps_to_a_show_prefixed_action() {
     let views = [
+      NluView::NowPlaying,
+      NluView::Artist,
+      NluView::Album,
+      NluView::Playlist,
+      NluView::Playlists,
       NluView::Library,
       NluView::Presets,
       NluView::Songs,
       NluView::SavedEpisodes,
       NluView::NewEpisodes,
       NluView::Queue,
-      NluView::ThisArtist,
     ];
     for view in views {
       let name = view_name(Some(view));
@@ -205,7 +211,8 @@ mod tests {
   #[test]
   fn search_naming_a_playlist_renders_an_entity_page() {
     let slots = NluSlots {
-      playlist: Some("discover weekly".into()),
+      target: Some("discover weekly".into()),
+      target_type: Some(NluTargetType::Playlist),
       ..Default::default()
     };
     let c = custom(&voice_intent_to_stock(&intent(VoiceDisplayIntent::Search, slots)));
@@ -214,25 +221,25 @@ mod tests {
   }
 
   #[test]
-  fn search_with_only_a_query_stays_a_result_list() {
+  fn search_with_only_an_untyped_target_stays_a_result_list() {
     let slots = NluSlots {
-      query: Some("shoegaze".into()),
+      target: Some("shoegaze".into()),
       ..Default::default()
     };
     let c = custom(&voice_intent_to_stock(&intent(VoiceDisplayIntent::Search, slots)));
-    assert_eq!(c["action"], "UNKNOWN", "a bare query has no entity page to open");
+    assert_eq!(c["action"], "UNKNOWN", "an untyped target has no entity page to open");
   }
 
   #[test]
-  fn entity_type_is_wrapped_in_an_array_for_stock() {
+  fn target_type_is_wrapped_in_an_array_for_stock() {
     let slots = NluSlots {
-      query: Some("shoegaze".into()),
-      entity_type: Some("album".into()),
+      target: Some("blue rev".into()),
+      target_type: Some(NluTargetType::Album),
       ..Default::default()
     };
     let c = custom(&voice_intent_to_stock(&intent(VoiceDisplayIntent::Search, slots)));
     assert_eq!(c["slots"]["requestedEntityType"][0], "album");
-    assert_eq!(c["bridge_slots"]["entityType"], "album");
+    assert_eq!(c["bridge_slots"]["targetType"], "album");
   }
 
   #[test]

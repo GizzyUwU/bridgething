@@ -16,6 +16,8 @@ import com.bridgething.schema.LibraryItem
 import com.bridgething.schema.LibraryScope as WireLibraryScope
 import com.bridgething.schema.LibrarySearchRequest
 import com.bridgething.schema.PlaybackState
+import com.bridgething.schema.QueuePosition
+import com.bridgething.schema.QueueUri
 import com.bridgething.schema.PlaybackTargetKind
 import com.bridgething.schema.TransferTo as WireTransferTo
 import com.bridgething.schema.BrowseEntry
@@ -49,25 +51,32 @@ import uniffi.spotify.Observer as SpObserver
 import uniffi.spotify.PlayerState as SpPlayerState
 import uniffi.spotify.ProductState as SpProductState
 import uniffi.spotify.Queue as SpQueue
+import uniffi.spotify.QueuePosition as SpQueuePosition
 import uniffi.spotify.RepeatMode as SpRepeat
 import uniffi.spotify.SearchResults as SpSearchResults
 import uniffi.spotify.Shelf as SpShelf
 import uniffi.spotify.SpotifyClientInterface
 import uniffi.spotify.Track as SpTrack
 import uniffi.spotify.TokenStore as SpTokenStore
+import uniffi.spotify.VoiceResolveRequest as SpVoiceResolveRequest
+import uniffi.spotify.VoiceResolved as SpVoiceResolved
+import uniffi.spotify.VoiceTargetKind as SpVoiceTargetKind
 
 class SpotifyGlueDispatchTest {
-    private class FakeTokenStore(private var refresh: String?) : SpTokenStore {
+    internal class FakeTokenStore(private var refresh: String?) : SpTokenStore {
         override fun loadRefreshToken(): String? = refresh
         override fun saveRefreshToken(token: String) { refresh = token }
         override fun loadUsername(): String? = null
         override fun saveUsername(username: String) {}
     }
 
-    private class FakeClient : SpotifyClientInterface {
+    internal class FakeClient : SpotifyClientInterface {
         var root: List<SpShelf> = emptyList()
         var page = SpBrowsePage(items = emptyList(), total = 0u, hasMore = false)
-        var searchResults = SpSearchResults(tracks = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList())
+        var searchResults = SpSearchResults(
+            tracks = emptyList(), albums = emptyList(), artists = emptyList(),
+            playlists = emptyList(), shows = emptyList(), episodes = emptyList(),
+        )
         var contains: List<Boolean> = emptyList()
         var productState = SpProductState(product = "premium", catalogue = "premium", country = "US", isPremium = true, canUseSuperbird = true)
         var observer: SpObserver? = null
@@ -106,7 +115,8 @@ class SpotifyGlueDispatchTest {
             return volume
         }
         override suspend fun activeDeviceVolumePercent(): Double? = volume
-        override suspend fun queueUri(uri: String) {}
+        val queueCalls = java.util.concurrent.CopyOnWriteArrayList<Pair<String, SpQueuePosition>>()
+        override suspend fun queueUri(uri: String, position: SpQueuePosition) { queueCalls.add(uri to position) }
         val transferCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
         override suspend fun transfer(deviceId: String) { transferCalls.add(deviceId) }
         override suspend fun play(uri: String, skipToUri: String?) { lastPlay = uri to skipToUri }
@@ -119,6 +129,17 @@ class SpotifyGlueDispatchTest {
         override suspend fun browse(nodeId: String, limit: UInt, offset: UInt): SpBrowsePage = page
         override suspend fun search(query: String, limit: UInt): SpSearchResults = searchResults
         override suspend fun resolveContext(uri: String): SpBrowseItem = item("spotify:playlist:1", "Ctx")
+        val voiceResolveCalls = java.util.concurrent.CopyOnWriteArrayList<SpVoiceResolveRequest>()
+        @Volatile var voiceResolved = SpVoiceResolved(
+            uri = "spotify:playlist:1", contextUri = null, display = "Ctx",
+            kind = SpVoiceTargetKind.PLAYLIST, alternatives = emptyList(),
+        )
+        @Volatile var voiceResolveFailure: Throwable? = null
+        override suspend fun resolveVoice(req: SpVoiceResolveRequest): SpVoiceResolved {
+            voiceResolveCalls.add(req)
+            voiceResolveFailure?.let { throw it }
+            return voiceResolved
+        }
         override suspend fun favoritesContains(uris: List<String>): List<Boolean> { favoritesContainsCalls++; return contains }
         override suspend fun favoritesSet(uri: String, liked: Boolean) {}
         override suspend fun favoritesList(limit: UInt, offset: UInt): SpBrowsePage = page
@@ -238,6 +259,7 @@ class SpotifyGlueDispatchTest {
             tracks = listOf(track("spotify:track:1", "T")),
             albums = listOf(item("spotify:album:1", "A")),
             artists = emptyList(), playlists = emptyList(),
+            shows = emptyList(), episodes = emptyList(),
         )
         val h = boot(this, fake)
         val resp = h.driver.request(
@@ -508,6 +530,29 @@ class SpotifyGlueDispatchTest {
     }
 
     @Test
+    fun `queue forwards every wire position to the client`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+
+        h.driver.send(BridgeToGatewayMsgData.Player(BridgeToGatewayPlayerMsg.Queue(QueueUri("spotify:track:a", QueuePosition.Append))))
+        h.driver.send(BridgeToGatewayMsgData.Player(BridgeToGatewayPlayerMsg.Queue(QueueUri("spotify:track:b", QueuePosition.Next))))
+        h.driver.send(BridgeToGatewayMsgData.Player(BridgeToGatewayPlayerMsg.Queue(QueueUri("spotify:track:c", QueuePosition.Index(3u)))))
+
+        withTimeout(20.seconds) {
+            while (fake.queueCalls.size < 3) delay(10)
+        }
+        assertEquals(
+            listOf(
+                "spotify:track:a" to SpQueuePosition.Append,
+                "spotify:track:b" to SpQueuePosition.Next,
+                "spotify:track:c" to SpQueuePosition.Index(3u),
+            ),
+            fake.queueCalls.sortedBy { it.first },
+        )
+        h.companion.stop()
+    }
+
+    @Test
     fun `skipToIndex replays context and skips to the queued uri`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
@@ -650,6 +695,7 @@ class SpotifyGlueDispatchTest {
             playingRemotely = remote, remoteDeviceId = if (remote) "speaker" else "", onRemoteSpeaker = remote,
             canSeek = true, canSkipNext = true, canSkipPrev = true, canToggleShuffle = true,
             canRepeatContext = true, canRepeatTrack = true,
+            canSetQueue = true, canInsertIntoNextTracks = true, canAddToQueue = true,
         )
     }
 }

@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=800, height=480, initial-scale=1, user-scalable=no" />
+    <title>mic debug</title>
+    <style>
+      :root {
+        --bg: #07090c;
+        --fg: #e8ecf2;
+        --dim: #78828f;
+        --line: #1c2229;
+        --ok: #35d07f;
+        --warn: #f5a524;
+        --bad: #ff4d4f;
+        --accent: #4d9fff;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+      html,
+      body {
+        width: 800px;
+        height: 480px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.25 system-ui, sans-serif;
+        user-select: none;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 12px 16px;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        border-bottom: 2px solid var(--line);
+        padding-bottom: 8px;
+      }
+      #headline {
+        font-size: 40px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        white-space: nowrap;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #detail {
+        color: var(--dim);
+        font-size: 15px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+      }
+      #clock {
+        flex: none;
+        font-size: 32px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      body[data-state='recording'] #headline {
+        color: var(--ok);
+      }
+      body[data-state='bad'] #headline {
+        color: var(--bad);
+      }
+      body[data-state='warn'] #headline {
+        color: var(--warn);
+      }
+      body[data-state='recording'] #headline::before {
+        content: '\25cf ';
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.25;
+        }
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 14px;
+        min-height: 0;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        min-height: 0;
+      }
+      .panel h2 {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1.4px;
+        text-transform: uppercase;
+        color: var(--dim);
+        margin-bottom: 8px;
+      }
+
+      .mics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .mic {
+        text-align: center;
+      }
+      .meter {
+        height: 150px;
+        border-radius: 5px;
+        background: #11161c;
+        position: relative;
+        overflow: hidden;
+      }
+      .meter i {
+        position: absolute;
+        inset: auto 0 0 0;
+        background: var(--accent);
+        transition: height 0.1s linear;
+      }
+      .mic b {
+        display: block;
+        font-size: 12px;
+        color: var(--dim);
+        margin-top: 4px;
+        font-variant-numeric: tabular-nums;
+      }
+      .mic.dead .meter {
+        background: #3a0f10;
+        box-shadow: inset 0 0 0 2px var(--bad);
+      }
+      .mic.dead b {
+        color: var(--bad);
+        font-weight: 700;
+      }
+
+      #wake {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 48px;
+      }
+      #wake span {
+        flex: 1;
+        background: #24303c;
+        min-height: 2px;
+        border-radius: 1px;
+      }
+      #wake span.hit {
+        background: var(--ok);
+      }
+      .wakefoot {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--dim);
+        margin-top: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .rows {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 10px;
+        font-size: 13px;
+        align-content: start;
+        font-variant-numeric: tabular-nums;
+      }
+      .rows dt {
+        color: var(--dim);
+      }
+      .rows dd {
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .right {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 10px;
+        min-height: 0;
+        min-width: 0;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0 18px;
+        align-content: start;
+      }
+
+      .strip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 12px;
+      }
+      #alerts {
+        flex: 1;
+        min-width: 0;
+        max-height: 34px;
+        overflow: hidden;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      #alerts li {
+        list-style: none;
+        color: var(--warn);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #alerts li:first-child {
+        color: var(--bad);
+        font-weight: 600;
+      }
+      #alerts .none {
+        color: var(--dim);
+      }
+
+      footer {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+      }
+      button {
+        font: inherit;
+        font-size: 17px;
+        font-weight: 700;
+        color: var(--fg);
+        background: #151b22;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 6px;
+        cursor: pointer;
+      }
+      button small {
+        display: block;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--dim);
+        margin-top: 3px;
+      }
+      button:active {
+        background: var(--accent);
+        color: #04121f;
+      }
+      button:active small {
+        color: #04121f;
+      }
+      button.mark {
+        background: #10261c;
+        border-color: #1d5136;
+      }
+      button.danger {
+        background: #23100f;
+        border-color: #5a1f1f;
+      }
+
+      #hold {
+        position: fixed;
+        inset: auto 0 0 0;
+        height: 5px;
+        background: var(--bad);
+        width: 0;
+      }
+
+      .chip {
+        flex: none;
+        font-size: 12px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        white-space: nowrap;
+      }
+      .chip.on {
+        color: var(--ok);
+        border-color: #1d5136;
+      }
+      .chip.off {
+        color: var(--bad);
+        border-color: #5a1f1f;
+      }
+      #tag {
+        flex: none;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body data-state="warn">
+    <header>
+      <div id="headline">connecting</div>
+      <div id="detail">waiting for the recorder</div>
+      <div id="clock">00:00:00</div>
+    </header>
+
+    <main>
+      <div class="panel">
+        <h2>microphones</h2>
+        <div class="mics" id="mics"></div>
+      </div>
+
+      <div class="right">
+        <div class="panel">
+          <h2>wake word</h2>
+          <div id="wake"></div>
+          <div class="wakefoot">
+            <span id="wakescore">score 0.00</span>
+            <span id="wakestate">no model</span>
+          </div>
+        </div>
+
+        <div class="panel split">
+          <div>
+            <h2>beamformer</h2>
+            <dl class="rows">
+              <dt>bearing</dt>
+              <dd id="bearing">-</dd>
+              <dt>steering</dt>
+              <dd id="steering">-</dd>
+              <dt>adopted bins</dt>
+              <dd id="bins">-</dd>
+              <dt>scene</dt>
+              <dd id="scene">-</dd>
+              <dt>beam level</dt>
+              <dd id="beamlevel">-</dd>
+            </dl>
+          </div>
+          <div>
+            <h2>session</h2>
+            <dl class="rows">
+              <dt>marks</dt>
+              <dd id="marks">0</dd>
+              <dt>fired</dt>
+              <dd id="detections">0</dd>
+              <dt>false / miss</dt>
+              <dd id="fm">0 / 0</dd>
+              <dt>drive left</dt>
+              <dd id="left">-</dd>
+              <dt>dropped</dt>
+              <dd id="dropped">0</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div class="panel strip">
+      <span class="chip" id="usb">usb -</span>
+      <span class="chip" id="mic">mic -</span>
+      <span class="chip" id="model">model -</span>
+      <span id="tag">untagged</span>
+      <ul id="alerts">
+        <li class="none">no alerts</li>
+      </ul>
+    </div>
+
+    <footer>
+      <button class="mark" data-mark="utterance">MARK<small>preset 1 / wheel</small></button>
+      <button data-mark="falseAlarm">FALSE<small>preset 2</small></button>
+      <button data-mark="miss">MISS<small>preset 3</small></button>
+      <button data-tag>TAG<small>preset 4</small></button>
+      <button class="danger" data-stop>STOP<small>hold back 2s</small></button>
+    </footer>
+
+    <div id="hold"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const HISTORY = 64;
+      const scores = new Array(HISTORY).fill(0);
+      let threshold = 0.35;
+
+      const mics = $('mics');
+      for (let ch = 0; ch < 4; ch++) {
+        const cell = document.createElement('div');
+        cell.className = 'mic';
+        cell.innerHTML = `<div class="meter"><i></i></div><b>ch${ch}</b>`;
+        mics.appendChild(cell);
+      }
+      const wake = $('wake');
+      for (let i = 0; i < HISTORY; i++) wake.appendChild(document.createElement('span'));
+
+      const post = (path, body) =>
+        fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body ?? {}),
+        }).catch(() => {});
+
+      for (const button of document.querySelectorAll('[data-mark]')) {
+        button.onclick = () => post('/mark', { kind: button.dataset.mark });
+      }
+      document.querySelector('[data-tag]').onclick = () => post('/tag');
+      document.querySelector('[data-stop]').onclick = () => post('/stop');
+
+      // -120 dBFS is the reported floor; map the top 80 dB of that onto the meter.
+      const meterHeight = (dbfs) => Math.max(0, Math.min(100, ((dbfs + 80) / 80) * 100));
+      const clock = (secs) =>
+        [Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60].map((n) => String(n).padStart(2, '0')).join(':');
+      const gigabytes = (bytes) => (bytes / 1e9).toFixed(1) + ' GB';
+
+      function render(status) {
+        const stage = status.stage.stage;
+        const bad = stage === 'noDrive' || stage === 'driveUnusable' || stage === 'faulted';
+        document.body.dataset.state = stage === 'recording' ? 'recording' : bad ? 'bad' : 'warn';
+
+        $('headline').textContent = status.headline;
+        $('detail').textContent = status.detail;
+        $('clock').textContent = clock(status.recordedSecs);
+
+        const t = status.telemetry;
+        const dead = new Set(status.deadChannels);
+        [...mics.children].forEach((cell, ch) => {
+          cell.classList.toggle('dead', dead.has(ch));
+          cell.querySelector('i').style.height = meterHeight(t.channelDbfs[ch]) + '%';
+          cell.querySelector('b').textContent = dead.has(ch) ? `ch${ch} DEAD` : `ch${ch} ${Math.round(t.channelDbfs[ch])}`;
+        });
+
+        threshold = status.wakewordThreshold;
+        scores.push(t.wakeScore);
+        scores.shift();
+        [...wake.children].forEach((bar, i) => {
+          bar.style.height = Math.max(2, scores[i] * 100) + '%';
+          bar.classList.toggle('hit', scores[i] >= threshold);
+        });
+        $('wakescore').textContent = 'score ' + t.wakeScore.toFixed(2);
+        $('wakestate').textContent = status.wakewordLoaded ? 'threshold ' + threshold.toFixed(2) : 'NO MODEL';
+
+        $('bearing').textContent = t.bearingDeg === null ? 'unresolved' : t.bearingDeg.toFixed(1) + '°';
+        $('steering').textContent = t.steeringDeg.toFixed(1) + '°';
+        $('bins').textContent = t.adoptedBins;
+        $('scene').textContent = (t.pointLike ? 'point-like' : 'diffuse') + (t.noiseMeasured ? ' / noise' : '');
+        $('beamlevel').textContent = Math.round(t.beamDbfs) + ' dBFS';
+
+        $('marks').textContent = status.counts.marks;
+        $('detections').textContent = status.counts.detections;
+        $('fm').textContent = status.counts.falseAlarms + ' / ' + status.counts.misses;
+        $('left').textContent = status.disk.totalBytes
+          ? `${gigabytes(status.disk.freeBytes)} / ${clock(status.disk.remainingSecs)}`
+          : '-';
+        $('dropped').textContent = status.counts.droppedChunks;
+
+        const chip = (id, text, ok) => {
+          const el = $(id);
+          el.textContent = text;
+          el.className = 'chip ' + (ok ? 'on' : 'off');
+        };
+        chip('usb', 'usb ' + status.usbRole, status.usbRole === 'host');
+        chip('mic', status.micOpen ? 'mic open' : 'MIC CLOSED', status.micOpen);
+        chip('model', status.wakewordLoaded ? 'model loaded' : 'NO MODEL', status.wakewordLoaded);
+        $('tag').textContent = status.tag;
+
+        const alerts = $('alerts');
+        alerts.innerHTML = status.alerts.length
+          ? status.alerts.map((line) => `<li></li>`).join('')
+          : '<li class="none">no alerts</li>';
+        status.alerts.forEach((line, i) => (alerts.children[i].textContent = line));
+
+        $('hold').style.width = status.stopHold * 100 + '%';
+      }
+
+      // the recorder may not be listening yet on a cold boot, and the kiosk has no other page to
+      // fall back to, so the stream reconnects forever rather than leaving a dead screen.
+      function connect() {
+        const source = new EventSource('/events');
+        source.onmessage = (event) => {
+          const status = JSON.parse(event.data);
+          render(status);
+        };
+        source.onerror = () => {
+          source.close();
+          $('headline').textContent = 'RECORDER DOWN';
+          $('detail').textContent = 'the debug daemon stopped answering; retrying';
+          document.body.dataset.state = 'bad';
+          setTimeout(connect, 1000);
+        };
+      }
+      connect();
+    </script>
+  </body>
+</html>

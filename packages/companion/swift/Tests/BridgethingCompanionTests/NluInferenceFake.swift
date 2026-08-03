@@ -22,3 +22,33 @@ struct FakeNluInference: NluInferring {
         return NluInferenceOutput(intentLogits: vector, inDomainLogit: inDomainLogit, slots: slots)
     }
 }
+
+final class PrewarmableNluInference: NluInferring, NluPrewarmable, @unchecked Sendable {
+    let warmed = CallCount()
+
+    func prewarm() async { warmed.bump() }
+
+    func infer(transcript _: String) async throws -> NluInferenceOutput {
+        NluInferenceOutput(
+            intentLogits: Array(repeating: 0.0, count: NluIntentCatalog.surfaceNames.count),
+            inDomainLogit: 8
+        )
+    }
+}
+
+final class CallCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func bump() {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}

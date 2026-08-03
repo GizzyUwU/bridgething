@@ -61,11 +61,7 @@ fn run(mut detector: WakeWord, mut pcm: mpsc::Receiver<Bytes>, hits: mpsc::Sende
   let mut samples: Vec<f32> = Vec::new();
   while let Some(frame) = pcm.blocking_recv() {
     samples.clear();
-    samples.extend(
-      frame
-        .chunks_exact(2)
-        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0),
-    );
+    bridgething_dsp::pipeline::from_pcm16(&frame, &mut samples);
     match detector.push(&samples) {
       Ok(Some(hit)) => {
         tracing::info!(score = hit.score, at_sample = hit.at_sample, "wake word fired");

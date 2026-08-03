@@ -58,6 +58,10 @@ public actor VoiceController {
         self.config = config
     }
 
+    public func prewarm() async {
+        await (client as? any NluPrewarmable)?.prewarm()
+    }
+
     public func resolve(transcript: String) async throws -> Resolution {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

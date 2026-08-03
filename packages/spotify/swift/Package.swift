@@ -31,6 +31,7 @@ let package = Package(
     .target(
       name: "BridgethingSpotifyGlue",
       dependencies: [
+        .product(name: "BridgethingCompanion", package: "Bridgething"),
         .product(name: "BridgethingGlue", package: "Bridgething"),
         .product(name: "BridgethingGateway", package: "Bridgething"),
         .product(name: "BridgethingSchema", package: "Bridgething"),

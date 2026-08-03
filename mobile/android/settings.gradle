@@ -48,6 +48,15 @@ setProj(':packages:spotify', "${repoRoot}/packages/spotify")
 setProj(':packages:spotify:kotlin', "${repoRoot}/packages/spotify/kotlin")
 setProj(':packages:spotify:kotlin:spotify', "${repoRoot}/packages/spotify/kotlin/spotify")
 
+setProj(':packages:nlu', "${repoRoot}/packages/nlu")
+setProj(':packages:nlu:kotlin', "${repoRoot}/packages/nlu/kotlin")
+setProj(':packages:nlu:kotlin:nlu', "${repoRoot}/packages/nlu/kotlin/nlu")
+setProj(':packages:nlu:kotlin:nlukit', "${repoRoot}/packages/nlu/kotlin/nlukit")
+
+setProj(':packages:asr', "${repoRoot}/packages/asr")
+setProj(':packages:asr:kotlin', "${repoRoot}/packages/asr/kotlin")
+setProj(':packages:asr:kotlin:whisper', "${repoRoot}/packages/asr/kotlin/whisper")
+
 setProj(':packages:apple-music', "${repoRoot}/packages/apple-music")
 setProj(':packages:apple-music:kotlin', "${repoRoot}/packages/apple-music/kotlin")
 setProj(':packages:apple-music:kotlin:apple-music', "${repoRoot}/packages/apple-music/kotlin/apple-music")

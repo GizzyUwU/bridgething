@@ -17,6 +17,7 @@
 		2EEBCB58BB4C8FABE67C2E1C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		3A2E5194E671495BB69D4FCD /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 92FD12EF2CA04AC78A5DA12B /* Inter-Regular.ttf */; };
 		4BD53FBDDB8C4BD5A06AF5A0 /* Outfit-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF3A93B38AEF41FEB0A84550 /* Outfit-Light.ttf */; };
+		6C3E9042DB5F7B8C3E206693 /* BridgethingNluKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5B2D8F31CA4E6A7B2D1F5582 /* BridgethingNluKit */; };
 		6E84EDDB26BD5F95073E6040 /* BridgethingLyrics in Frameworks */ = {isa = PBXBuildFile; productRef = 36F56798DD80B12C33156F70 /* BridgethingLyrics */; };
 		72010B89238448ABB08972C6 /* Outfit-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E933859026B94647ACD128BF /* Outfit-Medium.ttf */; };
 		72B79D6718F445D1A51FDA33 /* Inter-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E0BE777E0ADC4EA7902341C3 /* Inter-SemiBold.ttf */; };
@@ -77,6 +78,7 @@
 				7429B03CA90D9A8E71D3DD4C /* BridgethingCompanion in Frameworks */,
 				C90677CED5F4F396FA808345 /* BridgethingSpotifyGlue in Frameworks */,
 				1B16E5853653557376728421 /* BridgethingAppleMusicGlue in Frameworks */,
+				6C3E9042DB5F7B8C3E206693 /* BridgethingNluKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -193,6 +195,7 @@
 				D924249BDDDFEA6D9511A03E /* BridgethingCompanion */,
 				7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */,
 				37EB35D1D6F792B888BCCF58 /* BridgethingAppleMusicGlue */,
+				5B2D8F31CA4E6A7B2D1F5582 /* BridgethingNluKit */,
 			);
 			productName = bridgething;
 			productReference = 13B07F961A680F5B00A75B9A /* bridgething.app */;
@@ -634,6 +637,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingAppleMusicGlue;
+		};
+		5B2D8F31CA4E6A7B2D1F5582 /* BridgethingNluKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
+			productName = BridgethingNluKit;
 		};
 		63A2BDB8419785846352F797 /* BridgethingSchema */ = {
 			isa = XCSwiftPackageProductDependency;
