@@ -125,6 +125,15 @@ jobs:
           set -euo pipefail
           [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
 
+      - name: link compiler-rt so ggml availability checks resolve on macos
+        if: startsWith(matrix.runner, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+          rt="$(clang --print-resource-dir)/lib/darwin/libclang_rt.osx.a"
+          [[ -f "$rt" ]] || { echo "libclang_rt.osx.a not found at ${rt}" >&2; exit 1; }
+          echo "RUSTFLAGS=${RUSTFLAGS:+${RUSTFLAGS} }-Clink-arg=${rt}" >>"$GITHUB_ENV"
+
       - name: stage the apple signing identity and notary key
         if: startsWith(matrix.runner, 'macos')
         shell: bash
