@@ -1,0 +1,154 @@
+name: tmp-debug-windows-headless
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the frontend and its workspace deps
+        run: bunx turbo run build --filter='@bridgething/desktop-frontend...'
+
+      - name: build the test executables without running them
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p bridgething-desktop --no-run --message-format=json >cargo-build.json
+          python - <<'EOF'
+          import json
+
+          exes = []
+          for line in open("cargo-build.json", encoding="utf-8"):
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              msg = json.loads(line)
+              exe = msg.get("executable")
+              if exe:
+                  exes.append((msg["target"]["name"], msg["target"]["kind"][0], exe))
+          with open("test-exes.txt", "w", encoding="utf-8") as out:
+              for name, kind, exe in exes:
+                  print(name, kind, exe)
+                  out.write(f"{name}\t{kind}\t{exe}\n")
+          EOF
+
+      - name: probe the import graph of each test executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet pefile
+          python - <<'EOF'
+          import os
+          import pefile
+
+          IMPORT_DIR = [pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]]
+          EXPORT_DIR = [pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]]
+          SYSTEM_ROOT = os.environ.get("SystemRoot", r"C:\Windows")
+
+          def search_dirs(exe_dir):
+              dirs = [exe_dir, os.path.join(SYSTEM_ROOT, "System32"), SYSTEM_ROOT]
+              dirs += [d for d in os.environ.get("PATH", "").split(";") if d]
+              return dirs
+
+          def exports_of(path):
+              try:
+                  pe = pefile.PE(path, fast_load=True)
+                  pe.parse_data_directories(directories=EXPORT_DIR)
+              except Exception:
+                  return None, None
+              names, ordinals = set(), set()
+              for sym in getattr(pe, "DIRECTORY_ENTRY_EXPORT", None) and pe.DIRECTORY_ENTRY_EXPORT.symbols or []:
+                  if sym.name:
+                      names.add(sym.name.decode())
+                  ordinals.add(sym.ordinal)
+              return names, ordinals
+
+          def resolve(dll, exe_dir):
+              if dll.lower().startswith(("api-ms-", "ext-ms-")):
+                  return "APISET"
+              for d in search_dirs(exe_dir):
+                  candidate = os.path.join(d, dll)
+                  if os.path.isfile(candidate):
+                      return candidate
+              return None
+
+          for line in open("test-exes.txt", encoding="utf-8"):
+              name, kind, exe = line.rstrip("\n").split("\t")
+              print("=" * 100)
+              print(f"EXE [{name} / {kind}]: {exe}")
+              exe_dir = os.path.dirname(exe)
+              seen, queue, problems = set(), [exe], []
+              while queue:
+                  current = queue.pop(0)
+                  if current.lower() in seen:
+                      continue
+                  seen.add(current.lower())
+                  try:
+                      pe = pefile.PE(current, fast_load=True)
+                      pe.parse_data_directories(directories=IMPORT_DIR)
+                  except Exception as err:
+                      problems.append(f"cannot parse {current}: {err}")
+                      continue
+                  for entry in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
+                      dll = entry.dll.decode()
+                      resolved = resolve(dll, exe_dir)
+                      if resolved == "APISET":
+                          continue
+                      if resolved is None:
+                          problems.append(f"{os.path.basename(current)} -> {dll}: NOT FOUND on search path")
+                          continue
+                      system = "system32" in resolved.lower() or resolved.lower().startswith(SYSTEM_ROOT.lower())
+                      print(f"  {os.path.basename(current)} -> {dll}  =>  {resolved}")
+                      names, ordinals = exports_of(resolved)
+                      if names is None:
+                          problems.append(f"{dll}: unparseable at {resolved}")
+                          continue
+                      for imp in entry.imports:
+                          if imp.name:
+                              symbol = imp.name.decode()
+                              if symbol not in names:
+                                  problems.append(f"{os.path.basename(current)} imports {dll}!{symbol} MISSING from {resolved}")
+                          elif imp.ordinal is not None and imp.ordinal not in ordinals:
+                              problems.append(f"{os.path.basename(current)} imports {dll}#{imp.ordinal} MISSING from {resolved}")
+                      if not system:
+                          queue.append(resolved)
+              if problems:
+                  print("PROBLEMS:")
+                  for p in problems:
+                      print("  !!", p)
+              else:
+                  print("NO IMPORT PROBLEMS FOUND")
+          EOF
+
+      - name: run the headless exe with the normal and a clean PATH
+        shell: pwsh
+        run: |
+          $line = Get-Content test-exes.txt | Where-Object { $_ -match "^headless`t" }
+          if (-not $line) { Write-Host "no headless exe built"; exit 1 }
+          $exe = ($line -split "`t")[2]
+          Write-Host "headless exe: $exe"
+          & $exe --list
+          Write-Host "normal PATH exit code: $LASTEXITCODE"
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          & $exe --list
+          Write-Host "clean PATH exit code: $LASTEXITCODE"
+          exit 0

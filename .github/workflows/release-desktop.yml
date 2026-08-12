@@ -1,16 +1,22 @@
 name: release-desktop
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - ".github/workflows/release-desktop.yml"
   workflow_dispatch:
     inputs:
       channel:
-        description: channel slug (stable | dev)
+        description: channel slug
         required: true
         type: choice
+        default: all
         options:
-          - stable
+          - all
           - dev
-        default: dev
+          - stable
 
 concurrency:
   group: release-desktop
@@ -20,11 +26,61 @@ permissions:
   contents: read
 
 jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      channels: ${{ steps.plan.outputs.channels }}
+      run: ${{ steps.plan.outputs.run }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve the version and check which channels are missing it
+        id: plan
+        env:
+          OTA_PUBLIC_BASE: https://ota.bridgething.com
+          CHANNEL_INPUT: ${{ inputs.channel || 'all' }}
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          [[ -n "$version" ]] || { echo "could not read the workspace version from Cargo.toml" >&2; exit 1; }
+
+          case "$CHANNEL_INPUT" in
+            all) channels="dev stable" ;;
+            *)   channels="$CHANNEL_INPUT" ;;
+          esac
+
+          published() { curl -fs -o /dev/null --max-time 20 -I "${OTA_PUBLIC_BASE}/$1" 2>/dev/null; }
+
+          missing=()
+          for ch in $channels; do
+            published "desktop/${ch}/${version}/desktop.json" \
+              && echo "desktop ${version} already on ${ch}" \
+              || { echo "desktop ${version} missing on ${ch}"; missing+=("$ch"); }
+          done
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            channels_json=$(printf '%s\n' "${missing[@]}" | jq -Rnc '[inputs]')
+            run=true
+          else
+            channels_json='[]'
+            run=false
+          fi
+
+          {
+            echo "channels=${channels_json}"
+            echo "run=${run}"
+          } >>"$GITHUB_OUTPUT"
+          echo "version ${version} -> channels ${channels_json}, run=${run}"
+
   build:
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
     strategy:
       fail-fast: false
       matrix:
-        include:
+        channel: ${{ fromJSON(needs.decide.outputs.channels) }}
+        build:
           - runner: macos-26
             target: aarch64-apple-darwin
             updater_target: darwin-aarch64
@@ -44,7 +100,7 @@ jobs:
             updater_target: windows-aarch64
             bundles: nsis
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.build.runner }}
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
@@ -57,12 +113,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.build.target }}
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: linux bundling deps
-        if: startsWith(matrix.runner, 'ubuntu')
+        if: startsWith(matrix.build.runner, 'ubuntu')
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -86,7 +142,7 @@ jobs:
         shell: bash
         working-directory: desktop
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ matrix.channel }}
         run: |
           set -euo pipefail
           printf '{"plugins":{"updater":{"endpoints":["https://ota.bridgething.com/desktop/%s/{{target}}-{{arch}}.json"]}}}\n' \
@@ -99,18 +155,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.DESKTOP_UPDATER_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.DESKTOP_UPDATER_KEY_PASSWORD }}
           BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
-        run: bun run tauri build --config src-tauri/channel.conf.json ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.bundles && format('--bundles {0}', matrix.bundles) || '' }}
+        run: bun run tauri build --config src-tauri/channel.conf.json ${{ matrix.build.target && format('--target {0}', matrix.build.target) || '' }} ${{ matrix.build.bundles && format('--bundles {0}', matrix.build.bundles) || '' }}
 
       - name: resolve the bundle dir
         id: bundle
         shell: bash
         run: |
           set -euo pipefail
-          echo "dir=target/${{ matrix.target && format('{0}/', matrix.target) || '' }}release/bundle" >>"$GITHUB_OUTPUT"
+          echo "dir=target/${{ matrix.build.target && format('{0}/', matrix.build.target) || '' }}release/bundle" >>"$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.updater_target }}
+          name: desktop-${{ matrix.channel }}-${{ matrix.build.updater_target }}
           path: |
             ${{ steps.bundle.outputs.dir }}/**/*.tar.gz
             ${{ steps.bundle.outputs.dir }}/**/*.tar.gz.sig
@@ -126,9 +182,18 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [decide, build]
+    if: needs.decide.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.decide.outputs.channels) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     env:
+      CHANNEL: ${{ matrix.channel }}
       R2_BUCKET: bridgething-ota
       PUBLIC_BASE: https://ota.bridgething.com
       PURGE_URLS: /tmp/purge-urls.txt
@@ -137,6 +202,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          pattern: desktop-${{ matrix.channel }}-*
           path: /tmp/desktop
 
       - name: install rclone (R2 client)
@@ -157,8 +223,6 @@ jobs:
 
       - name: upload each target and write its updater manifest
         id: targets
-        env:
-          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
@@ -178,8 +242,8 @@ jobs:
             return 0
           }
 
-          for dir in /tmp/desktop/desktop-*; do
-            updater_target="${dir##*/desktop-}"
+          for dir in /tmp/desktop/desktop-"${CHANNEL}"-*; do
+            updater_target="${dir##*/desktop-"${CHANNEL}"-}"
 
             archive=$(pick "$dir" '*.app.tar.gz' '*.AppImage.tar.gz' '*.AppImage' '*.exe' '*.msi' '*.tar.gz' '*.zip')
             [ -n "$archive" ] || { echo "::error::no archive for ${updater_target}"; exit 1; }
@@ -226,7 +290,6 @@ jobs:
 
       - name: write the aggregate desktop manifest
         env:
-          CHANNEL: ${{ inputs.channel }}
           VERSION: ${{ steps.targets.outputs.version }}
           RELEASED_AT: ${{ steps.targets.outputs.released_at }}
         run: |
@@ -240,6 +303,8 @@ jobs:
           cat /tmp/desktop.json
           site/scripts/r2-put /tmp/desktop.json "desktop/${CHANNEL}/desktop.json" application/json \
             "public, max-age=300, must-revalidate"
+          site/scripts/r2-put /tmp/desktop.json "desktop/${CHANNEL}/${VERSION}/desktop.json" application/json \
+            "public, max-age=31536000, immutable"
 
       - name: purge the cloudflare edge
         if: always()
@@ -247,3 +312,9 @@ jobs:
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
         run: site/scripts/cf-purge
+
+      - name: redeploy the site so /install picks up the new pointer
+        if: matrix.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-site.yml --ref main -R "${GITHUB_REPOSITORY}"

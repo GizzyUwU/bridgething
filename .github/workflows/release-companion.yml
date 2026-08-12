@@ -180,7 +180,7 @@ jobs:
         run: bunx turbo run build --filter="@bridgething/mobile^..."
 
       - name: nitro codegen
-        run: bunx turbo run nitro:codegen
+        run: bunx turbo run nitro:codegen --filter=@bridgething/session-react-native
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -324,7 +324,7 @@ jobs:
           sccache --show-stats
 
       - name: nitro codegen
-        run: bunx turbo run nitro:codegen
+        run: bunx turbo run nitro:codegen --filter=@bridgething/session-react-native
 
       - name: pod install
         working-directory: mobile/ios
@@ -383,14 +383,14 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           IPA: ${{ steps.ipa.outputs.path }}
-          GROUPS: ${{ inputs.testflight_groups || 'public' }}
+          TESTFLIGHT_GROUPS: ${{ inputs.testflight_groups || 'public' }}
           SUBMIT: ${{ inputs.testflight_submit || github.event_name == 'push' }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
         run: |
           set -euo pipefail
           export ASC_PRIVATE_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
           args=(publish testflight --app "$ASC_APP_ID" --ipa "$IPA" --build-number "$BUILD_NUMBER" --wait)
-          [[ -n "$GROUPS" ]] && args+=(--group "$GROUPS")
+          [[ -n "$TESTFLIGHT_GROUPS" ]] && args+=(--group "$TESTFLIGHT_GROUPS")
           [[ "$SUBMIT" == "true" ]] && args+=(--submit --confirm)
           asc "${args[@]}"
 
