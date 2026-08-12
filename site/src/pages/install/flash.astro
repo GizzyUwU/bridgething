@@ -1,0 +1,65 @@
+---
+import { Flasher, type Build } from '../../components/device/Flasher';
+import Footer from '../../components/Footer.astro';
+import Header from '../../components/Header.astro';
+import Layout from '../../layouts/Layout.astro';
+import { FEATURES } from '../../lib/features';
+import { loadManifest } from '../../lib/manifest';
+import { terbiumUrl } from '../../lib/site';
+
+const manifest = await loadManifest();
+
+const channels = manifest
+  ? Object.entries(manifest.channels)
+      .map(([slug, channel]) => {
+        const release = manifest.releases[channel.latest];
+        return {
+          slug,
+          name: channel.name.toLowerCase(),
+          description: channel.description,
+          stability: channel.stability,
+          default: channel.default,
+          version: channel.latest,
+          url: release?.download.url ?? null,
+          size: release?.download.size ?? 0,
+        };
+      })
+      .filter(channel => channel.url !== null)
+      .sort((a, b) => Number(b.default) - Number(a.default))
+  : [];
+
+const builds = channels as Build[];
+---
+
+<Layout
+  title="flash"
+  description="flash bridgething onto a spotify car thing from your browser over usb."
+  noindex={true}>
+  <Header />
+
+  <main class="container-site w-full flex-1 py-12 md:py-16">
+    <section class="flex flex-col gap-8">
+      <header class="flex flex-col gap-3">
+        <p class="m-0 font-mono text-sm text-white/40">
+          <a href="/install">install</a> / flash
+        </p>
+        <h1 class="m-0">flash from your browser</h1>
+        <p class="m-0 max-w-[60ch] text-lg text-pretty text-white/70">writes a whole system image over usb</p>
+      </header>
+
+      <div class="flex flex-col gap-4">
+        <p class="text-accent m-0 font-mono text-sm">1 - put the thing in burn mode</p>
+        <ol class="m-0 flex list-none flex-col gap-2 p-0 font-mono text-sm text-white/60">
+          <li>unplug the car thing.</li>
+          <li>hold the first and fourth buttons buttons (preset 1 and 4).</li>
+          <li>keep holding, plug the usb-c cable back in, let go after a few seconds.</li>
+          <li>if the screen stays dark, welcome to burn mode</li>
+        </ol>
+      </div>
+
+      <Flasher builds={builds} client:only="preact" />
+    </section>
+  </main>
+
+  <Footer />
+</Layout>
