@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          { echo "CMAKE_GENERATOR=Ninja"; echo "CC=clang-cl"; echo "CXX=clang-cl"; } >>"$GITHUB_ENV"
+          { echo "CMAKE_GENERATOR=Ninja"; echo "CC=clang-cl"; echo "CXX=clang-cl"; echo "CXXFLAGS=/EHsc"; } >>"$GITHUB_ENV"
 
       - name: require the auth psk
         shell: bash
