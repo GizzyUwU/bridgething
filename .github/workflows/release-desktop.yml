@@ -105,6 +105,11 @@ jobs:
       - name: build the frontend and its workspace deps
         run: bunx turbo run build --filter='@bridgething/desktop-frontend...'
 
+      - name: use clang-cl for ggml on windows arm
+        if: matrix.updater_target == 'windows-aarch64'
+        shell: bash
+        run: echo "CMAKE_GENERATOR_TOOLSET=ClangCL" >>"$GITHUB_ENV"
+
       - name: require the auth psk
         shell: bash
         env:
