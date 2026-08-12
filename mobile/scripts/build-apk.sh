@@ -25,7 +25,7 @@ gradle_jdk_env
 
 command -v bun >/dev/null || { echo "bun not found (required for nitro:codegen)" >&2; exit 1; }
 echo "== nitro:codegen =="
-( cd .. && bunx turbo run nitro:codegen )
+( cd .. && bunx turbo run nitro:codegen --filter=@bridgething/session-react-native )
 
 echo "== gradle $TASK ($ABI, jdk: $GRADLE_JAVA) =="
 ( cd android && JAVA_HOME="$GRADLE_JAVA" ./gradlew "$TASK" \
