@@ -1,0 +1,645 @@
+{
+  "version": 1,
+  "component": "LaneScheduler",
+  "phase": "capture",
+  "description": "Cross-language conformance traces for outbound lane scheduling. PHASE 1: every arm EMITS its own trace to lane-trace.<arm>.json and asserts NOTHING. Diff those files; each difference is a spec question nobody has answered. Once reconciled, freeze the agreed answers and flip every arm to assert. This corpus is the conformance target for the ratified \"OutboundPacker 70/20/10 byte-share with idle-lane donation, everywhere\" decision, and it is the spec that the weak RED assertion in sdk-runtime cannot express.",
+  "arms": {
+    "rust-packer": "crates/core/src/bluetooth/packer.rs OutboundPacker - byte-share 70/20/10 over three mpsc lanes with a one-frame stash, batching whole frames into a max_batch_bytes buffer.",
+    "rust-driver": "crates/sdk-runtime Driver (connection.rs) - three VecDeque lanes, strict priority, exactly one frame per loop iteration, one cross-lane queue cap.",
+    "rust-ea": "crates/iap2/src/session/ea_transport.rs EaChunker - strict priority with a skip-count starvation guard, EA-MTU chunking that splits frames, per-stream coalescing.",
+    "swift-ea": "packages/gateway/swift EAAccessoryAdapter.SessionState - three arrays, strict-priority coalesce loop with a soft byte cap, byte high-water and hard-cap drop thresholds.",
+    "kotlin-bt": "packages/gateway/kotlin BluetoothSocketAdapter.Session - unbounded normal channel plus two bounded lanes, peek-normal then peek-bulk then fair select, one frame per write."
+  },
+  "skipped_arms": {
+    "swift-iobluetooth": "packages/gateway/swift IOBluetoothRFCOMMAdapter.SessionState is deliberately not captured. It is macOS-only and cannot compile on the Linux box this corpus is authored and run on, and it is ratified for deletion rather than for porting, so a captured answer from it could never become part of the conformance target. Its lane logic is a copy of the EAAccessoryAdapter loop and reads the same frame[5] priority byte, so nothing unique is lost."
+  },
+  "frame": {
+    "layout": "a frame is a real 16-byte wire header followed by byte_len - 16 filler bytes: magic 0xDEAD BE, version 0x02, compression 0x00, encoding 0x00, priority byte at offset 5, two reserved 0x00, then payload length as u64 BE. filler is 0xA5.",
+    "priority_byte": "normal 0x00, bulk 0x01, background 0x02, at offset 5.",
+    "byte_len": "total frame length including the header. a byte_len under 16 is a truncated header: emit only that many bytes of it, filler never applies.",
+    "payload_is_never_emitted": "no arm writes frame bytes into its answer file. emissions are reported as (id, byte count) segments, so the answer files stay small even where a case queues megabytes.",
+    "attribution": "an arm that splits a frame attributes emitted bytes by cumulative offset within the lane byte order it preserves; an arm that emits whole frames attributes by object identity. both produce the same segment list shape."
+  },
+  "contract": {
+    "ops": "each case is a script of ops driven in order. enqueue hands one frame to the scheduler. drain gives the scheduler exactly one unit of link capacity and records what comes out. write_complete returns credit for a previously emitted unit without asking for a new emission.",
+    "expansion": "an op may carry \"count\": it expands to that many identical ops before driving. an expanded enqueue numbers its ids <id>0 .. <id>(count-1); an unexpanded enqueue uses its id verbatim. the emitted steps array has one entry per EXPANDED op, so step indices line up across arms.",
+    "sink": "the arm wires the component to a sink that reports no capacity except during a drain op, where it accepts exactly one emission in full (no short writes - a short write is a stream artifact, not lane policy). an arm whose component drains eagerly on enqueue must hold the sink shut so that every emission lands on a drain op and the answer files stay comparable.",
+    "settle": "both enqueue and drain have a bounded settle window, at least 50 ms of the arm's own clock. an enqueue that returns inside the window is accepted; one that does not is parked and stays listed in parked_ids until it completes. a drain that produces nothing inside the window records empty segments rather than blocking the run - three of the five components await forever on an idle lane set, and a case that ends with the component idle must not hang the emitter.",
+    "write_complete": "every arm captured here emits synchronously and treats write_complete as a no-op step. the op is in the vocabulary because the ratified restructure gates the next send on on_write_complete with one batch in flight per device; the freeze pass fills these steps in, and a capture arm that records anything other than an empty no-op has found something.",
+    "ceiling_is_construction_not_per_drain": "max_emission_bytes is per case, not per drain, because it is a construction parameter in three of the five arms (OutboundPacker field, EaChunker task argument, SessionState private constant) and cannot be varied per call without rebuilding the component mid-case.",
+    "permitted_source_edits": "an arm may add a test-visible constructor parameter for a lane CAPACITY that is otherwise a private constant (kotlin BULK_LANE_DEPTH, ea LANE_CAPACITY), defaulting to the shipping value, and must report the value it used in constants. the swift BYTE thresholds - coalesceCapBytes, highWaterBytes, hardCapBytes - must NOT be made injectable: a-small-emission-ceiling-is-not-honored-everywhere, ios-high-water-drops-background and ios-hard-cap-drops-the-link exist to measure the real shipping values against a configured ceiling, and injecting them would erase the finding.",
+    "enqueue_ordering": "ops are driven strictly in order and an enqueue is fully settled before the next op starts, so arrival order within a lane is exactly corpus order.",
+    "case_arms": "a case may declare \"arms\": the subset of arm keys that answer it. cases added after an arm's code was deleted declare the surviving arms; the frozen answer files simply end before such a case and the differ compares only the declared arms there. a case without the key is answered by every arm."
+  },
+  "config_defaults": {
+    "max_emission_bytes": 32768,
+    "lane_depth": 64,
+    "stream": 256
+  },
+  "config_keys": {
+    "max_emission_bytes": "the most bytes one emission may carry. packer max_batch_bytes; ea max_chunk_payload; swift coalesceCapBytes (NOT injectable, see permitted_source_edits); kotlin and driver have no such concept and report null.",
+    "lane_depth": "requested capacity for the bulk and background lanes. packer mpsc channel capacity; ea LANE_CAPACITY; kotlin BULK_LANE_DEPTH. the normal lane keeps each arm's own capacity (kotlin unbounded, driver cross-lane cap 16, swift unbounded array). arms report every real depth in constants.",
+    "stream": "per-enqueue EA stream id. only rust-ea uses it; a packet carries one stream-id prefix, so frames from different streams can never share an emission there. every other arm ignores it."
+  },
+  "emitted": {
+    "file": "crates/lib/fixtures/lane-trace.<arm>.json, arm one of the five keys in \"arms\".",
+    "shape": "{ \"impl\": \"<arm>\", \"constants\": {...}, \"cases\": [ { \"name\": ..., \"steps\": [...] } ] }",
+    "step_fields": {
+      "op": "echo of the expanded op name.",
+      "segments": "ordered [{ \"id\": ..., \"bytes\": n }] of what left the component during this op. empty array when nothing left.",
+      "outcome": "enqueue only: \"accepted\", \"parked\" or \"dropped\". null on other ops.",
+      "dropped_ids": "ids the component discarded during this op, ordered. empty array when none.",
+      "parked_ids": "ids whose enqueue has not returned as of the end of this op, ordered by enqueue order.",
+      "queued_bytes": "the component's own byte accounting of what it is holding, or null when it does not account bytes. a null here is the byte-blindness finding, not a gap in the capture.",
+      "link_dropped": "true on the op where the component tore its own link down."
+    },
+    "conformance_bearing": [
+      "segments",
+      "outcome",
+      "dropped_ids",
+      "link_dropped"
+    ],
+    "diagnostic_only": [
+      "parked_ids",
+      "queued_bytes"
+    ],
+    "constants": [
+      "lane_shares",
+      "emission_ceiling_bytes",
+      "honors_configured_ceiling",
+      "normal_lane_depth",
+      "bulk_lane_depth",
+      "background_lane_depth",
+      "cross_lane_queue_cap",
+      "starvation_guard_skips",
+      "high_water_bytes",
+      "hard_cap_bytes",
+      "fragments_frames",
+      "coalesces_frames",
+      "priority_read_from_frame_byte",
+      "min_frame_bytes_for_priority",
+      "enqueue_couples_to_send"
+    ]
+  },
+  "cases": [
+    {
+      "name": "strict-priority-baseline",
+      "description": "one frame per lane, enqueued lowest-priority first so arrival order and priority order disagree. the cheapest possible anchor: it separates the arms that emit a batch from the arms that emit a frame, before any policy is under test.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 64
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 64
+        },
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 64
+        },
+        {
+          "op": "drain",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "one-drain-coalesces-what-fits",
+      "description": "four normal frames well under the ceiling, one lane only. no fairness question at all - this pins how much a single drain is allowed to carry when nothing competes.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 4096,
+          "count": 4
+        },
+        {
+          "op": "drain",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "saturated-normal-with-waiting-bulk-and-background",
+      "description": "the headline case. the normal lane holds more bytes than a single emission can carry, and one bulk and one background frame arrive behind it. a byte-share scheduler gives both a slot in the first emission; a strict-priority one does not, and the answer files say which arms do which and how far back the lower lanes land. lane_depth 256 keeps the normal lane deeper than the 70 percent share (38400 queued bytes against a 22937-byte ceiling) so the share binds instead of the lane running dry first.",
+      "config": {
+        "lane_depth": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 256,
+          "count": 150
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 256
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 256
+        },
+        {
+          "op": "drain",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "name": "bulk-saturated-background-waits",
+      "description": "no normal traffic at all, a saturated bulk lane, one background frame behind it, and a ceiling small enough that an emission carries exactly one frame. the small ceiling is the point: with one frame per emission the packer byte shares cannot express themselves and it degenerates to strict priority, so this case measures how each arm behaves when the emission unit is too small for a share to bite - and it is the only case where the EA skip-count guard can fire.",
+      "config": {
+        "max_emission_bytes": 512
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "b",
+          "priority": "bulk",
+          "byte_len": 512,
+          "count": 200
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 512
+        },
+        {
+          "op": "drain",
+          "count": 12
+        }
+      ]
+    },
+    {
+      "name": "idle-lower-lanes-donate-to-normal",
+      "description": "normal alone, more bytes queued than one emission holds, bulk and background dry. a share-only scheduler would stop normal at 70 percent of the ceiling; a donating one fills the emission. this is the donation half of the ratified policy.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 4096,
+          "count": 12
+        },
+        {
+          "op": "drain",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "idle-normal-lane-donates-to-bulk",
+      "description": "the same shape one lane down: bulk alone with normal and background dry. donation has to work upward from an idle higher lane too, not only downward, or a bulk transfer runs at 20 percent of the link on an otherwise silent connection.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "b",
+          "priority": "bulk",
+          "byte_len": 4096,
+          "count": 12
+        },
+        {
+          "op": "drain",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "interleaved-bursts",
+      "description": "enqueues and drains alternate so lanes are refilled between emissions and each emission sees a different lane occupancy. this is where arrival order inside a lane and priority order across lanes are forced to disagree repeatedly, and where a stashed frame from one emission has to survive into the next while a higher lane preempts it.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 8192
+        },
+        {
+          "op": "enqueue",
+          "id": "n1",
+          "priority": "normal",
+          "byte_len": 8192
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 8192
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 8192
+        },
+        {
+          "op": "enqueue",
+          "id": "n2",
+          "priority": "normal",
+          "byte_len": 8192
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "enqueue",
+          "id": "n3",
+          "priority": "normal",
+          "byte_len": 1024
+        },
+        {
+          "op": "enqueue",
+          "id": "b1",
+          "priority": "bulk",
+          "byte_len": 1024
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "drain"
+        }
+      ]
+    },
+    {
+      "name": "byte-size-skewed-loads",
+      "description": "many tiny normal frames against a few very large bulk and background frames. a single bulk frame here is larger than the whole 20 percent bulk share, so a scheduler that only ever fills a lane up to its share can never ship one at all; whether the large frame lands depends entirely on whether a donation pass runs after the shares. this is also the case that separates byte fairness from frame-count fairness, which look identical everywhere else.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 40,
+          "count": 40
+        },
+        {
+          "op": "enqueue",
+          "id": "b",
+          "priority": "bulk",
+          "byte_len": 16384,
+          "count": 3
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 16384
+        },
+        {
+          "op": "drain",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "name": "an-oversize-frame-exceeds-the-emission-ceiling",
+      "description": "a single frame larger than the whole emission ceiling, followed by a small one. the network path treats a mid-frame tail as fatal, so a batching arm must ship the oversize frame alone and intact, while the EA path is allowed - and required - to split it across packets. the answer files show which arms fragment, and whether the small frame rides along with the tail.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 40960
+        },
+        {
+          "op": "enqueue",
+          "id": "n1",
+          "priority": "normal",
+          "byte_len": 1024
+        },
+        {
+          "op": "drain",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "a-small-emission-ceiling-is-not-honored-everywhere",
+      "description": "the ceiling is configured far below every arm shipping default. the arms that take it as a construction parameter honor it; the platform arms carry it as a private constant and cannot. this is a deliberate injectability probe, not a fairness question: it measures what the unified scheduler has to make configurable, and the divergence it produces is expected.",
+      "config": {
+        "max_emission_bytes": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 64,
+          "count": 6
+        },
+        {
+          "op": "drain",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "bounded-lanes-park-the-sender",
+      "description": "more bulk frames than the configured lane depth, with the sink shut, then enough drains to unpark everything. an arm with real backpressure parks the surplus senders; an arm with unbounded queues accepts them all; an arm that pumps its bounded channel into an unbounded internal queue accepts them all while looking bounded. the off-by-one from a frame already pulled by a writer loop is real and belongs in the answer file rather than being smoothed over.",
+      "config": {
+        "lane_depth": 4
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "b",
+          "priority": "bulk",
+          "byte_len": 512,
+          "count": 8
+        },
+        {
+          "op": "drain",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "name": "ios-high-water-drops-background",
+      "description": "normal and bulk fill the queue to exactly the 4 MiB iOS high-water mark, then background frames arrive one at a time. the EA adapter sheds a queued frame from the lowest occupied lane on every arrival that crosses the mark, so each background frame is discarded the moment it is enqueued, silently, with no error to the caller. every other arm queues them. this is the drop-versus-backpressure behavior change the restructure makes, and the dropped_ids column is what it changes.",
+      "config": {
+        "max_emission_bytes": 262144,
+        "lane_depth": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 262144,
+          "count": 8
+        },
+        {
+          "op": "enqueue",
+          "id": "b",
+          "priority": "bulk",
+          "byte_len": 262144,
+          "count": 8
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 262144
+        },
+        {
+          "op": "enqueue",
+          "id": "g1",
+          "priority": "background",
+          "byte_len": 262144
+        },
+        {
+          "op": "enqueue",
+          "id": "g2",
+          "priority": "background",
+          "byte_len": 262144
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "write_complete"
+        },
+        {
+          "op": "drain"
+        },
+        {
+          "op": "write_complete"
+        },
+        {
+          "op": "drain",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "ios-hard-cap-drops-the-link",
+      "description": "a normal-only flood past the 8 MiB hard cap with nothing in the lower lanes to shed. the EA adapter has no frame it is willing to discard, so it tears down the link instead and the session dies mid-transfer. every other arm keeps queueing. the second half of the drop-versus-backpressure change, and the more damaging half.",
+      "config": {
+        "max_emission_bytes": 262144,
+        "lane_depth": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 262144,
+          "count": 33
+        },
+        {
+          "op": "drain",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "starvation-window-for-a-single-bulk-frame",
+      "description": "the measurement case. one bulk frame arrives behind a fully saturated normal lane and the run is 24 drains long. the emission index at which b0 first appears IS the starvation window, read straight off the answer file with no extra field - and an arm where b0 never appears has an unbounded window, which is exactly the condition the RED sdk-runtime test asserts against and cannot express. the run is deliberately shorter than the normal backlog so an unbounded arm shows up as an absence rather than as a large number. lane_depth 256 keeps the normal lane deeper than the 70 percent share (46080 queued bytes against a 22937-byte ceiling) so the window measures fairness rather than lane depth.",
+      "config": {
+        "lane_depth": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 256,
+          "count": 180
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 256
+        },
+        {
+          "op": "drain",
+          "count": 24
+        }
+      ]
+    },
+    {
+      "name": "drain-with-nothing-queued",
+      "description": "drains against an empty scheduler, then one frame, then more drains. three of the five components await forever on an idle lane set, so this pins the settle rule as much as the behavior: an idle drain records an empty emission and the run continues. it also catches an arm that reports a phantom emission or that treats an empty lane set as shutdown.",
+      "config": {},
+      "ops": [
+        {
+          "op": "drain",
+          "count": 3
+        },
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 64
+        },
+        {
+          "op": "drain",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "same-stream-frames-coalesce-and-streams-never-mix",
+      "description": "four normal frames across two EA stream ids, interleaved so a stream boundary sits in the middle of what would otherwise be one emission. an EA packet carries one stream-id prefix, so the fragmenter under the unified scheduler has to keep this boundary even though no other arm has the concept. this is recorded as an intentional asymmetry, not a divergence to reconcile away.",
+      "config": {
+        "max_emission_bytes": 4096
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 1024,
+          "stream": 256
+        },
+        {
+          "op": "enqueue",
+          "id": "n1",
+          "priority": "normal",
+          "byte_len": 1024,
+          "stream": 256
+        },
+        {
+          "op": "enqueue",
+          "id": "n2",
+          "priority": "normal",
+          "byte_len": 1024,
+          "stream": 512
+        },
+        {
+          "op": "enqueue",
+          "id": "n3",
+          "priority": "normal",
+          "byte_len": 1024,
+          "stream": 256
+        },
+        {
+          "op": "drain",
+          "count": 5
+        }
+      ]
+    },
+    {
+      "name": "a-short-frame-loses-its-priority",
+      "description": "a bulk frame too short to carry a header, followed by a normal frame. the platform adapters peek priority out of frame[5] and fall back to normal on anything under 16 bytes, so the bulk frame lands in the normal lane ahead of the normal frame; the Rust arms are handed the priority as an argument and route it to bulk, behind the normal frame. the emission order inverts between the two groups. the frame[5] peek is ratified for deletion, and this case is the evidence of what deleting it changes.",
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "s0",
+          "priority": "bulk",
+          "byte_len": 8
+        },
+        {
+          "op": "enqueue",
+          "id": "n0",
+          "priority": "normal",
+          "byte_len": 64
+        },
+        {
+          "op": "drain",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "wide-normal-frames-do-not-end-the-emission-for-waiting-bulk",
+      "description": "the normal lane holds frames wider than half the ceiling, so after the seed no second normal frame can ever fit, and one small bulk frame waits behind them. a scheduler that ends the emission on a non-fitting head starves b0 until the normal lane runs dry; the ratified rule skips to the next lane instead, so b0 rides out with the first emission. this is the paced-transfer shape in miniature: 16384-byte fragments against a 32768 ceiling put every emission one non-fitting head away from ending early.",
+      "arms": [
+        "rust-packer",
+        "rust-driver",
+        "rust-ea"
+      ],
+      "config": {},
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 20000,
+          "count": 3
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 256
+        },
+        {
+          "op": "drain",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "a-bulk-head-wider-than-its-share-is-not-starved-by-a-fed-normal-lane",
+      "description": "the shipping starvation shape at a ceiling that holds forty frames, so nothing here is degenerate. a 4096-byte ceiling gives bulk 819 bytes and background 409, the bulk head is 1200 and the background head 600, and the normal lane never runs dry. neither head can be taken in the share pass, and the donation pass reaches the lower lanes only after normal has consumed the emission, so a share-and-donate scheduler with no further rule starves both without bound. this is the rfcomm writer at its real ceiling with an asset or ota frame behind ordinary player traffic. the case stays inside the 256-frame envelope the rust-ea arm's index tagging imposes, and lane_depth is above its frame count so no lane ever parks a sender: the two lane-bound models (frame depth in the packer arm, depth times the widest frame in bytes elsewhere) only agree when frames are uniform, and this case is deliberately not.",
+      "arms": [
+        "rust-packer",
+        "rust-driver",
+        "rust-ea"
+      ],
+      "config": {
+        "max_emission_bytes": 4096,
+        "lane_depth": 256
+      },
+      "ops": [
+        {
+          "op": "enqueue",
+          "id": "n",
+          "priority": "normal",
+          "byte_len": 100,
+          "count": 250
+        },
+        {
+          "op": "enqueue",
+          "id": "b0",
+          "priority": "bulk",
+          "byte_len": 1200
+        },
+        {
+          "op": "enqueue",
+          "id": "g0",
+          "priority": "background",
+          "byte_len": 600
+        },
+        {
+          "op": "drain",
+          "count": 6
+        }
+      ]
+    }
+  ]
+}

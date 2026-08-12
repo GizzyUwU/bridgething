@@ -1,13 +1,10 @@
 import { BridgethingClient } from '@bridgething/client';
+import { daemonUrl } from '@bridgething/webapp-shared/daemon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Dashboard from './Dashboard';
 import { controlKind, momentaryCall, optimisticToggle, toggleCall } from './domains';
 import { HaConnection, type HaEntities, type HaState, type HaStatus } from './ha';
 import Picker from './Picker';
-
-const wsUrl =
-  import.meta.env.VITE_BRIDGETHING_URL ??
-  (typeof window !== 'undefined' ? `ws://${window.location.host}/` : 'ws://127.0.0.1:8891/');
 
 const SELECTION_KEY = 'selected_entities';
 const TEMP_DEBOUNCE_MS = 600;
@@ -19,7 +16,7 @@ type Mode =
   | { kind: 'dashboard' };
 
 export default function App() {
-  const client = useMemo(() => new BridgethingClient({ url: wsUrl }), []);
+  const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const connRef = useRef<HaConnection | null>(null);
   const tempTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -37,7 +34,6 @@ export default function App() {
     setTimeout(() => setToast(t => (t === message ? null : t)), 3_000);
   }, []);
 
-  // live updates reconcile any optimistic overlay that has caught up to reality.
   const ingest = useCallback((next: HaEntities) => {
     setEntities(next);
     setOverlay(prev => {
@@ -91,7 +87,7 @@ export default function App() {
       try {
         await conn.whenReady();
       } catch {
-        return; // status already carries the error; auth_invalid is terminal
+        return;
       }
       if (cancelled) return;
 
@@ -263,8 +259,8 @@ function mergeState(
 
 function Center({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-bt-charcoal px-10">
-      <div className={`max-w-136 text-center text-sm ${muted ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>
+    <div className="flex h-full w-full items-center justify-center bg-bg px-10">
+      <div className={`max-w-136 text-center font-mono text-row ${muted ? 'text-near' : 'text-off-white'}`}>
         {children}
       </div>
     </div>

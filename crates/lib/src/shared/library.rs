@@ -4,14 +4,12 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use super::{Album, Artist, Track};
 
 /// Coarse type tag a webapp uses to filter or branch. Mirrors the variant
 /// names of `LibraryItem`; kept separate so search/recommendations can
 /// constrain by kind without having to construct a sample item.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -29,7 +27,6 @@ pub enum ItemKind {
 /// (e.g. `player.play({ uri })`, `library.favorites.toggle({ item })`).
 /// `persistent_id` is the platform-stable id when the gateway has one;
 /// webapps treat it as opaque.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +41,6 @@ pub struct ItemRef {
 /// would route on; `track_count` is best-effort (some sources don't expose
 /// it cheaply); `owner_name` is whatever the source surfaces (Spotify
 /// owner, Apple Music curator, etc.).
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -61,7 +57,6 @@ pub struct Playlist {
 /// at episode-level so a webapp can render show + episode without a
 /// separate fetch. `published_at_ms` is best-effort; not every gateway
 /// surfaces it.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -77,7 +72,6 @@ pub struct PodcastEpisode {
 
 /// One podcast show (parent of `PodcastEpisode`). `episode_count` is
 /// best-effort.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +86,6 @@ pub struct Show {
 
 /// Algorithmic / radio station. `seed` is the URI the station was seeded
 /// from when known (artist, track, etc.).
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -109,7 +102,6 @@ pub struct Station {
 /// fields, rare per-platform fields just don't surface. Forward-compat:
 /// adding new variants or fields is an additive change webapps can
 /// branch on.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -130,7 +122,6 @@ pub const RECENTS_NODE_ID: &str = "recently-played";
 
 /// One row in a `BrowseResult`: either a folder (drilldown) or a leaf
 /// item the user can play / queue / favorite.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -147,7 +138,6 @@ pub enum BrowseEntry {
 /// gateways populate it when cheap (Spotify Web API home shelves include
 /// previews; Apple Music curated rails do too) and leave it `None`
 /// otherwise.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -166,7 +156,6 @@ pub struct BrowseFolder {
 /// means indeterminate). `has_more` is the authoritative end-of-data
 /// signal - webapps paginate by raising `offset` until `has_more` is
 /// false rather than relying on `total`.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -180,7 +169,6 @@ pub struct BrowseResult {
 /// Page of search results. `kinds` is the constrained kinds the search
 /// honored (echoed back so webapps can detect ignored constraints); items
 /// are ranked best-first.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -195,7 +183,6 @@ pub struct SearchResult {
 /// Page of recommendation results. Gateway decides how seed + kind
 /// interact (Spotify uses radio-style seeding, Apple Music uses curated
 /// rails) - the daemon doesn't prescribe.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -208,7 +195,6 @@ pub struct RecommendationsResult {
 
 /// Page of the user's favorited / liked / saved library items. Mixed-kind
 /// because most platforms expose one "Saved" surface across kinds.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -219,7 +205,6 @@ pub struct FavoritesPage {
   pub has_more: bool,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

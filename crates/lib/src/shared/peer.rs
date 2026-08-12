@@ -12,11 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use crate::{Device, GatewayInfo};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +50,6 @@ impl Peer {
   }
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -64,7 +61,6 @@ pub enum PeerIap2Status {
   Identified,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

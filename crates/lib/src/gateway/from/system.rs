@@ -2,12 +2,10 @@ use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use super::transfer::{TransferBody, TransferRef};
 use crate::{LogLevel, LogSource, OtaKind, RangePart};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -16,7 +14,6 @@ pub struct KeepaliveAck {
   pub seq: u32,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -37,9 +34,12 @@ pub struct OtaBegin {
   pub transfer: TransferRef,
   pub patch: Option<OtaPatch>,
   pub provenance: Option<String>,
+  /// What the pusher believes this artifact's version is. Only kinds whose payload does not carry
+  /// its own version need it: a daemon knows its own, a webapp zip has a manifest, an image has
+  /// /etc/superbird, but a .btww model container has no version field at all.
+  pub version: Option<String>,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -48,7 +48,6 @@ pub enum OtaPatchAlgorithm {
   Zstd,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +59,6 @@ pub struct OtaPatch {
   pub source_sha256: Option<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -69,7 +67,6 @@ pub struct OtaAbandon {
   pub update_id: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -78,7 +75,6 @@ pub struct OtaActivate {
   pub expected: Vec<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +85,6 @@ pub struct OtaAssetRangeReply {
   pub body: TransferBody,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +93,6 @@ pub struct OtaAssetRangeRejected {
   pub reason: String,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = GatewayToBridge,
@@ -109,7 +103,6 @@ pub struct OtaAssetRangeRejected {
 )]
 pub struct DeviceGetNickname;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -127,7 +120,6 @@ pub struct DeviceSetNickname {
   pub nickname: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -146,7 +138,6 @@ pub struct LogsTail {
   pub max_lines: u32,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -164,7 +155,6 @@ pub struct LogsSubscribe {
   pub filter: Option<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -173,7 +163,6 @@ pub struct LogsUnsubscribe {
   pub token: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

@@ -1,12 +1,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use bluer::Address;
-use bridgething::{Iap2Event, Iap2InjectTx};
+use bridgething::{Address, Iap2Event, Iap2InjectTx};
 use bridgething_client::Client as CommandClient;
 use bridgething_gateway::Gateway;
-use bridgething_iap2::{DeviceEmulatorHandle, SessionEvent, csm::now_playing::NowPlayingUpdate as Iap2NowPlaying};
+#[cfg(target_os = "linux")]
+use bridgething_iap2::DeviceEmulatorHandle;
+use bridgething_iap2::{SessionEvent, csm::now_playing::NowPlayingUpdate as Iap2NowPlaying};
 
-use crate::{DeviceHarness, FrameObserver, Harness, Iap2OutboundObserver, MockWsClient};
+#[cfg(target_os = "linux")]
+use crate::DeviceHarness;
+use crate::{FrameObserver, Harness, Iap2OutboundObserver, MockWsClient};
 
 #[async_trait]
 pub trait GatewayDriver {
@@ -137,6 +140,7 @@ impl Iap2Source for HarnessIap2Source {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl FrameObserve for DeviceHarness {
   async fn frames(&self) -> Result<FrameObserver> {
     self.frame_tap().await
@@ -144,6 +148,7 @@ impl FrameObserve for DeviceHarness {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl ModernClientDriver for DeviceHarness {
   async fn modern_client(&self) -> Result<MockWsClient> {
     self.connect_modern_client().await
@@ -151,6 +156,7 @@ impl ModernClientDriver for DeviceHarness {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl Iap2SourceDriver for DeviceHarness {
   type Source = DeviceIap2Source;
   async fn iap2_source(&self) -> Result<DeviceIap2Source> {
@@ -160,11 +166,13 @@ impl Iap2SourceDriver for DeviceHarness {
   }
 }
 
+#[cfg(target_os = "linux")]
 pub struct DeviceIap2Source {
   handle: DeviceEmulatorHandle,
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl Iap2Source for DeviceIap2Source {
   async fn push_now_playing(&self, update: Iap2NowPlaying) -> Result<()> {
     self.handle.push_now_playing(update).await?;
@@ -183,11 +191,13 @@ pub enum OverAirTransport {
   Iap2Ea,
 }
 
+#[cfg(target_os = "linux")]
 pub struct DeviceTier {
   harness: DeviceHarness,
   transport: OverAirTransport,
 }
 
+#[cfg(target_os = "linux")]
 impl DeviceTier {
   pub fn new(harness: DeviceHarness, transport: OverAirTransport) -> Self {
     Self { harness, transport }
@@ -195,6 +205,7 @@ impl DeviceTier {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl GatewayDriver for DeviceTier {
   async fn gateway(&self) -> Result<Gateway> {
     match self.transport {
@@ -205,6 +216,7 @@ impl GatewayDriver for DeviceTier {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl FrameObserve for DeviceTier {
   async fn frames(&self) -> Result<FrameObserver> {
     self.harness.frame_tap().await
@@ -212,6 +224,7 @@ impl FrameObserve for DeviceTier {
 }
 
 #[async_trait]
+#[cfg(target_os = "linux")]
 impl ModernClientDriver for DeviceTier {
   async fn modern_client(&self) -> Result<MockWsClient> {
     self.harness.connect_modern_client().await

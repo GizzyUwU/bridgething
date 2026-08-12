@@ -1,41 +1,71 @@
 import type {
   BridgethingOtaManifest,
+  BridgethingOtaOutcome,
   BridgethingOtaRelease,
 } from '@bridgething/session-react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { describeError } from '@bridgething/ui/errors';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Text, View } from 'react-native';
 
+import { ConfirmSheet } from '../components/ConfirmSheet';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
+import { Note } from '../components/Note';
+import { OtaRunProgress, OtaStarting } from '../components/OtaRun';
 import { Pill } from '../components/Pill';
+import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { Segmented } from '../components/Segmented';
-import { isRunning, useOtaRun } from '../lib/ota';
+import { Spinner } from '../components/Spinner';
+import {
+  describeOtaInstall,
+  isRunning,
+  rootUrlOf,
+  useOtaProgress,
+} from '../lib/ota';
 import { getSession, useSession } from '../lib/session';
-import type { RootStackParamList } from '../navigation';
+import { TEXT } from '../lib/theme';
+import type { AppsScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'OtaVersions'>;
+type Props = AppsScreenProps<'OtaVersions'>;
 
-export function OtaVersionsScreen({ route, navigation }: Props) {
+function outcomeLabel(
+  outcome: BridgethingOtaOutcome | undefined,
+  error: string | undefined,
+): string {
+  if (outcome === 'succeeded') return 'installed';
+  if (outcome === 'cancelled') return 'cancelled';
+  return error ? `did not finish · ${describeError(error)}` : 'did not finish';
+}
+
+export function OtaVersionsScreen({ route }: Props) {
   const { deviceId, channel: initialChannel } = route.params;
   const meta = useSession(s => s.deviceMeta[deviceId]);
-  const installing = isRunning(useOtaRun(deviceId));
+  const rootUrl = rootUrlOf(useSession(s => s.otaPollConfig));
+  const progress = useOtaProgress(deviceId);
+  const run = progress?.run;
+  const outcome = run?.outcome;
+  const runError = run?.error;
 
   const [manifest, setManifest] = useState<BridgethingOtaManifest | null>(null);
   const [channel, setChannel] = useState(initialChannel);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [asking, setAsking] = useState<BridgethingOtaRelease | null>(null);
+  const [asked, setAsked] = useState<BridgethingOtaRelease | null>(null);
+  const [target, setTarget] = useState<BridgethingOtaRelease | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setError(null);
+    setLoadError(null);
+    setManifest(null);
     try {
-      setManifest(await getSession().fetchOtaManifest(null));
+      setManifest(await getSession().fetchOtaManifest(rootUrl));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setLoadError(describeError(err));
       setManifest(null);
     }
-  }, []);
+  }, [rootUrl]);
 
   useEffect(() => {
     load();
@@ -49,94 +79,146 @@ export function OtaVersionsScreen({ route, navigation }: Props) {
   const current = meta
     ? `${meta.daemonVersion}+image.${meta.imageVersion}`
     : null;
-  const deviceChannel = meta?.channel;
 
-  const install = (release: BridgethingOtaRelease) => {
-    const crossChannel =
-      deviceChannel && deviceChannel !== channel
-        ? ` this moves the device from the ${deviceChannel} channel to ${channel}.`
-        : '';
-    Alert.alert(
-      `install ${release.version}?`,
-      `pushes daemon ${release.daemonVersion} and image ${release.imageVersion} to this Car Thing.${crossChannel}`,
-      [
-        { text: 'cancel', style: 'cancel' },
-        {
-          text: 'install',
-          onPress: () => {
-            getSession()
-              .applyOtaUpdate(deviceId, channel, release.version, null)
-              .catch(() => {});
-            navigation.goBack();
-          },
-        },
-      ],
-    );
+  const apply = async (release: BridgethingOtaRelease) => {
+    setTarget(release);
+    setFailure(null);
+    setStarting(true);
+    try {
+      await getSession().applyOtaUpdate(
+        deviceId,
+        channel,
+        release.version,
+        rootUrl,
+      );
+    } catch (err) {
+      setFailure(describeError(err));
+    } finally {
+      setStarting(false);
+    }
   };
 
+  const ask = (release: BridgethingOtaRelease) => {
+    setAsked(release);
+    setAsking(release);
+  };
+
+  const installing = isRunning(run) || starting;
+  const watching =
+    target?.version ?? (isRunning(run) ? (run.releaseVersion ?? null) : null);
+  const question = asked
+    ? describeOtaInstall(asked, channel, meta?.channel)
+    : null;
+
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView contentContainerClassName="px-5 pb-12 pt-2">
-        <SectionHeader
-          title={`${channel} channel`}
-          hint={current ? `installed: ${current}` : undefined}
-        />
-        {channels.length > 1 ? (
-          <View className="mb-3">
-            <Segmented
-              options={channels}
-              value={channel}
-              onChange={setChannel}
-            />
-          </View>
-        ) : null}
-        {releases == null && !error ? (
-          <View className="items-center py-10">
-            <ActivityIndicator />
-          </View>
-        ) : error ? (
-          <SectionEmpty>{error}</SectionEmpty>
-        ) : !selected ? (
-          <SectionEmpty>{`channel '${channel}' is not in the manifest`}</SectionEmpty>
-        ) : releases == null || releases.length === 0 ? (
-          <SectionEmpty>no releases on this channel</SectionEmpty>
-        ) : (
-          <ListGroup>
-            {releases.map(r => {
-              const isCurrent = current === r.version;
-              const tappable = !r.yanked && !isCurrent && !installing;
+    <ScrollScreen>
+      <ConfirmSheet
+        visible={asking != null}
+        title={question?.title ?? ''}
+        body={question?.body}
+        warning={question?.warning}
+        detail={question?.detail}
+        confirmLabel="install"
+        onConfirm={() => {
+          const release = asking;
+          setAsking(null);
+          if (release) void apply(release);
+        }}
+        onClose={() => setAsking(null)}
+      />
+
+      <SectionHeader
+        title="releases"
+        hint={current ? `installed ${current}` : undefined}
+      />
+      {channels.length > 1 ? (
+        <View className="mb-3">
+          <Segmented options={channels} value={channel} onChange={setChannel} />
+        </View>
+      ) : null}
+
+      {releases == null && !loadError ? (
+        <View className="items-center py-10">
+          <Spinner />
+        </View>
+      ) : loadError ? (
+        <Note tone="err" action="retry" onAction={() => void load()}>
+          {loadError}
+        </Note>
+      ) : !selected ? (
+        <SectionEmpty>{`there is no ${channel} track on this update host`}</SectionEmpty>
+      ) : releases == null || releases.length === 0 ? (
+        <SectionEmpty>nothing has been released here yet</SectionEmpty>
+      ) : (
+        <ListGroup>
+          {releases.map(r => {
+            const isCurrent = current === r.version;
+            const watched = watching === r.version;
+
+            if (watched && (installing || failure || outcome)) {
               return (
-                <ListRow
-                  key={r.version}
-                  title={r.version}
-                  subtitle={`daemon ${r.daemonVersion} · image ${r.imageVersion}`}
-                  disabled={!tappable}
-                  onPress={tappable ? () => install(r) : undefined}
-                  trailing={
-                    r.yanked ? (
-                      <Pill tone="destructive" dot={false}>
-                        yanked
-                      </Pill>
-                    ) : isCurrent ? (
-                      <Pill tone="success" dot={false}>
-                        installed
-                      </Pill>
-                    ) : latest === r.version ? (
-                      <Pill tone="primary" dot={false}>
-                        latest
-                      </Pill>
-                    ) : r.deprecated ? (
-                      <Pill tone="warning" dot={false}>
-                        old
-                      </Pill>
-                    ) : undefined
-                  }
-                />
+                <View key={r.version} className="gap-3 px-4 py-3">
+                  <Text className="font-mono text-fg" style={TEXT.row}>
+                    {r.version}
+                  </Text>
+                  {run && progress && !outcome ? (
+                    <OtaRunProgress run={run} progress={progress} />
+                  ) : starting ? (
+                    <OtaStarting />
+                  ) : failure ? (
+                    <Note
+                      tone="err"
+                      action="retry"
+                      onAction={() => void apply(r)}
+                    >
+                      {failure}
+                    </Note>
+                  ) : (
+                    <Text
+                      className={`font-sans ${
+                        outcome === 'succeeded' ? 'text-ok' : 'text-muted'
+                      }`}
+                      style={TEXT.hint}
+                    >
+                      {outcomeLabel(outcome, runError)}
+                    </Text>
+                  )}
+                </View>
               );
-            })}
-          </ListGroup>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+            }
+
+            const tappable = !r.yanked && !isCurrent && !installing;
+            return (
+              <ListRow
+                key={r.version}
+                title={r.version}
+                subtitle={`daemon ${r.daemonVersion} · image ${r.imageVersion}`}
+                disabled={!tappable}
+                onPress={tappable ? () => ask(r) : undefined}
+                trailing={
+                  r.yanked ? (
+                    <Pill tone="err" dot={false}>
+                      yanked
+                    </Pill>
+                  ) : isCurrent ? (
+                    <Pill tone="ok" dot={false}>
+                      installed
+                    </Pill>
+                  ) : latest === r.version ? (
+                    <Pill tone="accent" dot={false}>
+                      latest
+                    </Pill>
+                  ) : r.deprecated ? (
+                    <Pill tone="warn" dot={false}>
+                      old
+                    </Pill>
+                  ) : undefined
+                }
+              />
+            );
+          })}
+        </ListGroup>
+      )}
+    </ScrollScreen>
   );
 }

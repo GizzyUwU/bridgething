@@ -1,10 +1,12 @@
 use std::{
   collections::HashMap,
   net::SocketAddr,
-  sync::{Arc, RwLock},
+  sync::{
+    Arc, RwLock,
+    atomic::{AtomicU64, Ordering},
+  },
 };
 
-use bluer::Address;
 use libbridgething::{
   Capabilities, CompanionAuthorityScope, GatewayCapabilities, SurfaceAvailability,
   client::{BridgeToClientCapabilitiesMsgEvent, CapabilitiesSnapshot},
@@ -12,6 +14,7 @@ use libbridgething::{
 
 use crate::{
   authority::AuthorityRegistry,
+  bluetooth::Address,
   net::{WSResult, WireEventBus},
 };
 
@@ -23,9 +26,16 @@ pub struct CapabilitiesRegistry {
 #[derive(Debug)]
 struct Inner {
   snapshot: RwLock<Capabilities>,
-  announces: RwLock<HashMap<Address, GatewayCapabilities>>,
+  announces: RwLock<HashMap<Address, Announce>>,
+  announce_seq: AtomicU64,
   bus: WireEventBus,
   authority: AuthorityRegistry,
+}
+
+#[derive(Debug)]
+struct Announce {
+  caps: GatewayCapabilities,
+  seq: u64,
 }
 
 impl CapabilitiesRegistry {
@@ -34,6 +44,7 @@ impl CapabilitiesRegistry {
       inner: Arc::new(Inner {
         snapshot: RwLock::new(Capabilities::default()),
         announces: RwLock::new(HashMap::new()),
+        announce_seq: AtomicU64::new(0),
         bus,
         authority,
       }),
@@ -47,11 +58,12 @@ impl CapabilitiesRegistry {
   pub async fn set_announce(&self, addr: Address, mut caps: GatewayCapabilities) -> WSResult<bool> {
     caps.uri_schemes = normalize_schemes(caps.uri_schemes);
     let provider = caps.music_provider;
+    let seq = self.inner.announce_seq.fetch_add(1, Ordering::Relaxed);
     let provider_changed = {
       let mut guard = self.inner.announces.write().expect("announces lock poisoned");
       guard
-        .insert(addr, caps)
-        .is_none_or(|prev| prev.music_provider != provider)
+        .insert(addr, Announce { caps, seq })
+        .is_none_or(|prev| prev.caps.music_provider != provider)
     };
     self.rebuild_and_broadcast().await?;
     Ok(provider_changed)
@@ -62,18 +74,23 @@ impl CapabilitiesRegistry {
       let mut guard = self.inner.announces.write().expect("announces lock poisoned");
       guard.remove(&addr);
     }
-    self.inner.authority.drop_all();
+    self.inner.authority.drop_for(addr);
     self.rebuild_and_broadcast().await
   }
 
-  pub async fn claim_authority(&self, scope: CompanionAuthorityScope, app_bundle: Option<String>) -> WSResult<()> {
-    self.inner.authority.claim(scope);
-    self.inner.authority.set_companion_app_bundle(app_bundle);
+  pub async fn claim_authority(
+    &self,
+    addr: Address,
+    scope: CompanionAuthorityScope,
+    app_bundle: Option<String>,
+  ) -> WSResult<()> {
+    self.inner.authority.claim(addr, scope);
+    self.inner.authority.set_companion_app_bundle(addr, app_bundle);
     self.rebuild_and_broadcast().await
   }
 
-  pub async fn release_authority(&self, scope: CompanionAuthorityScope) -> WSResult<()> {
-    self.inner.authority.release(scope);
+  pub async fn release_authority(&self, addr: Address, scope: CompanionAuthorityScope) -> WSResult<()> {
+    self.inner.authority.release(addr, scope);
     self.rebuild_and_broadcast().await
   }
 
@@ -83,9 +100,26 @@ impl CapabilitiesRegistry {
     self.inner.bus.send_event(to, event).await
   }
 
+  pub fn primary_addr(&self) -> Option<Address> {
+    let announces = self.inner.announces.read().expect("announces lock poisoned");
+    self.elect_addr(&announces)
+  }
+
+  fn elect_addr(&self, announces: &HashMap<Address, Announce>) -> Option<Address> {
+    self
+      .inner
+      .authority
+      .primary()
+      .filter(|addr| announces.contains_key(addr))
+      .or_else(|| announces.iter().max_by_key(|(_, a)| a.seq).map(|(addr, _)| *addr))
+  }
+
   fn build_snapshot(&self) -> Capabilities {
     let announces = self.inner.announces.read().expect("announces lock poisoned");
-    let primary = announces.values().next();
+    let primary = self
+      .elect_addr(&announces)
+      .and_then(|addr| announces.get(&addr))
+      .map(|a| &a.caps);
     let authority = self.inner.authority.live_scopes();
 
     match primary {
@@ -147,7 +181,7 @@ fn normalize_schemes(schemes: Vec<String>) -> Vec<String> {
   seen
 }
 
-fn is_valid_scheme(s: &str) -> bool {
+pub(crate) fn is_valid_scheme(s: &str) -> bool {
   let mut chars = s.chars();
   let Some(first) = chars.next() else { return false };
   if !first.is_ascii_alphabetic() {
@@ -240,14 +274,17 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let reg = CapabilitiesRegistry::new(bus, auth.clone());
 
+    let addr: Address = "00:11:22:33:44:55".parse().unwrap();
     let _ = reg
-      .claim_authority(CompanionAuthorityScope::NowPlayingMetadata, None)
+      .claim_authority(addr, CompanionAuthorityScope::NowPlayingMetadata, None)
       .await;
     let snap = reg.snapshot();
     assert_eq!(snap.authority, vec![CompanionAuthorityScope::NowPlayingMetadata]);
     assert!(auth.is_authoritative(CompanionAuthorityScope::NowPlayingMetadata));
 
-    let _ = reg.release_authority(CompanionAuthorityScope::NowPlayingMetadata).await;
+    let _ = reg
+      .release_authority(addr, CompanionAuthorityScope::NowPlayingMetadata)
+      .await;
     assert!(reg.snapshot().authority.is_empty());
   }
 
@@ -263,7 +300,7 @@ mod tests {
       .set_announce(addr, caps_with(vec!["spotify"], SurfaceAvailability::default()))
       .await;
     let _ = reg
-      .claim_authority(CompanionAuthorityScope::NowPlayingPlayback, None)
+      .claim_authority(addr, CompanionAuthorityScope::NowPlayingPlayback, None)
       .await;
     assert!(reg.snapshot().gateway.is_some());
     assert!(!reg.snapshot().authority.is_empty());

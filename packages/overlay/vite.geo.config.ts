@@ -1,7 +1,5 @@
 import { defineConfig } from 'vite';
 
-// separate bundle from the overlay on purpose: a webapp may designate its own overlay body, and that
-// substitution must not be able to take navigator.geolocation with it.
 export default defineConfig({
   build: {
     lib: {

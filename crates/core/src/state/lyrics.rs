@@ -1,17 +1,22 @@
-use std::future::Future;
+use std::{future::Future, num::NonZeroUsize};
 
 use libbridgething::{Lyrics, gateway::TrackIdentity};
-use tokio::sync::Mutex;
 
-#[derive(Debug, Default)]
-pub struct LyricsCache {
-  inner: Mutex<Option<Entry>>,
-}
+use super::cache::GenerationCache;
+
+const MAX_ENTRIES: NonZeroUsize = NonZeroUsize::new(1).expect("nonzero cap");
 
 #[derive(Debug)]
-struct Entry {
-  key: TrackIdentity,
-  lyrics: Option<Lyrics>,
+pub struct LyricsCache {
+  inner: GenerationCache<TrackIdentity, Option<Lyrics>>,
+}
+
+impl Default for LyricsCache {
+  fn default() -> Self {
+    Self {
+      inner: GenerationCache::new(MAX_ENTRIES),
+    }
+  }
 }
 
 impl LyricsCache {
@@ -20,18 +25,7 @@ impl LyricsCache {
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<Option<Lyrics>, E>>,
   {
-    let mut guard = self.inner.lock().await;
-    if let Some(entry) = guard.as_ref()
-      && &entry.key == key
-    {
-      return Ok(entry.lyrics.clone());
-    }
-    let lyrics = fetch().await?;
-    *guard = Some(Entry {
-      key: key.clone(),
-      lyrics: lyrics.clone(),
-    });
-    Ok(lyrics)
+    self.inner.get_or_fetch(key.clone(), None, None, fetch).await
   }
 }
 
@@ -87,6 +81,25 @@ mod tests {
     assert!(cache.get_or_fetch(&identity("a"), fetch).await.unwrap().is_none());
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn a_stalled_fetch_does_not_block_a_different_track() {
+    let cache = LyricsCache::default();
+    let (stalled, other) = (identity("a"), identity("b"));
+    let slow = cache.get_or_fetch(&stalled, || async {
+      tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+      Ok::<_, ()>(Some(lyrics()))
+    });
+    let fast = tokio::time::timeout(
+      tokio::time::Duration::from_millis(50),
+      cache.get_or_fetch(&other, || async { Ok::<_, ()>(Some(lyrics())) }),
+    );
+    let (_, fast) = tokio::join!(slow, fast);
+    assert!(
+      fast.is_ok(),
+      "a stalled companion fetch must not stall a lookup for another track"
+    );
   }
 
   #[tokio::test]

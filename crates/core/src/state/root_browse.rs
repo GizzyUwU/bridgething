@@ -1,23 +1,25 @@
-use std::{collections::HashMap, future::Future};
+use std::{future::Future, num::NonZeroUsize};
 
 use libbridgething::BrowseResult;
-use tokio::{
-  sync::Mutex,
-  time::{Duration, Instant},
-};
+use tokio::time::Duration;
+
+use super::cache::GenerationCache;
 
 pub type RootBrowseShape = (Option<u32>, Option<u32>);
 
+const MAX_ENTRIES: NonZeroUsize = NonZeroUsize::new(8).expect("nonzero cap");
+
 #[derive(Debug)]
-struct Cached {
-  generation: u64,
-  fetched_at: Instant,
-  result: BrowseResult,
+pub struct RootBrowseCache {
+  inner: GenerationCache<RootBrowseShape, BrowseResult>,
 }
 
-#[derive(Debug, Default)]
-pub struct RootBrowseCache {
-  inner: Mutex<HashMap<RootBrowseShape, Cached>>,
+impl Default for RootBrowseCache {
+  fn default() -> Self {
+    Self {
+      inner: GenerationCache::new(MAX_ENTRIES),
+    }
+  }
 }
 
 impl RootBrowseCache {
@@ -32,24 +34,7 @@ impl RootBrowseCache {
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<BrowseResult, E>>,
   {
-    let mut guard = self.inner.lock().await;
-    if let Some(cached) = guard.get(&shape)
-      && cached.generation == generation
-      && cached.fetched_at.elapsed() < ttl
-    {
-      return Ok(cached.result.clone());
-    }
-    let result = fetch().await?;
-    guard.retain(|_, cached| cached.generation == generation);
-    guard.insert(
-      shape,
-      Cached {
-        generation,
-        fetched_at: Instant::now(),
-        result: result.clone(),
-      },
-    );
-    Ok(result)
+    self.inner.get_or_fetch(shape, Some(generation), Some(ttl), fetch).await
   }
 }
 
@@ -154,6 +139,24 @@ mod tests {
       calls.load(Ordering::SeqCst),
       4,
       "a generation bump invalidates stale entries of every shape"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn a_stalled_fetch_does_not_block_a_different_shape() {
+    let cache = RootBrowseCache::default();
+    let slow = cache.get_or_fetch(FULL, 0, LONG_TTL, || async {
+      tokio::time::sleep(Duration::from_secs(30)).await;
+      Ok::<_, ()>(result())
+    });
+    let fast = tokio::time::timeout(
+      Duration::from_millis(50),
+      cache.get_or_fetch(SLIM, 0, LONG_TTL, || async { Ok::<_, ()>(result()) }),
+    );
+    let (_, fast) = tokio::join!(slow, fast);
+    assert!(
+      fast.is_ok(),
+      "a stalled companion fetch for one shape must not stall lookups of another"
     );
   }
 

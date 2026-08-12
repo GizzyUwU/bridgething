@@ -27,6 +27,6 @@ export default [
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'tests/**'],
+    ignores: ['dist/**', 'node_modules/**'],
   },
 ];

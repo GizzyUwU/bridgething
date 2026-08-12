@@ -13,6 +13,12 @@ convert() {
     cargo run --release --quiet -p bridgething-wakeword --example convert -- "$source" "${source%.onnx}.btww"
 }
 
+GUARD="$MODELS/embedding_stream.btww"
+if [ ! -f "$GUARD" ]; then
+    : >"$GUARD"
+    trap '[ -s "$GUARD" ] || rm -f "$GUARD"' EXIT
+fi
+
 if [ $# -gt 0 ]; then
     for source in "$@"; do convert "$source"; done
     exit 0

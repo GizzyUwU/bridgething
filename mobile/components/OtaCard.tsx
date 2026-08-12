@@ -1,210 +1,159 @@
-import type {
-  BridgethingOtaAvailable,
-  BridgethingOtaRun,
-} from '@bridgething/session-react-native';
-import { ChevronRight, X } from 'lucide-react-native';
+import { describeError } from '@bridgething/ui/errors';
+import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button } from './Button';
+import { Icon } from './Icon';
+import { Note } from './Note';
+import { OtaRunProgress, OtaStarting } from './OtaRun';
 import { Press } from './Press';
-import { dismissOtaRun, useOtaProgress, type OtaProgress } from '../lib/ota';
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${Math.round(n)} B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatEta(seconds: number): string {
-  const s = Math.round(seconds);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return r ? `${m}m ${r}s` : `${m}m`;
-}
-
-function isPullingDeltas(run: BridgethingOtaRun): boolean {
-  return run.dwlPercent != null && run.dwlPercent < 100;
-}
-
-function phaseLabel(run: BridgethingOtaRun, stepLabel: string | null): string {
-  switch (run.phase) {
-    case 'downloading':
-      return stepLabel ? `downloading ${stepLabel}` : 'downloading update';
-    case 'streaming':
-      return stepLabel ? `${stepLabel} to device` : 'sending to device';
-    case 'verifying':
-      return 'verifying';
-    case 'writing':
-      return isPullingDeltas(run) ? 'pulling deltas' : 'writing to device';
-    case 'confirming':
-      return 'confirming';
-    case 'reboot':
-      return 'rebooting device';
-    default:
-      return 'preparing update';
-  }
-}
-
-function stageDetail(
-  run: BridgethingOtaRun,
-  etaSeconds: number | null,
-): string | null {
-  const parts: string[] = [];
-  if (run.stageReceived != null) {
-    parts.push(
-      run.stageTotal != null && run.stageTotal > 0
-        ? `${formatBytes(run.stageReceived)} / ${formatBytes(run.stageTotal)}`
-        : formatBytes(run.stageReceived),
-    );
-  }
-  if (run.ratePerSec != null && run.ratePerSec > 0)
-    parts.push(`${formatBytes(run.ratePerSec)}/s`);
-  if (etaSeconds != null && etaSeconds > 0)
-    parts.push(`${formatEta(etaSeconds)} left`);
-  if (parts.length === 0 && run.phase === 'writing' && !isPullingDeltas(run)) {
-    return 'this can take several minutes';
-  }
-  return parts.length ? parts.join(' · ') : null;
-}
-
-function UpdateProgress({
-  run,
-  progress,
-}: {
-  run: BridgethingOtaRun;
-  progress: OtaProgress;
-}) {
-  const detail = stageDetail(run, progress.etaSeconds);
-  return (
-    <View className="mt-2">
-      <View className="flex-row items-baseline justify-between">
-        <Text className="text-[13px] font-semibold text-foreground">
-          {phaseLabel(run, progress.stepLabel)}
-        </Text>
-        <Text className="text-[12px] text-muted-foreground">
-          {progress.percent}%
-        </Text>
-      </View>
-      <View className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-        <View
-          className="h-full rounded-full bg-primary"
-          style={{ width: `${progress.percent}%` }}
-        />
-      </View>
-      <View className="mt-1 flex-row items-baseline justify-between">
-        <Text className="text-[11px] text-muted-foreground">
-          {detail ?? ''}
-        </Text>
-        {progress.stepCount > 0 ? (
-          <Text className="text-[11px] text-muted-foreground">
-            step {progress.stepIndex + 1}/{progress.stepCount}
-          </Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function releaseLabel(
-  available: BridgethingOtaAvailable | undefined,
-): string | null {
-  if (!available) return null;
-  if (available.daemonVersion && available.imageVersion) {
-    return `daemon ${available.daemonVersion} · image ${available.imageVersion}`;
-  }
-  return available.releaseVersion ?? null;
-}
-
-export function otaHasActivity(
-  run?: BridgethingOtaRun,
-  available?: BridgethingOtaAvailable,
-): boolean {
-  return run !== undefined || releaseLabel(available) !== null;
-}
+import { getSession } from '../lib/bridge';
+import {
+  describeOtaOffer,
+  dismissOtaRun,
+  installLatestOta,
+  lastCheckedAt,
+  rootUrlOf,
+  useOta,
+  useOtaProgress,
+} from '../lib/ota';
+import { useSession } from '../lib/session';
+import { TEXT } from '../lib/theme';
 
 export function OtaCard({
   deviceId,
-  name,
-  available,
-  onInstall,
   onPickVersion,
 }: {
   deviceId: string;
-  name: string;
-  available?: BridgethingOtaAvailable;
-  onInstall?: () => void;
   onPickVersion?: () => void;
 }) {
+  const meta = useSession(s => s.deviceMeta[deviceId]);
+  const rootUrl = rootUrlOf(useSession(s => s.otaPollConfig));
+  const poll = useOta(s => s.poll);
+  const available = useOta(s => s.available[deviceId]);
   const progress = useOtaProgress(deviceId);
   const run = progress?.run;
-  const offer = releaseLabel(available);
-  const title = run?.webappName ?? name;
+
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const offer = describeOtaOffer({
+    available,
+    lastCheckedAt: lastCheckedAt(poll, checkedAt),
+    error: poll.error,
+  });
+
+  const check = async () => {
+    setChecking(true);
+    setFailure(null);
+    try {
+      await getSession().checkForOtaUpdate(rootUrl);
+      setCheckedAt(Date.now());
+    } catch (err) {
+      setFailure(describeError(err));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const install = async () => {
+    setInstalling(true);
+    setFailure(null);
+    try {
+      await installLatestOta(deviceId, meta?.channel || 'stable', rootUrl);
+    } catch (err) {
+      setFailure(describeError(err));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const running = run != null && run.outcome === undefined;
 
   return (
-    <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
-      <View className="flex-row items-center justify-between">
-        <Text className="text-[14px] font-semibold text-foreground">
-          {title}
+    <View className="gap-3 border border-rule bg-screen p-4">
+      <View className="flex-row items-baseline justify-between gap-3">
+        <Text className="font-sans text-fg" style={TEXT.body}>
+          {run?.webappName ?? 'firmware'}
         </Text>
         {run?.outcome ? (
-          <Press
-            onPress={() => dismissOtaRun(deviceId)}
-            scaleTo={0.9}
-            hitSlop={10}
-          >
-            <X size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+          <Press onPress={() => dismissOtaRun(deviceId)} hitSlop={10}>
+            <Icon name="X" size={16} />
           </Press>
-        ) : null}
+        ) : (
+          <Text
+            className="font-mono text-soft"
+            style={TEXT.hint}
+            numberOfLines={1}
+          >
+            {offer.value}
+          </Text>
+        )}
       </View>
 
-      {progress && run && !run.outcome ? (
-        <UpdateProgress run={run} progress={progress} />
+      {running && progress ? (
+        <OtaRunProgress run={run} progress={progress} />
+      ) : installing ? (
+        <OtaStarting />
       ) : run?.outcome === 'succeeded' ? (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
+        <Text className="font-sans text-ok" style={TEXT.hint}>
           update installed
         </Text>
       ) : run?.outcome === 'cancelled' ? (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
+        <Text className="font-sans text-muted" style={TEXT.hint}>
           update cancelled
         </Text>
-      ) : offer ? (
-        <View className="mt-2">
-          <Text className="mb-2 text-[12px] text-muted-foreground">
-            update available: {offer}
-          </Text>
-          {onInstall ? (
-            <Button onPress={onInstall} size="md">
-              install update
-            </Button>
-          ) : null}
-        </View>
       ) : run?.outcome === 'failed' ? (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
-          update failed
+        <Text className="font-sans text-muted" style={TEXT.hint}>
+          {run.resumable
+            ? 'waiting to reconnect to finish'
+            : 'the update did not finish'}
         </Text>
-      ) : (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
-          up to date
+      ) : offer.detail ? (
+        <Text className="font-mono text-dim" style={TEXT.hint}>
+          {offer.detail}
         </Text>
-      )}
+      ) : null}
 
       {run?.error ? (
-        <Text className="mt-2 text-[12px] text-destructive">{run.error}</Text>
+        <Note tone="err">{describeError(run.error)}</Note>
+      ) : failure ? (
+        <Note tone="err">{failure}</Note>
+      ) : null}
+
+      {!running && !installing ? (
+        <View className="gap-2">
+          {offer.version || run?.outcome === 'failed' ? (
+            <Button onPress={install} size="md">
+              {offer.version ? `install ${offer.version}` : 'try again'}
+            </Button>
+          ) : null}
+          <Button
+            onPress={check}
+            loading={checking}
+            variant="secondary"
+            size="md"
+            icon="RefreshCw"
+          >
+            check for updates now
+          </Button>
+        </View>
       ) : null}
 
       {onPickVersion ? (
         <Press
           onPress={onPickVersion}
-          scaleTo={0.99}
-          fade={false}
-          className="mt-3 flex-row items-center gap-1 py-1"
+          className="flex-row items-center gap-1.5 self-start py-1"
         >
-          <Text className="text-[13px] font-semibold text-primary">
+          <Text
+            className="font-mono uppercase text-accent"
+            style={TEXT.eyebrow}
+          >
             choose a specific version
           </Text>
-          <ChevronRight size={14} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+          <Icon name="ChevronRight" tone="accent" size={14} />
         </Press>
       ) : null}
     </View>

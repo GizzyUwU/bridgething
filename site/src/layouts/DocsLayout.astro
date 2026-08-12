@@ -1,0 +1,141 @@
+---
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import { surfaceHasMethods } from '../lib/docs.ts';
+import { loadSurfaceDocs } from '../lib/sdk.ts';
+import Layout from './Layout.astro';
+
+export type Props = {
+  title?: string;
+  description?: string;
+  current?: string;
+};
+
+const { title, description, current } = Astro.props;
+const docs = await loadSurfaceDocs();
+const surfaces = docs.surfaces.filter(surfaceHasMethods).sort((a, b) => a.title.localeCompare(b.title));
+
+const groups = [
+  {
+    label: 'using it',
+    items: [
+      { href: '/docs', label: 'overview', active: !current },
+      { href: '/docs/getting-started', label: 'getting started', active: current === 'getting-started' },
+      { href: '/docs/faq', label: 'faq', active: current === 'faq' },
+      { href: '/docs/troubleshooting', label: 'troubleshooting', active: current === 'troubleshooting' },
+    ],
+  },
+  {
+    label: 'building apps',
+    items: [
+      { href: '/docs/sdk', label: 'webapp sdk', active: current === 'sdk' },
+      { href: '/docs/settings-pages', label: 'settings pages', active: current === 'settings-pages' },
+      {
+        href: '/docs/launchers-and-overlays',
+        label: 'launchers and overlays',
+        active: current === 'launchers-and-overlays',
+      },
+      { href: '/docs/publishing-apps', label: 'publishing apps', active: current === 'publishing-apps' },
+    ],
+  },
+  {
+    label: 'sdk reference',
+    items: surfaces.map(s => ({ href: `/docs/${s.name}`, label: s.title.toLowerCase(), active: current === s.name })),
+  },
+];
+
+const items = groups.flatMap(g => g.items);
+---
+
+<Layout title={title} description={description}>
+  <Header />
+  <div class="container-site w-full flex-1 py-10 md:py-14">
+    <div class="flex gap-12">
+      <aside class="hidden w-44 shrink-0 lg:block">
+        <nav class="sticky top-10">
+          <div class="relative flex flex-col gap-4 border border-dashed border-white/25 p-3 pt-5 font-mono text-sm">
+            <span class="bg-bg absolute -top-2.5 left-3 px-2 text-white/45">index</span>
+            {
+              groups.map(group => (
+                <div class="flex flex-col gap-px">
+                  <p class="m-0 px-2 pb-1 text-xs tracking-wider text-white/30">{group.label}</p>
+                  {group.items.map(it => (
+                    <a
+                      href={it.href}
+                      aria-current={it.active ? 'page' : undefined}
+                      class:list={[
+                        'border-b-0 px-2 py-1.5',
+                        it.active ? 'text-off-white bg-white/5' : 'hover:text-off-white text-white/50 hover:bg-white/5',
+                      ]}>
+                      {it.label}
+                    </a>
+                  ))}
+                </div>
+              ))
+            }
+          </div>
+        </nav>
+      </aside>
+
+      <main class="min-w-0 flex-1">
+        <details class="mb-8 border border-white/15 lg:hidden">
+          <summary class="cursor-pointer list-none px-4 py-2.5 font-mono text-sm text-white/50 select-none">
+            index &darr;
+          </summary>
+          <nav class="grid grid-cols-2 gap-px px-2 pb-3 font-mono text-sm sm:grid-cols-3">
+            {
+              items.map(it => (
+                <a href={it.href} class:list={['border-b-0 px-2 py-1', it.active ? 'text-off-white' : 'text-white/50']}>
+                  {it.label}
+                </a>
+              ))
+            }
+          </nav>
+        </details>
+
+        <div class="max-w-3xl">
+          <slot />
+        </div>
+      </main>
+    </div>
+  </div>
+  <Footer />
+</Layout>
+
+<script>
+  const tip = document.createElement('div');
+  tip.className = 'typetip';
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  let hideTimer: number | undefined;
+
+  function place(anchor: Element): void {
+    const r = anchor.getBoundingClientRect();
+    tip.style.visibility = 'hidden';
+    tip.hidden = false;
+    const maxLeft = window.scrollX + document.documentElement.clientWidth - tip.offsetWidth - 8;
+    tip.style.left = `${Math.max(8, Math.min(window.scrollX + r.left, maxLeft))}px`;
+    tip.style.top = `${window.scrollY + r.bottom + 6}px`;
+    tip.style.visibility = 'visible';
+  }
+
+  function show(anchor: HTMLElement): void {
+    const name = anchor.dataset.typeref;
+    const code = name && document.getElementById(`type-${name}`)?.querySelector('.astro-code');
+    if (!code) return;
+    tip.replaceChildren(code.cloneNode(true));
+    place(anchor);
+  }
+
+  for (const el of document.querySelectorAll<HTMLElement>('[data-typeref]')) {
+    el.addEventListener('mouseenter', () => {
+      clearTimeout(hideTimer);
+      show(el);
+    });
+    el.addEventListener('mouseleave', () => {
+      hideTimer = window.setTimeout(() => (tip.hidden = true), 150);
+    });
+  }
+  tip.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+  tip.addEventListener('mouseleave', () => (tip.hidden = true));
+</script>

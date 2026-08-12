@@ -1,15 +1,13 @@
 #![cfg(feature = "emulator")]
 
-mod emu;
-
 use std::time::Duration;
 
 use bridgething_iap2::{
   EmulatorEvent, SessionEvent,
   csm::now_playing::{MediaItemAttributes, NowPlayingUpdate},
+  emulator::harness::{self as emu, recv_with_timeout},
 };
 use bytes::Bytes;
-use emu::recv_with_timeout;
 
 #[tokio::test]
 async fn emulator_handle_drives_now_playing_and_artwork() {

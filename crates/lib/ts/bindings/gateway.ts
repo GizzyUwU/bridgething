@@ -186,7 +186,8 @@ export type BridgeToGatewayPlayerMsg =
   | { event: 'setRepeat'; data: SetRepeat }
   | { event: 'setSpeed'; data: SetSpeed }
   | { event: 'setCrossfade'; data: SetCrossfade }
-  | { event: 'transferTo'; data: TransferTo };
+  | { event: 'transferTo'; data: TransferTo }
+  | { event: 'snapshotRequest'; data: PlayerSnapshotRequest };
 
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
@@ -368,7 +369,9 @@ export type GatewayToBridgePlayerMsg =
   | { event: 'queueChanged'; data: QueueSnapshot }
   | { event: 'targetsChanged'; data: PlaybackTargets }
   | { event: 'errorEvent'; data: PlayerErrorReply }
-  | { event: 'requestSpotifyWake' };
+  | { event: 'requestSpotifyWake' }
+  | { event: 'snapshotAck'; data: PlayerSnapshotAck }
+  | { event: 'errorReply'; data: PlayerErrorReply };
 
 export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
@@ -533,6 +536,12 @@ export type OtaBegin = {
   transfer: TransferRef;
   patch: OtaPatch | null;
   provenance: string | null;
+  /**
+   * What the pusher believes this artifact's version is. Only kinds whose payload does not carry
+   * its own version need it: a daemon knows its own, a webapp zip has a manifest, an image has
+   * /etc/superbird, but a .btww model container has no version field at all.
+   */
+  version: string | null;
 };
 
 export type OtaBeginAck = { resumeFromOffset: number };
@@ -576,6 +585,10 @@ export type PlayUri = { uri: string; context: PlayContext | null };
 export type PlaybackTargets = { targets: Array<PlaybackTarget> };
 
 export type PlayerErrorReply = { error: PlayerError };
+
+export type PlayerSnapshotAck = Record<symbol, never>;
+
+export type PlayerSnapshotRequest = Record<symbol, never>;
 
 export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 
@@ -653,7 +666,7 @@ export type VoiceMicOpen = { reason: VoiceCaptureReason };
 
 export type VoiceStreamClose = { streamId: string; reason: VoiceCloseReason };
 
-export type VoiceStreamOpen = { streamId: string; format: VoiceFormat };
+export type VoiceStreamOpen = { streamId: string; format: VoiceFormat; reason?: VoiceCaptureReason };
 
 export type VolumeChanged = { level: number; muted: boolean };
 

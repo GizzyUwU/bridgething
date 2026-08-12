@@ -1,3 +1,4 @@
+use bridgething_iap2::session::TelephonyCommand;
 use libbridgething::{
   AcceptCallAction, EndCallAction, InitiateCallType, PhoneCallService, PhoneError,
   client::{
@@ -23,6 +24,13 @@ impl PhoneHandler {
     let event = BridgeToClientPhoneMsgEvent::ErrorEvent(PhoneErrorReply { error });
     if let Err(err) = self.handle.state.bus.send_event(self.handle.from, event).await {
       tracing::warn!(?err, "failed to report phone action failure to webapp");
+    }
+  }
+
+  async fn dispatch(&self, cmd: TelephonyCommand) {
+    if let Err(err) = self.handle.state.telephony.dispatch(cmd).await {
+      tracing::warn!(?err, "phone action never reached the phone");
+      self.report(PhoneError::NoTarget).await;
     }
   }
 
@@ -68,7 +76,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_accept(0, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -84,7 +92,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_accept(action_byte, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -93,7 +101,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_end(0, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -102,7 +110,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_end(0, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -115,7 +123,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       EndCallAction::EndAll => 1,
     };
     let cmd = TelephonyManager::build_end(action_byte, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -124,7 +132,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_hold(true, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -133,7 +141,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_hold(false, Some(params.call_id));
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -153,7 +161,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       PhoneCallService::Unknown => 0,
     });
     let cmd = TelephonyManager::build_initiate(kind, params.destination_id, service, params.address_book_id);
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -161,13 +169,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
     if !self.verb_available("swap", |c| c.swap_available).await {
       return Ok(());
     }
-    self
-      .handle
-      .state
-      .telephony
-      .dispatch(bridgething_iap2::session::TelephonyCommand::Swap)
-      .await
-      .ok();
+    self.dispatch(TelephonyCommand::Swap).await;
     Ok(())
   }
 
@@ -175,19 +177,13 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
     if !self.verb_available("merge", |c| c.merge_available).await {
       return Ok(());
     }
-    self
-      .handle
-      .state
-      .telephony
-      .dispatch(bridgething_iap2::session::TelephonyCommand::Merge)
-      .await
-      .ok();
+    self.dispatch(TelephonyCommand::Merge).await;
     Ok(())
   }
 
   async fn mute(&self, params: PhoneMuteAction) -> HandlerResult {
     let cmd = TelephonyManager::build_mute(params.mute);
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 
@@ -198,7 +194,7 @@ impl ClientToBridgePhoneMsgDispatch for PhoneHandler {
       return Ok(());
     }
     let cmd = TelephonyManager::build_dtmf(params.tone, params.call_id);
-    self.handle.state.telephony.dispatch(cmd).await.ok();
+    self.dispatch(cmd).await;
     Ok(())
   }
 

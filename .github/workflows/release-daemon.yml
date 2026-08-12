@@ -20,7 +20,7 @@ on:
           - dev
           - stable
       dispatch_bundle:
-        description: Ask bridgething.com to compose a bundle afterwards
+        description: Ask the bundle workflow to compose a bundle afterwards
         type: boolean
         default: true
 
@@ -143,6 +143,20 @@ jobs:
       - name: provision the aarch64 build environment
         run: sudo scripts/cross-aarch64-deps.sh crates/swupdate-sys/vendor/swupdate
 
+      - name: cache the wakeword graphs
+        id: wakeword
+        uses: actions/cache@v4
+        with:
+          path: crates/wakeword/models
+          key: >-
+            wakeword-models-${{ hashFiles('scripts/bridgething-fetch-wakeword-models',
+            'scripts/bridgething-convert-wakeword', 'crates/wakeword/examples/convert.rs',
+            'crates/wakeword/src/blob.rs') }}
+
+      - name: fetch and convert the wakeword graphs
+        if: steps.wakeword.outputs.cache-hit != 'true'
+        run: scripts/bridgething-fetch-wakeword-models
+
       - name: build the daemon
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -165,7 +179,7 @@ jobs:
 
           zip_it() {
             local name="$1" dist="$2" meta
-            meta=$(bun run scripts/webapp-zip.ts --dist "$dist" --output "/tmp/$name.zip" --builtin)
+            meta=$(bun run scripts/webapp-zip.ts --dist "$dist" --output "/tmp/$name.zip")
             webapps=$(jq -c --arg name "$name" --argjson meta "$meta" \
               '. + {($name): {version: $meta.version, size: $meta.size, sha256: $meta.sha256}}' <<<"$webapps")
             echo "built $name@$(jq -r '.version' <<<"$meta")"
@@ -217,7 +231,6 @@ jobs:
             if exists "$daemon_key"; then
               echo "daemon ${VERSION} already published on ${ch}; describing those bytes, not this build"
               rclone copyto "r2:${R2_BUCKET}/${daemon_key}" "$pub"
-              # recover the patch table this run will not cut rather than replacing a good one below.
               patches=$(rclone cat "r2:${R2_BUCKET}/daemon/${ch}/${VERSION}/release.json" 2>/dev/null \
                 | jq -c '.daemon_patches // {}' 2>/dev/null || echo '{}')
             else
@@ -274,7 +287,6 @@ jobs:
                 '. + {($name): {version: $version, size: $size, sha256: $sha256}}' <<<"$webapps_pub")
             done < <(jq -r 'to_entries[] | "\(.key) \(.value.version)"' <<<"$WEBAPPS")
 
-            # rewritten every run so it always describes the full release for this channel.
             jq -n \
               --arg channel "$ch" \
               --arg version "$VERSION" \
@@ -304,7 +316,7 @@ jobs:
           CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
         run: scripts/cf-purge
 
-      - name: ask bridgething.com to compose a bundle
+      - name: ask the bundle workflow to compose a bundle
         if: steps.publish.outputs.dispatch != '' && (github.event_name == 'push' || inputs.dispatch_bundle)
         env:
           GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
@@ -317,6 +329,6 @@ jobs:
               --arg daemon_version "$VERSION" \
               '{event_type: "daemon-released",
                 client_payload: {kind: "daemon", channel: $channel, daemon_version: $daemon_version}}' \
-              | gh api repos/JoeyEamigh/bridgething.com/dispatches --input -
+              | gh api repos/JoeyEamigh/bridgething/dispatches --input -
             echo "dispatched a bundle for $ch"
           done

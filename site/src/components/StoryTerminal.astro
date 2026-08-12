@@ -1,0 +1,231 @@
+---
+import Terminal from './Terminal.astro';
+---
+
+<Terminal title="/var/log/superbird" titleId="shell-title">
+  <div
+    id="story-shell"
+    class="flex flex-col gap-3 p-6 font-mono text-base transition-[height] duration-500 ease-out motion-reduce:transition-none max-sm:text-sm md:p-10 md:text-lg">
+    <p class="m-0 text-white/70"><span class="text-accent/60">[ 2022 ]</span> spotify ships the car thing</p>
+    <p class="m-0 text-white/70">
+      <span class="text-accent/60">[ 2022 ]</span> spotify discontinues the car thing
+    </p>
+    <p class="m-0 text-white/70">
+      <span class="text-accent/60">[ 2024 ]</span> shutdown scheduled. devices told to brick themselves
+    </p>
+    <p class="m-0 text-white/85">
+      <span class="text-err">[&nbsp;ERR&nbsp; ]</span> spotify inc. has left the chat
+    </p>
+    <p class="m-0 text-white/70">
+      <span class="text-accent/60">[ 2025 ]</span> the community refuses. hardware gets opened up
+    </p>
+    <p class="m-0 text-white/70">
+      <span class="text-accent/60">[ 2026 ]</span> mainline linux boots
+    </p>
+    <p class="m-0 text-white/85">
+      <span class="text-ok">[ &nbsp;OK&nbsp; ]</span> bridgething ships
+    </p>
+    <form id="shell-form" class="relative m-0 flex items-center text-white/75">
+      <label for="shell-input" class="text-accent shrink-0">$</label>
+      <span id="shell-typed" class="min-w-0 pl-2 break-all whitespace-pre-wrap text-white/85"
+        ><span id="typed-before"></span><span id="typed-cursor" class="cursor-block bg-accent text-black">&nbsp;</span
+        ><span id="typed-after"></span></span
+      >
+      <input
+        id="shell-input"
+        class="absolute top-0 left-0 size-px border-0 bg-transparent p-0 opacity-0"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        enterkeyhint="send"
+        aria-label="shell"
+      />
+    </form>
+  </div>
+</Terminal>
+
+<script>
+  import type { Bash } from 'just-bash/browser';
+  import type { ShellFsManifest } from '../lib/shell-fs';
+
+  const container = document.getElementById('story-shell') as HTMLElement;
+  const form = document.getElementById('shell-form') as HTMLFormElement;
+  const input = document.getElementById('shell-input') as HTMLInputElement;
+  const typedBefore = document.getElementById('typed-before') as HTMLElement;
+  const typedCursor = document.getElementById('typed-cursor') as HTMLElement;
+  const typedAfter = document.getElementById('typed-after') as HTMLElement;
+  const title = document.getElementById('shell-title') as HTMLElement;
+
+  function renderPrompt(): void {
+    const value = input.value;
+    const pos = input.selectionStart ?? value.length;
+    typedBefore.textContent = value.slice(0, pos);
+    typedCursor.textContent = value.charAt(pos) || ' ';
+    typedAfter.textContent = value.slice(pos + 1);
+  }
+
+  function setInput(value: string): void {
+    input.value = value;
+    renderPrompt();
+  }
+
+  let bash: Bash | null = null;
+  let bootPromise: Promise<void> | null = null;
+  let bootError: string | null = null;
+  let bootImage = '';
+  let revealed = false;
+  let cwd = '/';
+  let running = false;
+  const history: string[] = [];
+  let historyIndex = -1;
+
+  function line(text: string, className: string): void {
+    const p = document.createElement('p');
+    p.className = className;
+    p.textContent = text;
+    form.before(p);
+  }
+
+  function statusLine(tag: string, tagClass: string, text: string): void {
+    const p = document.createElement('p');
+    p.className = 'm-0 text-white/70';
+    const span = document.createElement('span');
+    span.className = tagClass;
+    span.textContent = `[ ${tag} ]`;
+    p.append(span, document.createTextNode(` ${text}`));
+    form.before(p);
+  }
+
+  function echoLine(cmd: string): void {
+    const p = document.createElement('p');
+    p.className = 'm-0 text-white/75';
+    const at = document.createElement('span');
+    at.className = 'text-white/35';
+    at.textContent = cwd === '/' ? '' : `${cwd} `;
+    const dollar = document.createElement('span');
+    dollar.className = 'text-accent';
+    dollar.textContent = '$ ';
+    p.append(at, dollar, document.createTextNode(cmd));
+    form.before(p);
+  }
+
+  function scrollToPrompt(): void {
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function preload(): void {
+    bootPromise ??= (async () => {
+      try {
+        const [{ createImageShell }, res] = await Promise.all([import('../lib/shell-fs'), fetch('/shell-fs.json')]);
+        if (!res.ok) throw new Error(`fetch failed (${res.status})`);
+        const manifest = (await res.json()) as ShellFsManifest;
+        bash = await createImageShell(manifest);
+        bootImage = manifest.image;
+        bootError = null;
+      } catch (err) {
+        bootError = err instanceof Error ? err.message : String(err);
+        bootPromise = null;
+      }
+    })();
+  }
+
+  function reveal(): void {
+    if (revealed) return;
+    revealed = true;
+    container.style.height = `${container.offsetHeight}px`;
+    container.classList.add('overflow-y-auto');
+    void container.offsetHeight;
+    container.style.height = '70dvh';
+  }
+
+  async function ensureShell(): Promise<boolean> {
+    if (bash) return true;
+    statusLine('mnt ', 'text-accent/60', 'mounting rootfs');
+    preload();
+    await bootPromise;
+    if (bash) {
+      statusLine(' OK ', 'text-ok', `${bootImage} mounted read-only`);
+      title.textContent = cwd;
+      return true;
+    }
+    statusLine('ERR ', 'text-err', `mount failed: ${bootError ?? 'unknown'}`);
+    return false;
+  }
+
+  async function run(raw: string): Promise<void> {
+    const cmd = raw.trim();
+    reveal();
+    echoLine(cmd);
+    if (!cmd) return;
+    history.push(cmd);
+    historyIndex = history.length;
+    await ensureShell();
+    const shell = bash;
+    if (!shell) {
+      scrollToPrompt();
+      return;
+    }
+    running = true;
+    try {
+      if (cmd === 'clear') {
+        for (const el of [...container.children]) if (el !== form) el.remove();
+        return;
+      }
+      const bareCd = /^cd(\s+\S*)?$/.test(cmd);
+      const res = await shell.exec(bareCd ? `${cmd} && pwd` : cmd, { cwd });
+      if (bareCd && res.exitCode === 0) {
+        cwd = res.stdout.trim() || '/';
+        title.textContent = cwd;
+        return;
+      }
+      const out = res.stdout.replace(/\n$/, '');
+      if (out) line(out, 'm-0 whitespace-pre-wrap break-all text-white/70');
+      const err = res.stderr.replace(/\n$/, '');
+      if (err) line(err, 'm-0 whitespace-pre-wrap break-all text-err/90');
+    } catch (err) {
+      line(err instanceof Error ? err.message : String(err), 'm-0 whitespace-pre-wrap text-err/90');
+    } finally {
+      running = false;
+      scrollToPrompt();
+    }
+  }
+
+  container.addEventListener('click', () => {
+    if (document.getSelection()?.toString()) return;
+    input.focus({ preventScroll: true });
+  });
+  input.addEventListener('focus', preload, { once: true });
+
+  input.addEventListener('input', renderPrompt);
+  input.addEventListener('keyup', renderPrompt);
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement === input) renderPrompt();
+  });
+
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (running) return;
+    const value = input.value;
+    setInput('');
+    void run(value);
+  });
+
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowUp') {
+      if (historyIndex > 0) {
+        historyIndex--;
+        setInput(history[historyIndex] ?? '');
+        ev.preventDefault();
+      }
+    } else if (ev.key === 'ArrowDown') {
+      if (historyIndex < history.length) {
+        historyIndex++;
+        setInput(history[historyIndex] ?? '');
+        ev.preventDefault();
+      }
+    } else if (ev.key === 'l' && ev.ctrlKey) {
+      ev.preventDefault();
+      void run('clear');
+    }
+  });
+</script>

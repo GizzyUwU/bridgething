@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+key="${1:?usage: r2-get <key> <local-path>}"
+dest="${2:?missing local path}"
+
+: "${R2_BUCKET:?r2-get: R2_BUCKET is required}"
+
+if rclone copyto "r2:${R2_BUCKET}/${key}" "$dest" --no-traverse 2>/dev/null; then
+  echo "r2-get: ${key}  ->  ${dest}" >&2
+else
+  echo "r2-get: no ${key} on ${R2_BUCKET}; ${dest} stays as checked in" >&2
+fi
+exit 0

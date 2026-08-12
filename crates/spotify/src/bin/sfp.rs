@@ -1,5 +1,6 @@
 use std::{error::Error, path::PathBuf, sync::Arc, time::Duration};
 
+use bridgething_io::{HttpExecutor, HttpMethod};
 use librespot_protocol::{
   client_info::ClientInfo,
   connect::Cluster,
@@ -13,7 +14,7 @@ use spotify::{
   client::{Observer, SpotifyClient},
   dealer::{Dealer, active_device, is_queued, provided_track_from_json, provided_track_json},
   http::{ANDROID_CLIENT_ID, SPCLIENT, SpHttp, random_hex},
-  httpx::{HttpExecutor, HttpMethod},
+  httpx,
   model::{AuthState, Device, LibraryScope, PlayerState, Queue, QueuePosition},
   resolver::{VoicePopularity, VoiceResolveRequest, VoiceResolved, VoiceTargetKind},
   spclient::SpClient,
@@ -30,7 +31,8 @@ commands:
   ctx <uri>        raw context-resolve of one spotify uri
   page <url>       follow a context page url
   autoplay <uri>   what spotify would autoplay after a context
-  resolve <query...> [--type kind] [--position n] [--random] [--mood m] [--genre g] [--era e]
+  resolve <query...> [--type kind] [--position n] [--mood m] [--genre g] [--era e]
+                     [--filter top5|top10|popular|recent|new|random] [--random]
                    voice slot resolution to a playable uri (read-only)
   pause | resume | next | prev | seek <ms> | play <uri>
   queue [show]     print queue_revision and the upcoming tracks
@@ -59,7 +61,7 @@ async fn main() -> Result<(), Boxed> {
     store.save_refresh_token(seed);
   }
   let device_id = load_or_make_device_id(&state_dir);
-  let exec = HttpExecutor::new();
+  let exec = httpx::executor();
   let auth = Arc::new(Auth::new(base, psk, Box::new(store), exec.clone()));
 
   if !auth.is_paired().await {
@@ -73,7 +75,7 @@ async fn main() -> Result<(), Boxed> {
 
   let username = match username {
     Some(u) => Some(u),
-    None => spotify::aplogin::resolve_and_cache(auth.as_ref(), &http, dealer.device_id())
+    None => spotify::aplogin::resolve_and_cache(&auth, &http, dealer.device_id())
       .await
       .ok(),
   };
@@ -326,14 +328,14 @@ async fn whoami(http: &SpHttp) -> Result<(), Boxed> {
   let mut req = LoginRequest::new();
   req.client_info = MessageField::some(ci);
   req.login_method = Some(Login_method::OneTimeToken(ott));
-  let mut headers = reqwest::header::HeaderMap::new();
+  let mut headers = ::http::header::HeaderMap::new();
   headers.insert(
-    reqwest::header::ACCEPT,
-    reqwest::header::HeaderValue::from_static("application/x-protobuf"),
+    ::http::header::ACCEPT,
+    ::http::header::HeaderValue::from_static("application/x-protobuf"),
   );
   headers.insert(
-    reqwest::header::CONTENT_TYPE,
-    reqwest::header::HeaderValue::from_static("application/x-protobuf"),
+    ::http::header::CONTENT_TYPE,
+    ::http::header::HeaderValue::from_static("application/x-protobuf"),
   );
   let resp = http
     .send(
@@ -363,7 +365,7 @@ async fn whoami(http: &SpHttp) -> Result<(), Boxed> {
   Ok(())
 }
 
-async fn pair(auth: &Auth) -> Result<(), Boxed> {
+async fn pair(auth: &Arc<Auth>) -> Result<(), Boxed> {
   let flow = auth.begin_device_flow().await?;
   println!("\n  open: {}\n  code: {}\n", flow.verification_uri, flow.user_code);
   println!("waiting for approval...");
@@ -631,6 +633,7 @@ fn parse_resolve(args: &[String]) -> Result<VoiceResolveRequest, Boxed> {
       "--genre" => req.genre = Some(value()?),
       "--era" => req.era = Some(value()?),
       "--random" => req.popularity_filter = Some(VoicePopularity::Random),
+      "--filter" => req.popularity_filter = Some(popularity(&value()?)?),
       flag if flag.starts_with("--") => return Err(format!("unknown flag: {flag}").into()),
       word => words.push(word),
     }
@@ -639,6 +642,18 @@ fn parse_resolve(args: &[String]) -> Result<VoiceResolveRequest, Boxed> {
     req.target = Some(words.join(" "));
   }
   Ok(req)
+}
+
+fn popularity(name: &str) -> Result<VoicePopularity, Boxed> {
+  match name {
+    "top5" | "top_5" => Ok(VoicePopularity::Top5),
+    "top10" | "top_10" => Ok(VoicePopularity::Top10),
+    "popular" => Ok(VoicePopularity::Popular),
+    "recent" => Ok(VoicePopularity::Recent),
+    "new" => Ok(VoicePopularity::New),
+    "random" => Ok(VoicePopularity::Random),
+    other => Err(format!("unknown popularity filter: {other}").into()),
+  }
 }
 
 fn target_kind(name: &str) -> Result<VoiceTargetKind, Boxed> {

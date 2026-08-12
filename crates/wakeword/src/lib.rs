@@ -61,14 +61,6 @@ impl WakeWord {
     })
   }
 
-  pub fn threshold(&self) -> f32 {
-    self.threshold
-  }
-
-  pub fn set_threshold(&mut self, threshold: f32) {
-    self.threshold = threshold;
-  }
-
   pub fn push(&mut self, samples: &[f32]) -> Result<Option<Detection>, Error> {
     let mut hit = None;
     for slice in samples.chunks(self.features.call_samples()) {

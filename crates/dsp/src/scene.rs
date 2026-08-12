@@ -89,8 +89,10 @@ pub struct SceneEstimator {
   gate_alpha: f64,
   noise_frames: usize,
   pooled_bearing: Option<f64>,
+  gate_reference: Vec<Complex64>,
   freeze_limit: usize,
   frozen_for: usize,
+  holding: bool,
   has_target: bool,
   point_like: bool,
 }
@@ -119,11 +121,17 @@ impl SceneEstimator {
       gate_alpha: decay(config.gate_tau_s, hop_s),
       noise_frames: 0,
       pooled_bearing: None,
+      gate_reference: Vec::new(),
       freeze_limit: (config.max_freeze_s / hop_s).ceil() as usize,
       frozen_for: 0,
+      holding: false,
       has_target: false,
       point_like: false,
     }
+  }
+
+  pub fn hold_noise(&mut self, holding: bool) {
+    self.holding = holding;
   }
 
   pub fn point_like(&self) -> bool {
@@ -154,7 +162,7 @@ impl SceneEstimator {
     let bins = (self.gate_bins.1 - self.gate_bins.0 + 1) as f64;
     self.point_like = gate_total / bins >= self.config.gate_threshold;
     self.frozen_for = if self.point_like { self.frozen_for + 1 } else { 0 };
-    let frozen = self.point_like && self.frozen_for <= self.freeze_limit;
+    let frozen = self.point_like && (self.holding || self.frozen_for <= self.freeze_limit);
 
     for (bin, (recent, noise)) in self.recent.iter_mut().zip(self.noise.iter_mut()).enumerate() {
       let snapshot: [Complex64; CHANNELS] =
@@ -185,6 +193,34 @@ impl SceneEstimator {
     }
     self.has_target = true;
     self.pooled_bearing = self.pool_bearing();
+    self.gate_reference = self.gate_reference_for(self.pooled_bearing);
+  }
+
+  fn gate_reference_for(&self, bearing: Option<f64>) -> Vec<Complex64> {
+    let Some(bearing) = bearing else { return Vec::new() };
+    let frequencies = bin_frequencies(self.sample_rate_hz);
+    let (lower, upper) = self.gate_bins;
+    (lower..=upper)
+      .map(|bin| {
+        let steering = steering_vector(frequencies[bin], bearing);
+        steering[WIDEST.0] * steering[WIDEST.1].conj()
+      })
+      .collect()
+  }
+
+  pub fn target_agreement(&self) -> Option<f32> {
+    if self.gate_reference.is_empty() {
+      return None;
+    }
+    let (lower, _) = self.gate_bins;
+    let mut aligned = 0.0;
+    let mut power = 0.0;
+    for (offset, expected) in self.gate_reference.iter().enumerate() {
+      let gate = &self.gate[lower + offset];
+      aligned += (gate.cross * expected.conj()).re;
+      power += (gate.auto[0] * gate.auto[1]).sqrt();
+    }
+    (power > 1e-30).then(|| (aligned / power).clamp(0.0, 1.0) as f32)
   }
 
   fn pool_bearing(&self) -> Option<f64> {
@@ -223,7 +259,9 @@ impl SceneEstimator {
     }
     self.noise_frames = 0;
     self.pooled_bearing = None;
+    self.gate_reference.clear();
     self.frozen_for = 0;
+    self.holding = false;
     self.has_target = false;
     self.point_like = false;
   }
@@ -753,6 +791,105 @@ mod tests {
         assert!((field.noise[i][j] - assumed.noise[i][j]).norm() < 1e-12);
       }
     }
+  }
+
+  fn steered_to(angle_deg: f64, seed: u64) -> SceneEstimator {
+    let mut estimator = estimator();
+    let mut seed = seed;
+    for _ in 0..300 {
+      estimator.observe(&frame(&diffuse_angles(64), 0.05, &mut seed));
+    }
+    for _ in 0..200 {
+      estimator.observe(&frame(&[(angle_deg, 80.0, 0.0)], 0.001, &mut seed));
+    }
+    estimator.mark_target();
+    estimator
+  }
+
+  #[test]
+  fn spatial_evidence_needs_a_bearing_before_it_reports_anything() {
+    let mut estimator = estimator();
+    let mut seed = 41;
+    assert!(
+      estimator.target_agreement().is_none(),
+      "evidence before any observation"
+    );
+    for _ in 0..300 {
+      estimator.observe(&frame(&diffuse_angles(64), 0.05, &mut seed));
+    }
+    estimator.mark_target();
+    assert!(
+      estimator.target_agreement().is_none(),
+      "diffuse noise resolves no bearing, so there is nothing to gate on"
+    );
+  }
+
+  #[test]
+  fn spatial_evidence_separates_the_marked_bearing_from_every_other_one() {
+    let mut seed = 43;
+    let mut estimator = steered_to(-42.0, seed);
+    assert!(estimator.bearing_deg().is_some(), "the fixture failed to resolve");
+
+    for _ in 0..100 {
+      estimator.observe(&frame(&[(-42.0, 80.0, 0.0)], 0.001, &mut seed));
+    }
+    let on_target = estimator
+      .target_agreement()
+      .expect("a resolved bearing reports evidence");
+
+    for _ in 0..100 {
+      estimator.observe(&frame(&[(45.0, 80.0, 0.0)], 0.001, &mut seed));
+    }
+    let off_target = estimator
+      .target_agreement()
+      .expect("evidence survives the source moving");
+
+    assert!(on_target > 0.6, "the marked bearing only scored {on_target:.3}");
+    assert!(
+      off_target < on_target / 2.0,
+      "a source at 45 deg scored {off_target:.3} against {on_target:.3} on target"
+    );
+  }
+
+  #[test]
+  fn a_diffuse_field_reads_as_no_evidence_even_with_a_bearing_marked() {
+    let mut seed = 47;
+    let mut estimator = steered_to(-42.0, seed);
+    for _ in 0..200 {
+      estimator.observe(&frame(&diffuse_angles(64), 0.2, &mut seed));
+    }
+    let evidence = estimator.target_agreement().expect("a marked bearing still reports");
+    assert!(
+      evidence < 0.4,
+      "a diffuse wash scored {evidence:.3}, which a gate would read as the talker"
+    );
+  }
+
+  #[test]
+  fn holding_the_noise_estimate_outlasts_the_freeze_cap() {
+    let mut seed = 53;
+    let point = |estimator: &mut SceneEstimator, seed: &mut u64, frames: usize| {
+      for _ in 0..frames {
+        estimator.observe(&frame(&[(35.0, 60.0, 0.0)], 0.001, seed));
+      }
+    };
+
+    let mut capped = estimator();
+    let mut held = estimator();
+    held.hold_noise(true);
+    let past_cap = capped.freeze_limit + 200;
+    point(&mut capped, &mut seed.clone(), past_cap);
+    point(&mut held, &mut seed, past_cap);
+
+    assert!(
+      capped.noise_frames > 0,
+      "the cap should have released and let the talker into the noise estimate"
+    );
+    assert_eq!(
+      held.noise_frames, 0,
+      "a held estimate absorbed {} frames of the talker it was told to protect",
+      held.noise_frames
+    );
   }
 
   #[test]

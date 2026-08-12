@@ -100,7 +100,7 @@ impl Telemetry {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Counts {
   pub marks: u64,
@@ -110,22 +110,12 @@ pub struct Counts {
   pub dropped_chunks: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Disk {
   pub free_bytes: u64,
   pub total_bytes: u64,
   pub remaining_secs: u64,
-}
-
-impl Default for Disk {
-  fn default() -> Self {
-    Self {
-      free_bytes: 0,
-      total_bytes: 0,
-      remaining_secs: 0,
-    }
-  }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -156,13 +146,7 @@ impl Default for Status {
       detail: Stage::Starting.detail(),
       recorded_secs: 0,
       telemetry: Telemetry::default(),
-      counts: Counts {
-        marks: 0,
-        false_alarms: 0,
-        misses: 0,
-        detections: 0,
-        dropped_chunks: 0,
-      },
+      counts: Counts::default(),
       disk: Disk::default(),
       usb_role: "unknown".into(),
       tag: crate::TAGS[0].into(),

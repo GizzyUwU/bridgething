@@ -3,10 +3,24 @@ import type {
   BridgethingOtaRun,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
+  BridgethingVoiceTurn,
 } from '@bridgething/session-react-native';
+import { emptySnapshot } from '../__mocks__/react-native-nitro-modules';
 
 export const DEVICE = 'aa:bb:cc:dd:ee:ff';
 export const OTHER = '11:22:33:44:55:66';
+
+export function voiceTurn(
+  over: Partial<BridgethingVoiceTurn> = {},
+): BridgethingVoiceTurn {
+  return {
+    deviceId: DEVICE,
+    streamId: 'stream-1',
+    trigger: 'wakeWord',
+    phase: 'listening',
+    ...over,
+  };
+}
 
 export function peer(
   id = DEVICE,
@@ -60,6 +74,7 @@ export function otaRun(
     stageReceived: 50_000_000,
     stageTotal: 100_000_000,
     ratePerSec: 1_000_000,
+    resumable: false,
     ...over,
   };
 }
@@ -69,36 +84,11 @@ export function snapshot(
   metas: Record<string, BridgethingDeviceMeta> = {},
 ): BridgethingSessionSnapshot {
   return {
-    hostInfo: {
-      appName: 'bridgething',
-      appVersion: '0.6.0',
-      osName: 'iOS',
-      osVersion: '26.0',
-      hostIdentifier: 'host',
-      libVersion: '0.6.0',
-      libbridgethingVersion: '0.6.0',
-      adapterVersion: '0.6.0',
-    },
-    providers: [],
-    providerPriority: [],
+    ...emptySnapshot(),
     peers,
-    ancsAuthStatuses: [],
     deviceMeta: Object.entries(metas).map(([deviceId, m]) => ({
       deviceId,
       meta: m,
     })),
-    capabilityFlags: {
-      geo: true,
-      notifications: true,
-      netFetch: true,
-      netWs: true,
-      audioTts: true,
-      voiceModel: true,
-    },
-    voiceModel: { status: 'absent', receivedBytes: 0, totalBytes: 0 },
-    webapps: [],
-    otaRuns: [],
-    otaAvailable: [],
-    otaPoll: {},
   };
 }

@@ -2,7 +2,6 @@ use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
@@ -25,7 +24,6 @@ pub struct ListWebapps;
 )]
 pub struct GetActiveWebapp;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -41,11 +39,9 @@ pub struct GetActiveWebapp;
 )]
 pub struct WebappSwitchTo {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -61,11 +57,9 @@ pub struct WebappSwitchTo {
 )]
 pub struct WebappUninstall {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -75,7 +69,6 @@ pub enum WebappResourceKind {
   Overlay,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -94,7 +87,6 @@ pub enum WebappSlot {
 )]
 pub struct GetWebappSlots;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -111,11 +103,9 @@ pub struct GetWebappSlots;
 pub struct WebappSetSlot {
   pub slot: WebappSlot,
   #[ts(type = "string | null")]
-  #[typeshare(serialized_as = "Option<Vec<u8>>")]
   pub id: Option<Uuid>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -131,13 +121,11 @@ pub struct WebappSetSlot {
 )]
 pub struct WebappResource {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub kind: WebappResourceKind,
   pub have: Option<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -153,12 +141,10 @@ pub struct WebappResource {
 )]
 pub struct WebappConfigGet {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -174,11 +160,9 @@ pub struct WebappConfigGet {
 )]
 pub struct WebappConfigList {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -194,13 +178,11 @@ pub struct WebappConfigList {
 )]
 pub struct WebappConfigSet {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
   pub value: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -216,12 +198,10 @@ pub struct WebappConfigSet {
 )]
 pub struct WebappConfigDelete {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -237,12 +217,10 @@ pub struct WebappConfigDelete {
 )]
 pub struct WebappDocGet {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -258,11 +236,9 @@ pub struct WebappDocGet {
 )]
 pub struct WebappDocList {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -278,13 +254,11 @@ pub struct WebappDocList {
 )]
 pub struct WebappDocSet {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
   pub value: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -300,12 +274,10 @@ pub struct WebappDocSet {
 )]
 pub struct WebappDocDelete {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub key: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

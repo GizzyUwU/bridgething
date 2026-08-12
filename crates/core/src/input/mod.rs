@@ -13,27 +13,14 @@ const HUB_GESTURE_WINDOW: Duration = Duration::from_millis(1500);
 
 #[derive(Debug)]
 pub struct InputManager {
-  #[cfg_attr(not(feature = "input"), allow(dead_code))]
-  cancel_token: CancellationToken,
   _handle: JoinHandle<()>,
 }
 
 impl InputManager {
   pub fn spawn(state: State) -> Self {
     let cancel_token = CancellationToken::new();
-    let handle = tokio::spawn(run(state, cancel_token.clone()));
-    Self {
-      cancel_token,
-      _handle: handle,
-    }
-  }
-
-  #[cfg_attr(not(feature = "input"), allow(dead_code))]
-  pub async fn shutdown(self) {
-    self.cancel_token.cancel();
-    if let Err(e) = self._handle.await {
-      tracing::warn!("input manager shutdown: {:?}", e);
-    }
+    let handle = tokio::spawn(run(state, cancel_token));
+    Self { _handle: handle }
   }
 }
 

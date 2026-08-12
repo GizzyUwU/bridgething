@@ -11,20 +11,20 @@ use crate::util::{gid_to_base62, image_hex};
 
 const DELIMITER_URI: &str = "spotify:delimiter";
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Artist {
   pub uri: String,
   pub name: String,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Album {
   pub uri: String,
   pub name: String,
   pub image_id: String,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Track {
   pub uri: String,
   pub uid: String,
@@ -38,7 +38,7 @@ pub struct Track {
   pub queued: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RepeatMode {
   #[default]
   Off,
@@ -46,13 +46,13 @@ pub enum RepeatMode {
   Track,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryScope {
   Saved,
   Playlists,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QueuePosition {
   #[default]
   Append,
@@ -62,7 +62,7 @@ pub enum QueuePosition {
   },
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct PlayerState {
   pub track: Option<Track>,
   pub context_uri: String,
@@ -86,14 +86,14 @@ pub struct PlayerState {
   pub can_add_to_queue: bool,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Queue {
   pub previous: Vec<Track>,
   pub current: Option<Track>,
   pub next: Vec<Track>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DeviceKind {
   #[default]
   Unknown,
@@ -107,7 +107,7 @@ pub enum DeviceKind {
   Wearable,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Device {
   pub id: String,
   pub name: String,
@@ -116,7 +116,7 @@ pub struct Device {
   pub volume: f32,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct BrowseItem {
   pub uri: String,
   pub title: String,
@@ -130,7 +130,7 @@ pub struct BrowseItem {
   pub has_children: bool,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct Shelf {
   pub id: String,
   pub title: String,
@@ -138,14 +138,14 @@ pub struct Shelf {
   pub total: u32,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct BrowsePage {
   pub items: Vec<BrowseItem>,
   pub total: Option<u32>,
   pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct ProductState {
   pub product: String,
   pub catalogue: String,
@@ -154,7 +154,7 @@ pub struct ProductState {
   pub can_use_superbird: bool,
 }
 
-#[derive(Debug, Clone, Default, uniffi::Record)]
+#[derive(Debug, Clone, Default)]
 pub struct SearchResults {
   pub tracks: Vec<BrowseItem>,
   pub albums: Vec<BrowseItem>,
@@ -164,7 +164,7 @@ pub struct SearchResults {
   pub episodes: Vec<BrowseItem>,
 }
 
-#[derive(Debug, Clone, uniffi::Enum)]
+#[derive(Debug, Clone)]
 pub enum AuthState {
   LoggedOut,
   Pending { url: String, code: String },
@@ -601,6 +601,24 @@ pub fn artist_top_track_uris(a: &PbArtist) -> Vec<String> {
         .collect()
     })
     .unwrap_or_default()
+}
+
+pub fn artist_release_uris(a: &PbArtist, albums_only: bool, depth: usize) -> Vec<String> {
+  let singles = if albums_only { [].as_slice() } else { &a.single_group };
+  let mut seen = std::collections::HashSet::new();
+  [a.album_group.as_slice(), singles]
+    .into_iter()
+    .flat_map(|group| {
+      group
+        .iter()
+        .flat_map(|g| g.album.iter())
+        .filter(|al| !al.gid().is_empty())
+        .map(|al| format!("spotify:album:{}", gid_to_base62(al.gid())))
+        .take(depth)
+        .collect::<Vec<_>>()
+    })
+    .filter(|u| seen.insert(u.clone()))
+    .collect()
 }
 
 #[cfg(test)]

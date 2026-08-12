@@ -1,0 +1,15 @@
+{
+  "name": "@bridgething/companion-types",
+  "type": "module",
+  "private": true,
+  "description": "generated typescript for the shared companion core's api surface",
+  "exports": {
+    ".": "./ts/companion.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

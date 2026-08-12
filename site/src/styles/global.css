@@ -1,0 +1,136 @@
+@import 'tailwindcss';
+@import '@bridgething/ui/theme.css';
+@plugin '@tailwindcss/typography';
+
+@source '../../../packages/ui/src';
+
+@font-face {
+  font-family: 'Outfit';
+  src: url('/fonts/Outfit/Outfit.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter/Inter.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@theme {
+  --container-site: 72rem;
+}
+
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid var(--color-edge);
+    transition:
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  a:hover {
+    border-bottom-color: var(--color-accent);
+  }
+}
+
+@layer base {
+  .astro-code {
+    @apply overflow-x-auto border border-white/10 p-4 text-sm;
+    line-height: 1.6;
+    background-color: var(--color-screen) !important;
+  }
+
+  .astro-code span {
+    color: var(--shiki-dark) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+
+  .typetip {
+    position: absolute;
+    z-index: 50;
+    max-width: min(92vw, 34rem);
+    border: 1px solid var(--color-edge);
+    background: var(--color-screen);
+  }
+  .typetip .astro-code {
+    margin: 0;
+    max-height: 20rem;
+    overflow: auto;
+    font-size: 0.8rem;
+    border: 0;
+  }
+}
+
+@utility container-site {
+  margin-inline: auto;
+  max-width: var(--container-site);
+  padding-inline: 1.5rem;
+}
+
+@utility btn-soon {
+  border-style: dashed;
+  color: var(--color-dim);
+  cursor: default;
+
+  &:hover {
+    border-color: var(--color-edge);
+    color: var(--color-dim);
+  }
+}
+
+@utility pill {
+  @apply font-mono;
+  font-size: 0.75rem;
+  text-transform: lowercase;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  color: var(--color-soft);
+  box-shadow: inset 0 0 0 1px var(--color-rule-strong);
+  display: inline-flex;
+  align-items: center;
+}
+
+@utility pill-stable {
+  color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+@utility pill-experimental {
+  color: var(--color-experimental);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-experimental) 40%, transparent);
+}
+
+@utility pill-warn {
+  color: var(--color-warn);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-warn) 40%, transparent);
+}
+
+@utility pill-default {
+  color: var(--color-off-white);
+}
+
+@utility cursor-block {
+  animation: invert 1.1s steps(1) infinite;
+
+  @variant motion-reduce {
+    animation: none;
+  }
+}
+
+@keyframes invert {
+  50% {
+    background-color: transparent;
+    color: inherit;
+  }
+}

@@ -3,6 +3,8 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
+use ::http::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
+use bridgething_io::HttpMethod;
 use librespot_protocol::{
   autoplay_context_request::AutoplayContextRequest,
   extended_metadata::{
@@ -13,12 +15,11 @@ use librespot_protocol::{
   playlist4_external::SelectedListContent,
 };
 use protobuf::{Message, MessageField};
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 
 use crate::{
   error::{Error, Result},
   http::{PROTO_CT, SPCLIENT, SpHttp, random_hex},
-  httpx::{HttpMethod, with_query},
+  httpx::with_query,
   proto::custom::{
     casita_home::HomeResponse,
     collection::{Item as CollectionWriteItem, WriteRequest},

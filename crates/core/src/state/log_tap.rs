@@ -7,13 +7,14 @@ use std::{
   time::SystemTime,
 };
 
-use bluer::Address;
 use libbridgething::{LogEntry, LogLevel, LogSource};
 use tokio::{sync::broadcast, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{Event, Subscriber, field::Visit};
 use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 use uuid::Uuid;
+
+use crate::bluetooth::Address;
 
 const RING_CAPACITY: usize = 512;
 const BROADCAST_CAPACITY: usize = 256;
@@ -289,8 +290,8 @@ mod tests {
   #[test]
   fn tap_denied_matches_self_and_gateway_traffic_targets() {
     assert!(tap_denied("bridgething::state::log_tap"));
-    assert!(tap_denied("libbridgething::protocol::bridge::encode"));
-    assert!(tap_denied("libbridgething::protocol::gateway::decoder"));
+    assert!(tap_denied("libbridgething::protocol::encode"));
+    assert!(tap_denied("libbridgething::protocol::decode"));
     assert!(tap_denied("bridgething::rfcomm::frame"));
     assert!(tap_denied("bridgething::net::connection"));
     assert!(tap_denied("bridgething::net::connman"));
@@ -308,7 +309,7 @@ mod tests {
     tracing::subscriber::with_default(subscriber, || {
       tracing::info!(target: "bridgething::als", "kept-normal");
       tracing::trace!(target: "bridgething::state::log_tap", "self-feedback");
-      tracing::trace!(target: "libbridgething::protocol::bridge::encode", "codec-noise");
+      tracing::trace!(target: "libbridgething::protocol::encode", "codec-noise");
       tracing::trace!(target: "bridgething::rfcomm::frame", "gateway-traffic");
       tracing::trace!(target: "bridgething::ws::connection::send", "ws-send-feedback");
       tracing::trace!(target: "bridgething::net::connman", "net-send-feedback");

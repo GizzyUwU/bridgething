@@ -46,7 +46,8 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     }
 
     let outbound = gateway::NetFetchRequestMsg { request };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    let primary = self.handle.state.capabilities.primary_addr();
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -114,7 +115,12 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     }
 
     let connection_id = open.connection_id;
-    self.handle.state.ws_routes.register(connection_id, self.handle.from);
+    let primary = self.handle.state.capabilities.primary_addr();
+    self
+      .handle
+      .state
+      .ws_routes
+      .register(connection_id, self.handle.from, primary);
 
     let outbound = gateway::NetWsOpen {
       connection_id,
@@ -122,7 +128,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
       protocols: open.protocols,
       headers: open.headers,
     };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -169,6 +175,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
   async fn ws_send(&self, params: NetWsSend) -> HandlerResult {
     let send = params;
     let owner = self.handle.state.ws_routes.lookup(send.connection_id);
+    let gateway = self.handle.state.ws_routes.gateway_of(send.connection_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(
         connection_id = %send.connection_id,
@@ -182,12 +189,13 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
       connection_id: send.connection_id,
       frame: send.frame,
     });
-    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    self.handle.bluetooth.gateway_man.command_bulk(gateway, outbound).await;
     Ok(())
   }
 
   async fn ws_close(&self, params: NetWsClose) -> HandlerResult {
     let close = params;
+    let gateway = self.handle.state.ws_routes.gateway_of(close.connection_id);
     let owner = self.handle.state.ws_routes.drop_id(close.connection_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(
@@ -203,7 +211,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
       code: close.code,
       reason: close.reason,
     });
-    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    self.handle.bluetooth.gateway_man.command_bulk(gateway, outbound).await;
     Ok(())
   }
 
@@ -224,21 +232,23 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
       return Ok(());
     }
 
+    let primary = self.handle.state.capabilities.primary_addr();
     self
       .handle
       .state
       .stream_routes
-      .register(open.stream_id, self.handle.from);
+      .register(open.stream_id, self.handle.from, primary);
     let outbound = BridgeToGatewayNetMsgCommand::StreamOpen(gateway::NetStreamOpen {
       stream_id: open.stream_id,
       request: open.request,
     });
-    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    self.handle.bluetooth.gateway_man.command_bulk(primary, outbound).await;
     Ok(())
   }
 
   async fn stream_cancel(&self, params: NetStreamCancel) -> HandlerResult {
     let cancel = params;
+    let gateway = self.handle.state.stream_routes.gateway_of(cancel.stream_id);
     let owner = self.handle.state.stream_routes.drop_id(cancel.stream_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(
@@ -252,7 +262,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     let outbound = BridgeToGatewayNetMsgCommand::StreamCancel(gateway::NetStreamCancel {
       stream_id: cancel.stream_id,
     });
-    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    self.handle.bluetooth.gateway_man.command_bulk(gateway, outbound).await;
     Ok(())
   }
 }

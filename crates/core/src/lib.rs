@@ -33,9 +33,8 @@ use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin};
 use als::{AlsConfig, AlsManager};
 use asset::AssetCache;
 use authority::AuthorityRegistry;
+pub use bluetooth::{Address, Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
 use bluetooth::{BluetoothBringup, BluetoothDeps, BluetoothManager};
-#[cfg(feature = "test-tap")]
-pub use bluetooth::{Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
 use capabilities::CapabilitiesRegistry;
 #[cfg(feature = "test-tap")]
 pub use handler::client::{ClientMode, PossibleSendMsg};
@@ -60,7 +59,6 @@ use transfer::ChunkedTransfer;
 use transport::TransportController;
 pub struct Daemon {
   pub state: State,
-  #[cfg(feature = "test-tap")]
   pub inject: Option<HeadlessInject>,
   #[cfg(feature = "test-tap")]
   pub server_addrs: ServerAddrs,
@@ -85,8 +83,8 @@ impl Daemon {
   }
 }
 
-pub async fn run_daemon() {
-  init(DaemonConfig::real()).await.run().await;
+pub async fn run_daemon(config: DaemonConfig) {
+  init(config).await.run().await;
 }
 
 pub async fn init(config: DaemonConfig) -> Daemon {
@@ -139,6 +137,8 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let kv = KvStore::new(db.clone());
   let meta_store = MetaStore::new(db.clone());
 
+  ota::retire_superseded_wakeword_model().await;
+
   let meta = state::meta::DeviceMeta::init(static_meta, kv.clone()).await;
 
   let installed_webapps_root = config.webapps_dir.clone().unwrap_or_else(paths::webapps_dir);
@@ -184,29 +184,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());
   let iap2_pending_art = handler::iap2::Iap2PendingArt::new();
   let spotify_wake_gate = handler::gateway::SpotifyWakeGate::new();
-  let peers = PeerTracker::new(
-    bus.clone(),
-    player.clone(),
-    audio.clone(),
-    capabilities.clone(),
-    playback_targets.clone(),
-    ws_routes.clone(),
-    stream_routes.clone(),
-    tunnel_routes.clone(),
-    log_tap.clone(),
-  );
-
-  let chrome = chrome::Chrome::init(format!("http://127.0.0.1:{modern_port}/"))
-    .await
-    .expect("failed to initialize chrome");
-
-  let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
-  let bluetooth_deps = BluetoothDeps {
-    bus: bus.clone(),
-    meta: meta.clone(),
-    devices: devices.clone(),
-    peers: peers.clone(),
-  };
   let (bluetooth, bluetooth_bootstrap) = BluetoothManager::create(
     serial_number
       .chars()
@@ -221,6 +198,33 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   );
 
   let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2.telephony.clone());
+
+  let peers = PeerTracker::new(
+    bus.clone(),
+    player.clone(),
+    audio.clone(),
+    capabilities.clone(),
+    playback_targets.clone(),
+    telephony.clone(),
+    ws_routes.clone(),
+    stream_routes.clone(),
+    tunnel_routes.clone(),
+    log_tap.clone(),
+  );
+
+  let chrome = chrome::Chrome::init(format!("http://127.0.0.1:{modern_port}/"))
+    .await
+    .expect("failed to initialize chrome");
+
+  let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
+  let bluetooth_deps = BluetoothDeps {
+    #[cfg(target_os = "linux")]
+    bus: bus.clone(),
+    meta: meta.clone(),
+    #[cfg(target_os = "linux")]
+    devices: devices.clone(),
+    peers: peers.clone(),
+  };
   let time = TimeManager::new(bus.clone());
 
   let (als, als_handle) = AlsManager::init(bus.clone(), AlsConfig::default())
@@ -256,12 +260,15 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let wakeword_reload: WakewordReload = {
     let mic = mic.clone();
+    let meta = meta.clone();
     std::sync::Arc::new(move || {
       let mic = mic.clone();
+      let meta = meta.clone();
       Box::pin(async move {
         if let Err(err) = mic.reload_wakeword().await {
           tracing::warn!("could not reload the wake word after an update: {err}");
         }
+        meta.refresh_wakeword_model_version().await;
       })
     })
   };
@@ -324,6 +331,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   spawn_ota_event_forwarder(bluetooth.clone(), state.client_man.clone(), ota_events_rx);
   spawn_nickname_observer(state.meta.subscribe(), bluetooth.clone(), state.bus.clone());
   spawn_next_art_warmer(state.clone(), bluetooth.clone());
+  spawn_primary_companion_resync(state.authority.clone(), bluetooth.clone());
   spawn_asset_event_forwarder(state.assets.subscribe(), state.bus.clone());
 
   let transport = TransportController::new(
@@ -362,20 +370,23 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let _input = input::InputManager::spawn(state.clone());
 
-  notifier.status("initializing bluetooth stack...");
-  #[cfg(feature = "test-tap")]
-  let mut headless_inject = None;
-  let bringup = match config.bluetooth {
-    BluetoothMode::Real => BluetoothBringup::Real,
-    #[cfg(feature = "test-tap")]
+  let (bringup, headless_inject) = match config.bluetooth {
+    #[cfg(target_os = "linux")]
+    BluetoothMode::Real => {
+      notifier.status("initializing bluetooth stack...");
+      (BluetoothBringup::Real, None)
+    }
+    #[cfg(not(target_os = "linux"))]
+    BluetoothMode::Real => panic!("this build has no bluez; only BluetoothMode::Headless can be brought up"),
     BluetoothMode::Headless => {
+      notifier.status("initializing gateway transports (no radio)...");
       let (inject_tx, inject_rx) = bluetooth::inject_channel();
-      headless_inject = Some(HeadlessInject {
+      let inject = HeadlessInject {
         rfcomm: inject_tx,
         iap2: bluetooth_bootstrap.iap2_inject_tx(),
         iap2_outbound: bluetooth_bootstrap.iap2_outbound_tap(),
-      });
-      BluetoothBringup::Headless(inject_rx)
+      };
+      (BluetoothBringup::Headless(inject_rx), Some(inject))
     }
   };
   let bluetooth_handle = bluetooth.spawn(
@@ -442,7 +453,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   Daemon {
     state: state_out,
-    #[cfg(feature = "test-tap")]
     inject: headless_inject,
     #[cfg(feature = "test-tap")]
     server_addrs,
@@ -450,7 +460,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   }
 }
 
-#[cfg(feature = "test-tap")]
 #[derive(Clone)]
 pub struct HeadlessInject {
   pub rfcomm: bluetooth::InjectConnectionTx,
@@ -460,7 +469,6 @@ pub struct HeadlessInject {
 
 pub enum BluetoothMode {
   Real,
-  #[cfg(feature = "test-tap")]
   Headless,
 }
 
@@ -496,6 +504,18 @@ impl DaemonConfig {
       webapps_dir: None,
       ro_webapps_dir: None,
       examples_dir: Some(paths::examples_dir()),
+    }
+  }
+
+  pub fn dev() -> Self {
+    Self {
+      bluetooth: BluetoothMode::Headless,
+      network_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_NETWORK_GATEWAY_PORT)),
+      stock_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_STOCK_WS_PORT)),
+      modern_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_WS_MODERN_PORT)),
+      #[cfg(feature = "test-tap")]
+      frame_tap_bind: SocketAddr::from(([127, 0, 0, 1], FRAME_TAP_PORT)),
+      ..Self::real()
     }
   }
 
@@ -584,9 +604,7 @@ fn spawn_nickname_observer(
     loop {
       let value = rx.borrow_and_update().clone();
 
-      if let Err(err) = systemd::avahi::publish_bridgething_service(value.as_deref()).await {
-        tracing::warn!(?err, "avahi republish on nickname change failed");
-      }
+      systemd::avahi::publish_bridgething_service(value.as_deref()).await;
 
       bluetooth
         .gateway_man
@@ -631,6 +649,34 @@ fn spawn_next_art_warmer(state: State, bluetooth: bluetooth::BluetoothMan) {
       if rx.changed().await.is_err() {
         break;
       }
+    }
+  });
+}
+
+fn spawn_primary_companion_resync(authority: AuthorityRegistry, bluetooth: bluetooth::BluetoothMan) {
+  let mut rx = authority.primary_subscription_rx();
+  tokio::spawn(async move {
+    let mut prev = *rx.borrow_and_update();
+    loop {
+      if rx.changed().await.is_err() {
+        break;
+      }
+      let next = *rx.borrow_and_update();
+      let handed_over = prev.is_some() && next.is_some() && prev != next;
+      prev = next;
+      let Some(addr) = next.filter(|_| handed_over) else {
+        continue;
+      };
+      let gateway_man = bluetooth.gateway_man.clone();
+      tokio::spawn(async move {
+        match gateway_man
+          .request(Some(addr), libbridgething::gateway::PlayerSnapshotRequest {})
+          .await
+        {
+          Ok(_) => tracing::debug!(%addr, "new primary companion acked the snapshot request"),
+          Err(err) => tracing::debug!(?err, %addr, "new primary companion did not answer the snapshot request"),
+        }
+      });
     }
   });
 }

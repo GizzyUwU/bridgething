@@ -4,6 +4,7 @@ use std::{
   time::Duration,
 };
 
+use bridgething_io::{HttpExecutor, HttpTransport, WsTransport};
 use futures::future::join_all;
 use librespot_protocol::{connect::Cluster, player::PlayerState as PbPlayerState};
 use serde_json::json;
@@ -14,18 +15,16 @@ use tokio::{
 
 use crate::{
   aplogin,
-  auth::{Auth, DeviceFlow, TokenStore},
+  auth::{Auth, DeviceFlow},
   dealer::{self, Dealer, DealerEvent, DealerWriter, active_device, cluster_playing, phone_device},
   error::{Error, Result},
   http::SpHttp,
-  httpx::{HttpExecutor, HttpTransport},
   model::{
     self, AuthState, BrowseItem, BrowsePage, Device, LibraryScope, PlayerState, ProductState, Queue, QueuePosition,
     RepeatMode, SearchResults, Shelf, Track,
   },
   resolver::{self, VoiceResolveRequest, VoiceResolved, VoiceResult},
   spclient::SpClient,
-  transport::WsTransport,
   util::gid_to_base62,
 };
 
@@ -41,7 +40,6 @@ const LIBRARY_CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_m
 const DJ_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const UPCOMING_CAP: usize = 80;
 
-#[uniffi::export(callback_interface)]
 pub trait Observer: Send + Sync {
   fn on_player(&self, state: PlayerState);
   fn on_queue(&self, queue: Queue);
@@ -50,13 +48,12 @@ pub trait Observer: Send + Sync {
   fn on_library_changed(&self, scope: LibraryScope);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WakeReason {
   UserPlay,
   ConnectResume,
 }
 
-#[uniffi::export(with_foreign)]
 pub trait DeviceWaker: Send + Sync {
   fn wake_device(&self, reason: WakeReason);
 }
@@ -65,6 +62,51 @@ const DEVICE_WAKE_TIMEOUT: Duration = Duration::from_secs(8);
 const CONNECT_RESUME_CLUSTER_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_RESUME_WAKE_TIMEOUT: Duration = Duration::from_secs(20);
 const CONNECT_RESUME_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
+const PLAY_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn is_stale_target(e: &Error) -> bool {
+  matches!(e, Error::Status { status: 404, body, .. } if body.contains("DEVICE_NOT_FOUND"))
+}
+
+async fn target_of(shared: &Shared, my_id: &str) -> Option<String> {
+  let last_active = shared.last_active.lock().await.clone();
+  let guard = shared.cluster.lock().await;
+  active_device(guard.as_ref()?, my_id, last_active.as_deref())
+}
+
+async fn await_device_of(shared: &Shared, my_id: &str) -> String {
+  let notified = shared.cluster_changed.notified();
+  tokio::pin!(notified);
+  loop {
+    notified.as_mut().enable();
+    if let Some(t) = target_of(shared, my_id).await {
+      return t;
+    }
+    notified.as_mut().await;
+    notified.set(shared.cluster_changed.notified());
+  }
+}
+
+async fn wake_fresh_target_of(shared: &Shared, my_id: &str) -> Result<String> {
+  let changed = shared.cluster_changed.notified();
+  tokio::pin!(changed);
+  changed.as_mut().enable();
+  let waker = shared.device_waker.lock().unwrap().clone();
+  let Some(waker) = waker else {
+    return Err(Error::other("target unreachable and no platform waker"));
+  };
+  waker.wake_device(WakeReason::UserPlay);
+  if tokio::time::timeout(CONNECT_RESUME_WAKE_TIMEOUT, changed)
+    .await
+    .is_err()
+  {
+    return Err(Error::other("no cluster update after wake"));
+  }
+  match tokio::time::timeout(DEVICE_WAKE_TIMEOUT, await_device_of(shared, my_id)).await {
+    Ok(t) => Ok(t),
+    Err(_) => Err(Error::other("no device appeared after wake")),
+  }
+}
 const TRANSFER_SETTLE_TIMEOUT: Duration = Duration::from_secs(4);
 
 struct Shared {
@@ -74,9 +116,9 @@ struct Shared {
   device_waker: std::sync::Mutex<Option<Arc<dyn DeviceWaker>>>,
   cluster_changed: Notify,
   connect_resume: Mutex<()>,
+  play_recover: Mutex<()>,
 }
 
-#[derive(uniffi::Object)]
 pub struct SpotifyClient {
   auth: Arc<Auth>,
   http: SpHttp,
@@ -151,6 +193,7 @@ impl SpotifyClient {
         device_waker: std::sync::Mutex::new(None),
         cluster_changed: Notify::new(),
         connect_resume: Mutex::new(()),
+        play_recover: Mutex::new(()),
       }),
       username: Mutex::new(None),
       liked: Arc::new(Mutex::new(None)),
@@ -186,14 +229,16 @@ impl SpotifyClient {
   }
 
   async fn target(&self) -> Result<String> {
-    let last_active = self.shared.last_active.lock().await.clone();
-    let guard = self.shared.cluster.lock().await;
-    let cluster = guard.as_ref().ok_or_else(|| Error::other("no cluster yet"))?;
-    match active_device(cluster, self.dealer.device_id(), last_active.as_deref()) {
+    {
+      let guard = self.shared.cluster.lock().await;
+      guard.as_ref().ok_or_else(|| Error::other("no cluster yet"))?;
+    }
+    match target_of(&self.shared, self.dealer.device_id()).await {
       Some(target) => Ok(target),
       None => {
+        let devices = self.shared.cluster.lock().await.as_ref().map_or(0, |c| c.device.len());
         tracing::warn!(
-          devices = cluster.device.len(),
+          devices,
           "spotify command: no reachable target device (phone spotify likely not an active connect device)"
         );
         Err(Error::other("no reachable target device"))
@@ -221,16 +266,73 @@ impl SpotifyClient {
   }
 
   async fn await_device(&self) -> Result<String> {
-    let notified = self.shared.cluster_changed.notified();
-    tokio::pin!(notified);
-    loop {
-      notified.as_mut().enable();
-      if let Ok(t) = self.target().await {
-        return Ok(t);
+    Ok(await_device_of(&self.shared, self.dealer.device_id()).await)
+  }
+
+  async fn wake_fresh_target(&self) -> Result<String> {
+    wake_fresh_target_of(&self.shared, self.dealer.device_id()).await
+  }
+
+  async fn verified_play(&self, cmd: serde_json::Value, context: &str) -> Result<()> {
+    let writer = self.writer().await?;
+    let target = self.target_or_wake().await?;
+    match writer.play(&target, cmd.clone()).await {
+      Ok(_) => {}
+      Err(e) if is_stale_target(&e) => {
+        tracing::warn!(%target, error = %e, "spotify play: connect no longer knows the target; waking and retrying");
+        let fresh = self.wake_fresh_target().await?;
+        writer.play(&fresh, cmd).await?;
+        return Ok(());
       }
-      notified.as_mut().await;
-      notified.set(self.shared.cluster_changed.notified());
+      Err(e) => return Err(e),
     }
+    self.spawn_play_confirm(writer, cmd, context.to_string());
+    Ok(())
+  }
+
+  fn spawn_play_confirm(&self, writer: DealerWriter, cmd: serde_json::Value, context: String) {
+    if self.shared.device_waker.lock().unwrap().is_none() {
+      return;
+    }
+    let shared = self.shared.clone();
+    let my_id = self.dealer.device_id().to_string();
+    tokio::spawn(async move {
+      let Ok(_recovering) = shared.play_recover.try_lock() else {
+        return;
+      };
+      let confirmed = tokio::time::timeout(PLAY_CONFIRM_TIMEOUT, async {
+        let notified = shared.cluster_changed.notified();
+        tokio::pin!(notified);
+        loop {
+          notified.as_mut().enable();
+          {
+            let guard = shared.cluster.lock().await;
+            if let Some(c) = guard.as_ref()
+              && cluster_playing(c)
+              && c.player_state.context_uri == context
+            {
+              return;
+            }
+          }
+          notified.as_mut().await;
+          notified.set(shared.cluster_changed.notified());
+        }
+      })
+      .await
+      .is_ok();
+      if confirmed {
+        return;
+      }
+      tracing::warn!(%context, "spotify play: accepted but the cluster never confirmed it; waking and replaying");
+      match wake_fresh_target_of(&shared, &my_id).await {
+        Ok(fresh) => {
+          if let Err(e) = writer.play(&fresh, cmd).await {
+            tracing::warn!(error = %e, "spotify play: replay after wake failed");
+          }
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify play: could not recover an unconfirmed play"),
+      }
+    });
   }
 
   fn fire_waker(&self, reason: WakeReason) -> bool {
@@ -365,7 +467,7 @@ impl SpotifyClient {
     Ok(out)
   }
 
-  async fn recents_uris(&self) -> Result<Vec<String>> {
+  pub(crate) async fn recent_track_uris(&self) -> Result<Vec<String>> {
     Ok(self.recents().await?.tracks)
   }
 
@@ -620,15 +722,25 @@ impl SpotifyClient {
         "prepare_play_options": {"license": "premium"},
         "play_options": {"reason": "interactive", "operation": "replace", "trigger": "immediately"},
     });
-    writer.play(&self.target_or_wake().await?, cmd).await?;
-    Ok(())
+    self.verified_play(cmd, DJ_URI).await
   }
 
   pub(crate) async fn current_context_uri(&self) -> Option<String> {
     let guard = self.shared.cluster.lock().await;
-    let cluster = guard.as_ref()?;
-    let uri = &cluster.player_state.context_uri;
-    (!uri.is_empty()).then(|| uri.clone())
+    some_uri(&guard.as_ref()?.player_state.context_uri)
+  }
+
+  pub(crate) async fn playback_anchor(&self) -> Option<PlaybackAnchor> {
+    let guard = self.shared.cluster.lock().await;
+    let state = &guard.as_ref()?.player_state;
+    let track = &state.track;
+    let held = |direct: &str, key: &str| some_uri(direct).or_else(|| track.metadata.get(key).and_then(|u| some_uri(u)));
+    Some(PlaybackAnchor {
+      track_uri: some_uri(&track.uri)?,
+      album_uri: held(&track.album_uri, "album_uri"),
+      artist_uri: held(&track.artist_uri, "artist_uri"),
+      context_uri: some_uri(&state.context_uri),
+    })
   }
 
   pub(crate) async fn home_uris(&self) -> Vec<String> {
@@ -643,6 +755,65 @@ impl SpotifyClient {
     Ok(flatten_search(&resp))
   }
 
+  pub(crate) async fn popularity_of(&self, uris: &[String]) -> HashMap<String, i32> {
+    let mut by_kind: HashMap<&str, Vec<String>> = HashMap::new();
+    for u in uris {
+      if let Some(kind) = u.split(':').nth(1) {
+        by_kind.entry(kind).or_default().push(u.clone());
+      }
+    }
+    let empty: Vec<String> = Vec::new();
+    let ids = |k: &str| by_kind.get(k).unwrap_or(&empty).clone();
+    let (track_ids, album_ids, artist_ids) = (ids("track"), ids("album"), ids("artist"));
+    let (tracks, albums, artists) = tokio::join!(
+      self.spc.get_tracks(&track_ids),
+      self.spc.get_albums(&album_ids),
+      self.spc.get_artists(&artist_ids),
+    );
+    let mut out = HashMap::new();
+    for (uri, t) in tracks.unwrap_or_default() {
+      out.insert(uri, t.popularity());
+    }
+    for (uri, a) in albums.unwrap_or_default() {
+      out.insert(uri, a.popularity());
+    }
+    for (uri, a) in artists.unwrap_or_default() {
+      out.insert(uri, a.popularity());
+    }
+    out
+  }
+
+  pub(crate) async fn artist_releases(
+    &self,
+    artist_uri: &str,
+    albums_only: bool,
+    depth: usize,
+  ) -> Result<Vec<Release>> {
+    let owned = artist_uri.to_string();
+    let artists = self.spc.get_artists(std::slice::from_ref(&owned)).await?;
+    let Some(artist) = artists.get(artist_uri) else {
+      return Ok(Vec::new());
+    };
+    let uris = model::artist_release_uris(artist, albums_only, depth);
+    if uris.is_empty() {
+      return Ok(Vec::new());
+    }
+    let albums = self.spc.get_albums(&uris).await?;
+    Ok(
+      uris
+        .iter()
+        .filter_map(|u| {
+          albums.get(u).map(|a| Release {
+            uri: u.clone(),
+            name: a.name().to_string(),
+            released: (a.date.year(), a.date.month(), a.date.day()),
+            popularity: a.popularity(),
+          })
+        })
+        .collect(),
+    )
+  }
+
   async fn upcoming_state(&self) -> Option<PbPlayerState> {
     let guard = self.shared.cluster.lock().await;
     let ps = &guard.as_ref()?.player_state;
@@ -650,21 +821,7 @@ impl SpotifyClient {
   }
 }
 
-#[uniffi::export(async_runtime = "tokio")]
 impl SpotifyClient {
-  #[uniffi::constructor]
-  pub fn create(
-    base: String,
-    psk: String,
-    device_id: String,
-    store: Box<dyn TokenStore>,
-    observer: Box<dyn Observer>,
-  ) -> Arc<Self> {
-    let exec = HttpExecutor::new();
-    let auth = Arc::new(Auth::new(base, psk, store, exec.clone()));
-    Arc::new(Self::new(auth, device_id, exec, Arc::from(observer)))
-  }
-
   pub fn set_ws_transport(&self, transport: Arc<dyn WsTransport>) {
     self.dealer.set_transport(transport);
   }
@@ -719,7 +876,7 @@ impl SpotifyClient {
       tracing::info!("spotify connect: device flow approved");
     }
 
-    let username = match aplogin::resolve_and_cache(self.auth.as_ref(), &self.http, self.dealer.device_id()).await {
+    let username = match aplogin::resolve_and_cache(&self.auth, &self.http, self.dealer.device_id()).await {
       Ok(u) => Some(u),
       Err(e) if is_auth_terminal(&e) => {
         tracing::warn!(error = %e, "spotify connect: terminal auth error resolving username");
@@ -787,8 +944,18 @@ impl SpotifyClient {
     Ok(())
   }
   pub async fn resume(&self) -> Result<()> {
-    self.writer().await?.resume(&self.target_or_wake().await?).await?;
-    Ok(())
+    let writer = self.writer().await?;
+    let target = self.target_or_wake().await?;
+    match writer.resume(&target).await {
+      Ok(_) => Ok(()),
+      Err(e) if is_stale_target(&e) => {
+        tracing::warn!(%target, error = %e, "spotify resume: connect no longer knows the target; waking and retrying");
+        let fresh = self.wake_fresh_target().await?;
+        writer.resume(&fresh).await?;
+        Ok(())
+      }
+      Err(e) => Err(e),
+    }
   }
 
   pub async fn resume_on_connect(&self) -> Result<()> {
@@ -993,8 +1160,6 @@ impl SpotifyClient {
     if uri == DJ_URI {
       return self.play_dj().await;
     }
-    let writer = self.writer().await?;
-    let target = self.target_or_wake().await?;
     let (context, skip) = if uri.starts_with("spotify:track:") && skip_to_uri.is_none() {
       match self.album_for_track(uri).await {
         Some(album) => (album, Some(uri.to_string())),
@@ -1014,8 +1179,7 @@ impl SpotifyClient {
         "prepare_play_options": ppo,
         "play_options": {"reason": "interactive", "operation": "replace", "trigger": "immediately"},
     });
-    writer.play(&target, cmd).await?;
-    Ok(())
+    self.verified_play(cmd, &context).await
   }
 
   // ---- content ------------------------------------------------------------
@@ -1146,7 +1310,7 @@ impl SpotifyClient {
 
   pub async fn browse(&self, node_id: &str, limit: u32, offset: u32) -> Result<BrowsePage> {
     let all: Vec<String> = match node_id {
-      NODE_RECENTS => self.recents_uris().await?,
+      NODE_RECENTS => self.recent_track_uris().await?,
       NODE_PLAYLISTS => {
         let mut u = Vec::new();
         if let Ok(user) = self.username().await {
@@ -1256,6 +1420,24 @@ pub(crate) struct FlatItem {
   image: String,
 }
 
+pub(crate) struct Release {
+  pub(crate) uri: String,
+  pub(crate) name: String,
+  pub(crate) released: (i32, i32, i32),
+  pub(crate) popularity: i32,
+}
+
+fn some_uri(uri: &str) -> Option<String> {
+  (!uri.is_empty()).then(|| uri.to_string())
+}
+
+pub(crate) struct PlaybackAnchor {
+  pub(crate) track_uri: String,
+  pub(crate) album_uri: Option<String>,
+  pub(crate) artist_uri: Option<String>,
+  pub(crate) context_uri: Option<String>,
+}
+
 pub(crate) fn flatten_search(resp: &crate::proto::custom::searchview::SearchResponse) -> Vec<FlatItem> {
   let mut out = Vec::new();
   let mut seen = std::collections::HashSet::new();
@@ -1345,6 +1527,18 @@ async fn resolve_context_name(spc: &SpClient, uri: &str) -> Option<String> {
   }
 }
 
+const RECONNECT_BASE: Duration = Duration::from_secs(2);
+const RECONNECT_CEILING: Duration = Duration::from_secs(64);
+
+fn reconnect_delay(attempt: u32) -> Duration {
+  let unjittered = RECONNECT_BASE
+    .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+    .unwrap_or(RECONNECT_CEILING)
+    .min(RECONNECT_CEILING);
+  let half = unjittered / 2;
+  half + half.mul_f64(rand::random::<f64>())
+}
+
 async fn events_loop(
   dealer: Dealer,
   spc: SpClient,
@@ -1354,10 +1548,12 @@ async fn events_loop(
   browse_cache: Arc<Mutex<BrowseCache>>,
   me: String,
 ) {
+  let mut attempt: u32 = 0;
   loop {
     match dealer.open().await {
       Ok((mut stream, writer)) => match writer.cluster().await {
         Ok(cluster) => {
+          attempt = 0;
           tracing::info!(
             active_device = %cluster.active_device_id,
             devices = cluster.device.len(),
@@ -1448,7 +1644,10 @@ async fn events_loop(
       Err(e) => tracing::warn!("dealer open failed: {e}"),
     }
     *shared.writer.lock().await = None;
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let delay = reconnect_delay(attempt);
+    tracing::debug!(?delay, attempt, "dealer: backing off before the next attempt");
+    attempt = attempt.saturating_add(1);
+    tokio::time::sleep(delay).await;
   }
 }
 
@@ -1640,6 +1839,7 @@ pub(crate) mod tests {
     atomic::{AtomicUsize, Ordering},
   };
 
+  use bridgething_io::{HttpDownloadSink, HttpRequest, HttpResponse, HttpSink, HttpTransport};
   use librespot_protocol::{
     connect::{Cluster, DeviceInfo},
     devices::DeviceType,
@@ -1647,7 +1847,38 @@ pub(crate) mod tests {
   use protobuf::Message;
 
   use super::*;
-  use crate::httpx::{HttpRequest, HttpResponse, HttpSink, HttpTransport};
+  use crate::auth::TokenStore;
+
+  #[test]
+  fn reconnect_delay_doubles_under_a_ceiling_and_never_repeats_the_same_instant() {
+    for attempt in 0..40u32 {
+      let unjittered = RECONNECT_BASE
+        .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+        .unwrap_or(RECONNECT_CEILING)
+        .min(RECONNECT_CEILING);
+      for _ in 0..64 {
+        let delay = reconnect_delay(attempt);
+        assert!(
+          delay >= unjittered / 2 && delay < unjittered,
+          "attempt {attempt} delay {delay:?} left the half-to-full jitter band around {unjittered:?}"
+        );
+      }
+    }
+
+    assert!(
+      reconnect_delay(0) < reconnect_delay(8),
+      "a persistent failure has to wait longer than the first retry"
+    );
+
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..64 {
+      seen.insert(reconnect_delay(4));
+    }
+    assert!(
+      seen.len() > 1,
+      "a fleet retrying in lockstep is what jitter exists to break"
+    );
+  }
 
   struct SeedStore;
   impl TokenStore for SeedStore {
@@ -1675,8 +1906,12 @@ pub(crate) mod tests {
     hits: Arc<StdMutex<Vec<(String, String)>>>,
     #[allow(clippy::type_complexity)]
     resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+    #[allow(clippy::type_complexity)]
+    play_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
     set_queue_failures: Arc<AtomicUsize>,
+    player_404s: Arc<AtomicUsize>,
     cluster_bytes: Arc<StdMutex<Option<Vec<u8>>>>,
+    search_bytes: Arc<StdMutex<Option<Vec<u8>>>>,
   }
   impl HttpTransport for RouteTransport {
     fn execute(&self, request: HttpRequest, sink: Arc<HttpSink>) {
@@ -1700,8 +1935,28 @@ pub(crate) mod tests {
           .set_queue_failures
           .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
           .is_ok();
+      let played = body.contains("\"endpoint\":\"play\"");
       self.hits.lock().unwrap().push((url.clone(), body));
+      if url.contains("/player/command/")
+        && self
+          .player_404s
+          .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+          .is_ok()
+      {
+        sink.complete(HttpResponse {
+          status: 404,
+          headers: Vec::new(),
+          body: br#"{"error_type":"DEVICE_NOT_FOUND","message":"Device not found, from edgeproxy"}"#.to_vec(),
+        });
+        return;
+      }
       if resumed && let Some((shared, cluster)) = self.resume_flip.lock().unwrap().clone() {
+        tokio::spawn(async move {
+          *shared.cluster.lock().await = Some(cluster);
+          shared.cluster_changed.notify_waiters();
+        });
+      }
+      if played && let Some((shared, cluster)) = self.play_flip.lock().unwrap().clone() {
         tokio::spawn(async move {
           *shared.cluster.lock().await = Some(cluster);
           shared.cluster_changed.notify_waiters();
@@ -1715,15 +1970,22 @@ pub(crate) mod tests {
         });
         return;
       }
-      let cluster_read = url.contains("/connect-state/v1/devices/");
+      let canned = if url.contains("/connect-state/v1/devices/") {
+        self.cluster_bytes.lock().unwrap().clone()
+      } else if url.contains("/searchview/v3/search") {
+        self.search_bytes.lock().unwrap().clone()
+      } else {
+        None
+      };
       sink.complete(HttpResponse {
         status: 200,
         headers: Vec::new(),
-        body: match cluster_read {
-          true => self.cluster_bytes.lock().unwrap().clone().unwrap_or_default(),
-          false => Vec::new(),
-        },
+        body: canned.unwrap_or_default(),
       });
+    }
+
+    fn download(&self, _request: HttpRequest, sink: Arc<HttpDownloadSink>) {
+      sink.on_failed("the test transport has no streaming arm".to_string());
     }
   }
 
@@ -1736,6 +1998,15 @@ pub(crate) mod tests {
       .iter()
       .filter(|(url, _)| url.contains("connect-state"))
       .cloned()
+      .collect()
+  }
+
+  fn play_targets(hits: &Hits) -> Vec<String> {
+    command_hits(hits)
+      .iter()
+      .filter(|(_, body)| body.contains("\"endpoint\":\"play\""))
+      .filter_map(|(url, _)| url.split("/player/command/from/me-device/to/").nth(1))
+      .map(str::to_string)
       .collect()
   }
 
@@ -1803,13 +2074,24 @@ pub(crate) mod tests {
     wake_reasons: Arc<StdMutex<Vec<WakeReason>>>,
     #[allow(clippy::type_complexity)]
     resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+    #[allow(clippy::type_complexity)]
+    play_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
     set_queue_failures: Arc<AtomicUsize>,
+    player_404s: Arc<AtomicUsize>,
     cluster_bytes: Arc<StdMutex<Option<Vec<u8>>>>,
   }
 
   impl Rig {
     async fn flip_to_on_resume(&self, cluster: Cluster) {
       *self.resume_flip.lock().unwrap() = Some((self.client.shared.clone(), cluster));
+    }
+
+    async fn flip_to_on_play(&self, cluster: Cluster) {
+      *self.play_flip.lock().unwrap() = Some((self.client.shared.clone(), cluster));
+    }
+
+    fn fail_player_commands(&self, n: usize) {
+      self.player_404s.store(n, Ordering::SeqCst);
     }
 
     fn refuse_set_queue(&self, count: usize, refreshed: &Cluster) {
@@ -1822,10 +2104,11 @@ pub(crate) mod tests {
     let transport = RouteTransport::default();
     let hits = transport.hits.clone();
     let resume_flip = transport.resume_flip.clone();
+    let play_flip = transport.play_flip.clone();
     let set_queue_failures = transport.set_queue_failures.clone();
+    let player_404s = transport.player_404s.clone();
     let cluster_bytes = transport.cluster_bytes.clone();
-    let exec = HttpExecutor::new();
-    exec.set(Arc::new(transport));
+    let exec = HttpExecutor::new(Arc::new(transport));
     let auth = Arc::new(Auth::new(
       "https://worker.invalid",
       "psk",
@@ -1850,13 +2133,73 @@ pub(crate) mod tests {
       wake_calls,
       wake_reasons,
       resume_flip,
+      play_flip,
       set_queue_failures,
+      player_404s,
       cluster_bytes,
     }
   }
 
   pub(crate) fn test_client(observer: Arc<dyn Observer>) -> SpotifyClient {
-    let exec = HttpExecutor::new();
+    client_over(RouteTransport::default(), observer)
+  }
+
+  #[derive(Default)]
+  pub(crate) struct Playing<'a> {
+    pub(crate) track: &'a str,
+    pub(crate) album: &'a str,
+    pub(crate) artist: &'a str,
+    pub(crate) context: &'a str,
+  }
+
+  pub(crate) async fn playing_client(observer: Arc<dyn Observer>, playing: Playing<'_>) -> SpotifyClient {
+    let client = test_client(observer);
+    let mut c = cluster("dev1", true, &[]);
+    let ps = c.player_state.mut_or_insert_default();
+    ps.context_uri = playing.context.to_string();
+    let track = ps.track.mut_or_insert_default();
+    track.uri = playing.track.to_string();
+    track.album_uri = playing.album.to_string();
+    track.artist_uri = playing.artist.to_string();
+    *client.shared.cluster.lock().await = Some(c);
+    client
+  }
+
+  pub(crate) fn searching_client(observer: Arc<dyn Observer>, results: &[&str]) -> (SpotifyClient, SearchLog) {
+    let transport = RouteTransport {
+      search_bytes: Arc::new(StdMutex::new(Some(
+        search_response(results, &[]).write_to_bytes().unwrap(),
+      ))),
+      ..Default::default()
+    };
+    let hits = transport.hits.clone();
+    (client_over(transport, observer), SearchLog(hits))
+  }
+
+  pub(crate) struct SearchLog(Hits);
+
+  impl SearchLog {
+    pub(crate) fn queries(&self) -> Vec<String> {
+      self
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(url, _)| url.contains("/searchview/v3/search"))
+        .filter_map(|(url, _)| {
+          url
+            .split('?')
+            .nth(1)?
+            .split('&')
+            .find_map(|p| p.strip_prefix("query="))
+            .map(|q| q.replace('+', " ").replace("%3A", ":"))
+        })
+        .collect()
+    }
+  }
+
+  fn client_over(transport: RouteTransport, observer: Arc<dyn Observer>) -> SpotifyClient {
+    let exec = HttpExecutor::new(Arc::new(transport));
     let auth = Arc::new(Auth::new(
       "https://example.invalid",
       "psk",
@@ -1864,6 +2207,52 @@ pub(crate) mod tests {
       exec.clone(),
     ));
     SpotifyClient::new(auth, "me-device".to_string(), exec, observer)
+  }
+
+  #[tokio::test]
+  async fn a_play_rejected_as_device_not_found_wakes_and_retries_on_the_fresh_cluster() {
+    let rig = rig(Some(active_cluster("dev1")), Some(active_cluster("dev2"))).await;
+    rig.fail_player_commands(1);
+    rig.client.play("spotify:album:x", None).await.unwrap();
+    assert_eq!(rig.wake_calls.load(Ordering::SeqCst), 1);
+    assert!(matches!(rig.wake_reasons.lock().unwrap()[0], WakeReason::UserPlay));
+    assert_eq!(play_targets(&rig.hits), vec!["dev1".to_string(), "dev2".to_string()]);
+  }
+
+  async fn eventually(what: &str, holds: impl Fn() -> bool) {
+    tokio::time::timeout(Duration::from_secs(120), async {
+      loop {
+        if holds() {
+          return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+      }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("never held: {what}"));
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn an_accepted_play_the_cluster_never_confirms_wakes_and_replays() {
+    let rig = rig(Some(active_cluster("dev1")), Some(active_cluster("dev1"))).await;
+    rig.client.play("spotify:album:x", None).await.unwrap();
+    eventually("the recovery replayed", || {
+      rig.wake_calls.load(Ordering::SeqCst) == 1 && play_targets(&rig.hits).len() == 2
+    })
+    .await;
+    assert!(matches!(rig.wake_reasons.lock().unwrap()[0], WakeReason::UserPlay));
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn a_play_the_cluster_confirms_never_wakes() {
+    let rig = rig(Some(active_cluster("dev1")), None).await;
+    let mut confirmed = cluster("dev1", true, &[]);
+    confirmed.player_state.mut_or_insert_default().context_uri = "spotify:album:x".to_string();
+    rig.flip_to_on_play(confirmed).await;
+    rig.client.play("spotify:album:x", None).await.unwrap();
+    tokio::time::sleep(PLAY_CONFIRM_TIMEOUT + CONNECT_RESUME_WAKE_TIMEOUT).await;
+    assert_eq!(rig.wake_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(play_targets(&rig.hits).len(), 1);
   }
 
   #[tokio::test]

@@ -17,7 +17,6 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 serde_with = { workspace = true, features = ["json"] }
 derive_more = { workspace = true, features = ["debug", "from"] }
-bluer = { workspace = true, features = ["bluetoothd", "l2cap", "rfcomm"] }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
@@ -83,16 +82,26 @@ async-stream = "0.3"
 tracing-appender = "0.2.5"
 zstd = "0.13.3"
 memmap2 = "0.9.11"
+bridgething-delivery = { path = "../delivery/core" }
+bridgething-sdk-runtime = { path = "../sdk-runtime" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = { workspace = true, features = ["bluetoothd", "l2cap", "rfcomm"] }
 
 [features]
 default = ["dev-linux-host"]
 als = []
-mic = ["dep:alsa", "dep:bridgething-dsp", "dep:bridgething-wakeword", "dep:opus"]
+mic = [
+  "dep:alsa",
+  "dep:bridgething-dsp",
+  "dep:bridgething-wakeword",
+  "dep:opus",
+]
 input = ["dep:evdev"]
 chrome = ["dep:headless_chrome"]
 systemd = ["dep:sd-notify", "dep:zbus"]
 swupdate = ["dep:bridgething-swupdate-sys"]
-superbird = ["als", "systemd", "chrome", "swupdate", "input"]
+superbird = ["als", "systemd", "chrome", "swupdate", "input", "mic"]
 # dev features
 dev-linux-host = ["als", "systemd", "chrome"]
 no-persist = []
@@ -104,4 +113,5 @@ name = "cover_art"
 path = "./examples/cover_art.rs"
 
 [dev-dependencies]
+tempfile = "3.27.0"
 tokio = { workspace = true, features = ["test-util"] }

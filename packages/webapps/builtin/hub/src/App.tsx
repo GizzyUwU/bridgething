@@ -27,9 +27,7 @@ export default function App() {
     };
   }, []);
 
-  if (phase === 'loading') {
-    return <div className="flex h-full w-full items-center justify-center bg-bt-charcoal" />;
-  }
+  if (phase === 'loading') return <div className="flex h-full w-full items-center justify-center bg-bg" />;
   if (phase === 'wizard') return <Wizard client={client} onDone={() => setPhase('done')} />;
   return <Launcher client={client} />;
 }

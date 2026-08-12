@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -12,7 +10,6 @@ pub struct NluAlternate {
   pub slots: Option<NluSlots>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +41,20 @@ pub struct NluSlots {
   pub context_uri: Option<String>,
 }
 
-#[typeshare]
+impl NluSlots {
+  pub fn has_catalog_slots(&self) -> bool {
+    self.target.is_some()
+      || self.target_type.is_some()
+      || self.genre.is_some()
+      || self.mood.is_some()
+      || self.era.is_some()
+      || self.popularity_filter.is_some()
+      || self.position.is_some()
+      || self.uri.is_some()
+      || self.context_uri.is_some()
+  }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -58,7 +68,6 @@ pub enum NluTargetType {
   Station,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -71,7 +80,6 @@ pub enum NluPopularityFilter {
   Random,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -80,7 +88,6 @@ pub enum NluScope {
   Restart,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -90,7 +97,6 @@ pub enum NluAmount {
   Large,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -100,7 +106,6 @@ pub enum NluRepeatMode {
   One,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -115,7 +120,6 @@ pub enum NluPlaybackSpeed {
   Two,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -124,7 +128,6 @@ pub enum NluDirection {
   Down,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -142,7 +145,6 @@ pub enum NluView {
   NewEpisodes,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -158,7 +160,6 @@ pub enum NluPhoneAction {
   Unmute,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -171,7 +172,6 @@ pub struct NluResolvedIntent {
   pub alternates: Option<Vec<NluAlternate>>,
 }
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -182,7 +182,6 @@ pub enum VoiceCaptureReason {
   WakeWord,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -194,7 +193,6 @@ pub enum NluStage {
   NoModel,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -208,7 +206,6 @@ pub enum VoiceDispatchErrorCode {
 }
 
 /// Where the daemon actually routed a successful dispatch
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

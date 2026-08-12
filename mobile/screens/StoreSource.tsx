@@ -1,13 +1,15 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Check, Plus, Trash2 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { describeError } from '@bridgething/ui/errors';
+import { useCallback, useEffect, useState } from 'react';
+import { Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
 import { CatalogRow } from '../components/CatalogRow';
 import { ListGroup } from '../components/ListGroup';
+import { Note } from '../components/Note';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { Spinner } from '../components/Spinner';
 import {
   addSource,
   previewSource,
@@ -15,9 +17,10 @@ import {
   useIsSubscribed,
   useSourceListings,
 } from '../lib/catalog';
-import type { RootStackParamList } from '../navigation';
+import { TEXT } from '../lib/theme';
+import type { StoreScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'StoreSource'>;
+type Props = StoreScreenProps<'StoreSource'>;
 
 export function StoreSourceScreen({ route, navigation }: Props) {
   const { deviceId, url, name } = route.params;
@@ -26,8 +29,9 @@ export function StoreSourceScreen({ route, navigation }: Props) {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     previewSource(url)
@@ -35,8 +39,7 @@ export function StoreSourceScreen({ route, navigation }: Props) {
         if (!cancelled) setError(null);
       })
       .catch(err => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(describeError(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -46,50 +49,49 @@ export function StoreSourceScreen({ route, navigation }: Props) {
     };
   }, [url]);
 
+  useEffect(() => load(), [load]);
+
+  const toggle = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (subscribed) await removeSource(url);
+      else await addSource(url);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <ScrollScreen>
-      <View className="mb-6">
-        <Text className="text-[20px] font-extrabold text-foreground">
-          {name}
-        </Text>
-        <Text
-          className="mt-0.5 text-[12px] text-muted-foreground"
-          numberOfLines={2}
-        >
-          {url}
-        </Text>
-      </View>
+      <ScreenHeader title={name} subtitle={url} />
 
       <View className="mb-8">
-        {subscribed ? (
-          <Button
-            onPress={() => void removeSource(url)}
-            variant="secondary"
-            icon={Trash2}
-          >
-            remove from my sources
-          </Button>
-        ) : (
-          <Button onPress={() => void addSource(url)} icon={Plus}>
-            add to my sources
-          </Button>
-        )}
-        <Text className="mt-2 px-1 text-[11.5px] leading-[16px] text-muted-foreground">
+        <Button
+          onPress={() => void toggle()}
+          loading={busy}
+          variant={subscribed ? 'secondary' : 'primary'}
+          icon={subscribed ? 'Trash2' : 'Plus'}
+        >
+          {subscribed ? 'remove this source' : 'add this source'}
+        </Button>
+        <Text className="mt-2 px-1 font-sans text-muted" style={TEXT.hint}>
           {subscribed
-            ? 'its apps show up in the store and are checked for updates.'
-            : 'you can install from here without adding it. adding it means its apps show up in the store and get update checks.'}
+            ? 'its apps show up in the store and get checked for updates.'
+            : 'you can install from here without adding it.'}
         </Text>
       </View>
 
       <SectionHeader title="apps" />
       {error ? (
-        <View className="mb-3 rounded-2xl border border-destructive/30 bg-destructive-soft px-4 py-3">
-          <Text className="text-[12px] text-destructive">{error}</Text>
-        </View>
-      ) : null}
-      {loading && listings.length === 0 ? (
-        <View className="items-center py-8">
-          <ActivityIndicator />
+        <Note tone="err" action="retry" onAction={load}>
+          {error}
+        </Note>
+      ) : loading && listings.length === 0 ? (
+        <View className="items-center py-10">
+          <Spinner />
         </View>
       ) : listings.length > 0 ? (
         <ListGroup>
@@ -107,18 +109,9 @@ export function StoreSourceScreen({ route, navigation }: Props) {
             />
           ))}
         </ListGroup>
-      ) : error ? null : (
+      ) : (
         <SectionEmpty>this source publishes no apps</SectionEmpty>
       )}
-
-      {subscribed ? (
-        <View className="mt-6 flex-row items-center gap-2 px-1">
-          <Check size={14} color="hsl(215 14% 50%)" strokeWidth={2.4} />
-          <Text className="text-[12px] text-muted-foreground">
-            in your sources
-          </Text>
-        </View>
-      ) : null}
     </ScrollScreen>
   );
 }

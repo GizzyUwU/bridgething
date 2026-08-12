@@ -7,14 +7,27 @@ license.workspace = true
 authors.workspace = true
 homepage.workspace = true
 
+[features]
+lane-corpus = ["dep:serde", "dep:serde_json"]
+
 [dependencies]
 libbridgething = { path = "../lib" }
 
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
-futures = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
+web-time = "1.1.0"
+bytes = "1.12.1"
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-util", "test-util"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures = { workspace = true }
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"

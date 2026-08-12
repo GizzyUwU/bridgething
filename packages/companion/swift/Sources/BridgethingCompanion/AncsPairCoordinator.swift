@@ -1,4 +1,4 @@
-import BridgethingSchema
+import BridgethingCompanionCore
 import Foundation
 
 public enum AncsSetupKind: Sendable, Equatable {
@@ -11,9 +11,9 @@ public enum AncsSetupKind: Sendable, Equatable {
 
 public struct AncsSetupResult: Sendable {
     public let kind: AncsSetupKind
-    public let authState: AncsAuthState
+    public let authState: AncsAuthStatus
 
-    public init(kind: AncsSetupKind, authState: AncsAuthState) {
+    public init(kind: AncsSetupKind, authState: AncsAuthStatus) {
         self.kind = kind
         self.authState = authState
     }
@@ -49,13 +49,13 @@ public struct AncsSetupResult: Sendable {
         private var sessionActivated = false
         private var activationContinuation: CheckedContinuation<Void, Never>?
         private var pendingPairs: [String: [CheckedContinuation<AncsSetupResult, Never>]] = [:]
-        private var authStates: [String: AncsAuthState] = [:]
+        private var authStates: [String: AncsAuthStatus] = [:]
 
         override init() {
             super.init()
         }
 
-        func setAuthState(serial: String, _ state: AncsAuthState) {
+        func setAuthState(serial: String, _ state: AncsAuthStatus) {
             authStates[AncsBluetooth.advertisedName(serial: serial)] = state
         }
 
@@ -193,7 +193,7 @@ public struct AncsSetupResult: Sendable {
             }
         }
 
-        private func authState(_ name: String) -> AncsAuthState {
+        private func authState(_ name: String) -> AncsAuthStatus {
             authStates[name] ?? .unknown
         }
 

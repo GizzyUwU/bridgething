@@ -17,6 +17,7 @@ fn park_iap2(fd: OwnedFd) {
     .push(fd);
 }
 
+#[cfg(target_os = "linux")]
 pub fn claim_inherited_iap2() -> Vec<OwnedFd> {
   match IAP2_FDS.get() {
     Some(fds) => std::mem::take(&mut *fds.lock().expect("iap2 fd park poisoned")),
@@ -62,6 +63,7 @@ pub fn inherited_listeners() -> HashMap<String, TcpListener> {
 }
 
 #[cfg(feature = "systemd")]
+#[cfg(target_os = "linux")]
 pub fn stash_iap2_fd(fd: std::os::fd::BorrowedFd<'_>) -> bool {
   use sd_notify::NotifyState;
 
@@ -75,6 +77,7 @@ pub fn stash_iap2_fd(fd: std::os::fd::BorrowedFd<'_>) -> bool {
 }
 
 #[cfg(feature = "systemd")]
+#[cfg(target_os = "linux")]
 pub fn clear_iap2_fds() {
   use sd_notify::NotifyState;
 

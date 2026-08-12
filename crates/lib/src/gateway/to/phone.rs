@@ -2,11 +2,9 @@ use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use crate::{AcceptCallAction, DtmfTone, EndCallAction, InitiateCallType, PhoneCallService};
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -14,7 +12,6 @@ pub struct PhoneCallAction {
   pub call_id: String,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -23,7 +20,6 @@ pub struct PhoneAcceptAction {
   pub action: AcceptCallAction,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -32,7 +28,6 @@ pub struct PhoneEndAction {
   pub action: EndCallAction,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +39,6 @@ pub struct PhoneInitiateAction {
   pub address_book_id: Option<String>,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -52,7 +46,6 @@ pub struct PhoneMuteAction {
   pub mute: bool,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -72,7 +65,6 @@ pub struct PhoneDtmfAction {
 )]
 pub struct PhoneStateGet;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

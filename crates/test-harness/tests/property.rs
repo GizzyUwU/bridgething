@@ -1,7 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
-use bluer::Address;
-use bridgething::State;
+use bridgething::{Address, State};
 use bridgething_gateway::Gateway;
 use bridgething_iap2::{
   SessionEvent,
@@ -21,6 +20,13 @@ use proptest::prelude::*;
 
 const CONVERGE: Duration = Duration::from_millis(500);
 const STABLE_WINDOW: Duration = Duration::from_millis(20);
+
+fn cases(default: u32) -> u32 {
+  std::env::var("PROPTEST_CASES")
+    .ok()
+    .and_then(|raw| raw.trim().parse().ok())
+    .unwrap_or(default)
+}
 
 fn daemon_projection(state: &State) -> Projection {
   Projection::from_daemon(
@@ -368,7 +374,7 @@ fn liveness_npu() -> Iap2NowPlaying {
 }
 
 proptest! {
-  #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
+  #![proptest_config(ProptestConfig { cases: cases(128), ..ProptestConfig::default() })]
 
   #[test]
   fn merge_matches_model(events in events_strategy()) {
@@ -416,7 +422,7 @@ proptest! {
 }
 
 proptest! {
-  #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+  #![proptest_config(ProptestConfig { cases: cases(64), ..ProptestConfig::default() })]
 
   #[test]
   fn chaos_burst_holds_safety_invariants(events in chaos_events_strategy()) {

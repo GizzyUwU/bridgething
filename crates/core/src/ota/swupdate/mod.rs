@@ -9,7 +9,6 @@ use libbridgething::OtaPhase;
 use tokio::sync::watch;
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub struct ProgressTick {
   pub phase: OtaPhase,
   pub percent: u8,
@@ -21,21 +20,21 @@ pub struct ProgressTick {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Selector {
   pub software_set: String,
   pub running_mode: String,
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum Error {
   #[error("operation cancelled")]
   Cancelled,
   #[error("io error: {0}")]
   Io(#[from] std::io::Error),
+  #[cfg(feature = "swupdate")]
   #[error("swupdate ipc error: {0}")]
   Ipc(String),
+  #[cfg(feature = "swupdate")]
   #[error("swupdate reported failure: {0}")]
   InstallFailed(String),
 }
@@ -50,12 +49,8 @@ where
   F: Fn(ProgressTick) + Send + Sync,
 {
   #[cfg(feature = "swupdate")]
-  {
+  if crate::paths::is_on_device() {
     return ffi::install_swu(swu_path, selector, progress, cancel_rx).await;
   }
-  #[cfg(not(feature = "swupdate"))]
-  {
-    let _ = selector;
-    return stub::install_swu(swu_path, progress, cancel_rx).await;
-  }
+  stub::install_swu(swu_path, selector, progress, cancel_rx).await
 }

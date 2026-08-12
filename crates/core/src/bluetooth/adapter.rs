@@ -39,7 +39,7 @@ impl AdapterEventStream {
           }
 
           if let Err(err) = profile
-            .handle_event(BluetoothConnectionEvent::DeviceAdded { mac: addr })
+            .handle_event(BluetoothConnectionEvent::DeviceAdded { mac: addr.into() })
             .await
           {
             tracing::error!("failed to handle DeviceAdded: {:?}", err);
@@ -50,7 +50,7 @@ impl AdapterEventStream {
             handle.abort();
           }
           if let Err(err) = profile
-            .handle_event(BluetoothConnectionEvent::DeviceRemoved { mac: addr })
+            .handle_event(BluetoothConnectionEvent::DeviceRemoved { mac: addr.into() })
             .await
           {
             tracing::error!("failed to handle DeviceRemoved: {:?}", err);
@@ -87,10 +87,14 @@ async fn spawn_device_watcher(
     while let Some(event) = stream.next().await {
       let DeviceEvent::PropertyChanged(prop) = event;
       let translated = match prop {
-        DeviceProperty::Paired(paired) => Some(BluetoothConnectionEvent::PairedChanged { mac: addr, paired }),
-        DeviceProperty::Connected(connected) => {
-          Some(BluetoothConnectionEvent::ConnectedChanged { mac: addr, connected })
-        }
+        DeviceProperty::Paired(paired) => Some(BluetoothConnectionEvent::PairedChanged {
+          mac: addr.into(),
+          paired,
+        }),
+        DeviceProperty::Connected(connected) => Some(BluetoothConnectionEvent::ConnectedChanged {
+          mac: addr.into(),
+          connected,
+        }),
         _ => None,
       };
       if let Some(event) = translated

@@ -56,26 +56,13 @@ type QueuedSend = {
 };
 
 export type ClientOptions = {
-  /** WebSocket URL. Defaults to `ws://127.0.0.1:8891/` (the on-device daemon). */
   url?: string;
   logLevel?: LogVerbosity;
-  /** Auto-connect on construct. Defaults to `true`. */
   autoConnect?: boolean;
-  /** Auto-reconnect on close with exponential backoff. Defaults to `true`. */
   reconnect?: boolean;
-  /** Constructor for the underlying WebSocket. Defaults to the global `WebSocket` (browser/runtime). */
   websocket?: typeof WebSocket;
 };
 
-/**
- * Typed webapp-side facade over the on-device daemon's local WebSocket.
- *
- * Single-peer (the daemon); every method addresses it implicitly. Holds one `WebSocket`
- * with auto-reconnect, JSON-encodes outbound `ClientToBridgeMsg`, decodes inbound
- * `BridgeToClientMsg`, and tracks in-flight requests so callers can `await` a reply by id.
- *
- * Surface methods are code-generated and applied to the prototype at module-load via `applyDispatch()`.
- */
 export interface BridgethingClient extends ClientSurfaces {}
 
 export class BridgethingClient {
@@ -123,20 +110,12 @@ export class BridgethingClient {
     this.listeners.delete(listener);
   }
 
-  /**
-   * Open the WebSocket if it is not already open. Idempotent when
-   * already connecting or open.
-   */
   connect(): void {
     if (this.state === 'open' || this.state === 'connecting') return;
     this.intentionalClose = false;
     this.openSocket();
   }
 
-  /**
-   * Close the WebSocket and cancel any reconnect timer. Pending requests
-   * are rejected with `'shutdown'`. After `close()`, `connect()` reopens.
-   */
   close(): void {
     this.intentionalClose = true;
     if (this.reconnectTimer) {
@@ -156,17 +135,8 @@ export class BridgethingClient {
     while (this.sendQueue.length > 0) this.sendQueue.shift()!.reject(shutdown);
   }
 
-  /**
-   * Encode and ship a fully-formed message. Caller picks `meta` (`command`, `event`, etc.).
-   * For request/response, prefer `request` or a typed surface query method.
-   *
-   * Sends before the socket opens are queued and flushed on `open`.
-   * After `close()`, queued sends reject with `'shutdown'`.
-   */
   async send(message: ClientToBridgeMsg): Promise<void> {
     this.logger.trace('send', message);
-    // msgpack encode returns a view into its own scratch buffer; copy it so a
-    // queued frame cannot be clobbered before it flushes
     const frame = new Uint8Array(msgpackEncode(walkUuidFields(message, 'encode')));
     if (this.socket && this.state === 'open') {
       try {
@@ -184,11 +154,6 @@ export class BridgethingClient {
     });
   }
 
-  /**
-   * Send a request and await the matching response by id. The wire id
-   * is generated here and matched against `BridgeToClientMsg.meta.data.requestId`
-   * on the way back.
-   */
   request(data: ClientToBridgeMsgData, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<BridgeToClientMsg> {
     const id = newUuid();
     const message: ClientToBridgeMsg = { id, meta: { kind: 'request' }, data };
@@ -260,12 +225,8 @@ export class BridgethingClient {
     let msg: BridgeToClientMsg;
     try {
       if (raw instanceof ArrayBuffer) {
-        // uuids cross msgpack as 16-byte bin, so they need the same walk the
-        // gateway transport does or nothing correlates to its request
         msg = walkUuidFields(msgpackDecode(new Uint8Array(raw)), 'decode') as BridgeToClientMsg;
       } else if (typeof raw === 'string') {
-        // the daemon answers in the encoding it was last spoken to, so a text
-        // frame can still arrive before our first request lands
         msg = JSON.parse(raw) as BridgeToClientMsg;
       } else {
         this.emit({ type: 'decodeError', description: 'unknown message payload type' });

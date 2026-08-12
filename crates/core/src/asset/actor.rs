@@ -396,9 +396,7 @@ impl AssetActor {
             storage: EntryStorage::Disk(dest),
           },
         );
-        if let Err(err) = self.make_disk_room(&id, retention.is_pinned()).await {
-          return Err(err);
-        }
+        self.make_disk_room(&id, retention.is_pinned()).await?;
       }
     }
 
@@ -452,9 +450,7 @@ impl AssetActor {
             storage: EntryStorage::Disk(dest),
           },
         );
-        if let Err(err) = self.make_disk_room(&id, retention.is_pinned()).await {
-          return Err(err);
-        }
+        self.make_disk_room(&id, retention.is_pinned()).await?;
       }
       Tier::Memory => {
         let bytes = tokio::fs::read(&source).await?;
@@ -812,8 +808,7 @@ fn partition_free_bytes(path: &Path) -> u64 {
   let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
     return u64::MAX;
   };
-  // SAFETY: statvfs takes a NUL-terminated path and writes a POSIX struct into our
-  // stack allocation; both pointers are valid for the duration of the call.
+  // SAFETY: statvfs takes a NUL-terminated path and writes a POSIX struct into our stack allocation; both pointers are valid for the duration of the call
   let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
   let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
   if rc != 0 {

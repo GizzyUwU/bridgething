@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { aggregate, type InstalledWebapp, newestCompatible, pinsFrom, satisfies, updates } from '../src/resolve.ts';
+import {
+  aggregate,
+  compareVersions,
+  type InstalledWebapp,
+  listedWebapps,
+  newestCompatible,
+  pinsFrom,
+  satisfies,
+  updates,
+  versionCompatible,
+} from '../src/resolve.ts';
 import type { AppEntry, AppVersion, Catalog } from '../src/types.ts';
 
 const CALENDAR_ID = '019e6701-13f8-71b5-ba04-85d326630e98';
@@ -80,6 +90,24 @@ describe('semver compat', () => {
   });
 });
 
+describe('compareVersions', () => {
+  test('orders by dotted component, not by string', () => {
+    expect(compareVersions('0.10.0', '0.9.0')).toBe(1);
+    expect(compareVersions('0.9.0', '0.10.0')).toBe(-1);
+    expect(compareVersions('2026.06.0', '2026.06.0')).toBe(0);
+  });
+
+  test('build metadata ends the numeric prefix, so a composite version orders by its daemon half', () => {
+    expect(compareVersions('0.9.0+image.2026.06.0', '0.9.0')).toBe(0);
+    expect(compareVersions('0.9.0+image.2026.06.0', '0.9.0+image.2025.01.0')).toBe(0);
+  });
+
+  test('a prerelease sorts with the release it hangs off, and a v prefix is noise', () => {
+    expect(compareVersions('v0.9.0-rc.1', '0.9.0')).toBe(0);
+    expect(compareVersions('0.9.0-rc.1', '0.8.9')).toBe(1);
+  });
+});
+
 describe('provenance', () => {
   test('pins come from device reported provenance', () => {
     const pins = pinsFrom([installed(CALENDAR_ID, '0.1.0', { provenance: SOURCE_B }), installed(WEATHER_ID, '0.1.0')]);
@@ -129,6 +157,15 @@ describe('version ordering', () => {
     expect(newestCompatible(a, 'v0.4.1')?.version).toBe('0.3.0');
   });
 
+  test('any single version can be checked, not just the newest', () => {
+    const older = ver('0.1.0');
+    const gated = ver('0.9.0', { minLib: '99.0.0' });
+
+    expect(versionCompatible(older, 'v0.4.1')).toBe(true);
+    expect(versionCompatible(gated, 'v0.4.1')).toBe(false);
+    expect(versionCompatible(gated, null)).toBe(true);
+  });
+
   test('compat filter applies after sorting', () => {
     const a = app(CALENDAR_ID, 'Calendar', [
       ver('0.1.0', { released: '2026-01-01T00:00:00Z' }),
@@ -136,6 +173,24 @@ describe('version ordering', () => {
       ver('0.5.0', { released: '2026-03-01T00:00:00Z' }),
     ]);
     expect(newestCompatible(a, 'v0.4.1')?.version).toBe('0.5.0');
+  });
+});
+
+describe('listedWebapps', () => {
+  test('the builtin launcher is hidden and every other builtin stays', () => {
+    const list = [
+      installed('hub', '0.1.0', { source: 'builtin', role: 'launcher' }),
+      installed('browser', '0.1.0', { source: 'builtin' }),
+      installed(CALENDAR_ID, '0.1.0'),
+    ];
+
+    expect(listedWebapps(list).map(w => w.id)).toEqual(['browser', CALENDAR_ID]);
+  });
+
+  test('an installed launcher is a real app the user chose, so it stays listed', () => {
+    const list = [installed(CALENDAR_ID, '0.1.0', { role: 'launcher' })];
+
+    expect(listedWebapps(list)).toHaveLength(1);
   });
 });
 
@@ -186,6 +241,40 @@ describe('aggregate', () => {
     expect(cal.sourceUrl).toBe(SOURCE_A);
     expect(cal.newestCompatible?.version).toBe('0.2.0');
     expect(cal.alsoAvailableFrom).toEqual([SOURCE_B]);
+  });
+
+  test('two catalogs spelling one id in different case offer one app, not two', () => {
+    const a = catalog([app(CALENDAR_ID.toUpperCase(), 'Calendar', [ver('0.2.0')])]);
+    const b = catalog([app(CALENDAR_ID, 'Calendar', [ver('0.1.5')])]);
+    const listings = aggregate({
+      orderedCatalogs: [
+        { url: SOURCE_A, catalog: a },
+        { url: SOURCE_B, catalog: b },
+      ],
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+    });
+
+    expect(listings).toHaveLength(1);
+    expect(listings[0]!.sourceUrl).toBe(SOURCE_A);
+    expect(listings[0]!.alsoAvailableFrom).toEqual([SOURCE_B]);
+  });
+
+  test('a pin matches its source whatever case that catalog spells the id in', () => {
+    const a = catalog([app(CALENDAR_ID.toUpperCase(), 'Calendar', [ver('0.2.0')])]);
+    const b = catalog([app(CALENDAR_ID, 'Calendar', [ver('0.1.5')])]);
+    const listings = aggregate({
+      orderedCatalogs: [
+        { url: SOURCE_A, catalog: a },
+        { url: SOURCE_B, catalog: b },
+      ],
+      installed: [installed(CALENDAR_ID, '0.1.5', { provenance: SOURCE_B })],
+      deviceLibVersion: 'v0.4.1',
+    });
+
+    expect(listings).toHaveLength(1);
+    expect(listings[0]!.sourceUrl).toBe(SOURCE_B);
+    expect(listings[0]!.installedVersion).toBe('0.1.5');
   });
 
   test('no compatible version for an old device', () => {
@@ -303,5 +392,110 @@ describe('updates', () => {
     });
     expect(found).toHaveLength(1);
     expect(found[0]!.target.version).toBe('0.2.0');
+  });
+});
+
+describe('popularity', () => {
+  function counts(entries: [string, string, number][]) {
+    return entries.map(([app_id, source_url, count]) => ({ app_id, source_url, count }));
+  }
+
+  test('the most installed app leads the listing, whatever its name', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([[WEATHER_ID, SOURCE_B, 12]]),
+    });
+
+    expect(listings.map(l => l.app.id)).toEqual([WEATHER_ID, CALENDAR_ID]);
+    expect(listings[0]!.installs).toBe(12);
+  });
+
+  test('an app nobody has installed sorts after every counted app', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([[WEATHER_ID, SOURCE_B, 1]]),
+    });
+
+    expect(listings.map(l => l.app.id)).toEqual([WEATHER_ID, CALENDAR_ID]);
+    expect(listings[1]!.installs).toBe(0);
+  });
+
+  test('installs from every source offering an app add up to one number', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([
+        [CALENDAR_ID, SOURCE_A, 3],
+        [CALENDAR_ID, SOURCE_B, 4],
+        [WEATHER_ID, SOURCE_B, 5],
+      ]),
+    });
+
+    expect(listings.map(l => l.app.id)).toEqual([CALENDAR_ID, WEATHER_ID]);
+    expect(listings[0]!.installs).toBe(7);
+  });
+
+  test('a count spelled in another case lands on the app it belongs to', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([[WEATHER_ID.toUpperCase(), SOURCE_B, 9]]),
+    });
+
+    expect(listings.find(l => l.app.id === WEATHER_ID)!.installs).toBe(9);
+  });
+
+  test('a count for an app no source offers changes nothing', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([['019e6701-13f8-71b5-ba04-0000000000ff', SOURCE_A, 400]]),
+    });
+
+    expect(listings.map(l => l.app.name)).toEqual(['Calendar', 'Weather']);
+    expect(listings.every(l => l.installs === 0)).toBe(true);
+  });
+
+  test('a nonsense tally is ignored rather than sorted on', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: [
+        { app_id: WEATHER_ID, source_url: SOURCE_B, count: Number.NaN },
+        { app_id: CALENDAR_ID, source_url: SOURCE_A, count: -50 },
+      ],
+    });
+
+    expect(listings.every(l => l.installs === 0)).toBe(true);
+    expect(listings.map(l => l.app.name)).toEqual(['Calendar', 'Weather']);
+  });
+
+  test('equal counts fall back to name, so the order never wobbles between refreshes', () => {
+    const listings = aggregate({
+      orderedCatalogs: orderedCatalogs(),
+      installed: [],
+      deviceLibVersion: 'v0.4.1',
+      installs: counts([
+        [CALENDAR_ID, SOURCE_A, 6],
+        [WEATHER_ID, SOURCE_B, 6],
+      ]),
+    });
+
+    expect(listings.map(l => l.app.name)).toEqual(['Calendar', 'Weather']);
+  });
+
+  test('a caller that knows no counts still gets the alphabetical listing it always had', () => {
+    const listings = aggregate({ orderedCatalogs: orderedCatalogs(), installed: [], deviceLibVersion: 'v0.4.1' });
+
+    expect(listings.map(l => l.app.name)).toEqual(['Calendar', 'Weather']);
+    expect(listings.every(l => l.installs === 0)).toBe(true);
   });
 });

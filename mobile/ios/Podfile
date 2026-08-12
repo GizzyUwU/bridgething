@@ -1,4 +1,3 @@
-# Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
     "react-native/scripts/react_native_pods.rb",
@@ -8,9 +7,6 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, '18.0'
 prepare_react_native_project!
 
-# react-native-permissions handlers — enable per-permission so the app
-# only ships the privacy strings + handler classes it actually uses.
-# Each entry compiles in one of the 'PermissionsIOS*' subspecs.
 require_relative '../node_modules/react-native-permissions/scripts/setup'
 setup_permissions(['LocationWhenInUse'])
 
@@ -25,7 +21,6 @@ target 'bridgething' do
 
   use_react_native!(
     :path => config[:reactNativePath],
-    # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
@@ -37,12 +32,6 @@ target 'bridgething' do
       # :ccache_enabled => true
     )
 
-    # Append `Local.xcconfig` include to the user target's Pods xcconfigs.
-    # Pods xcconfig is set as the base configuration in pbxproj by CocoaPods,
-    # so signing settings sourced from `Local.xcconfig` (DEVELOPMENT_TEAM,
-    # PRODUCT_BUNDLE_IDENTIFIER, CODE_SIGN_STYLE) flow through to the app
-    # target without needing to touch pbxproj. `Local.xcconfig` is gitignored;
-    # `Local.xcconfig.example` is the committed template.
     user_target = 'Pods-bridgething'
     %w[debug release].each do |config_name|
       xcconfig_path = File.join(__dir__, 'Pods/Target Support Files', user_target, "#{user_target}.#{config_name}.xcconfig")

@@ -11,6 +11,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use crate::{
   asset::{AssetCache, AssetCacheEvent, Retention},
   authority::AuthorityRegistry,
+  bluetooth::Address,
   net::{WSError, WireEventBus},
 };
 
@@ -40,11 +41,11 @@ enum PlayerCommand {
   SendState,
   ApplyNowPlaying(libbridgething::NowPlayingUpdate),
   ApplyArtworkId(String),
-  ApplyCompanionQueue(libbridgething::gateway::QueueSnapshot),
-  ApplyCompanionSnapshot(libbridgething::PlayerState),
+  ApplyCompanionQueue(Address, libbridgething::gateway::QueueSnapshot),
+  ApplyCompanionSnapshot(Address, libbridgething::PlayerState),
   ApplyTransportIntent(bool),
   ApplySeekIntent(u32),
-  ResetCompanion,
+  ResetCompanion(Address),
   NoteAuthorityChanged,
   NoteLibraryChanged,
 }
@@ -76,12 +77,20 @@ impl Player {
     self.send(PlayerCommand::ApplyArtworkId(asset_id)).await
   }
 
-  pub async fn apply_companion_queue(&self, snapshot: libbridgething::gateway::QueueSnapshot) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyCompanionQueue(snapshot)).await
+  pub async fn apply_companion_queue(
+    &self,
+    addr: Address,
+    snapshot: libbridgething::gateway::QueueSnapshot,
+  ) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyCompanionQueue(addr, snapshot)).await
   }
 
-  pub async fn apply_companion_snapshot(&self, snapshot: libbridgething::PlayerState) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyCompanionSnapshot(snapshot)).await
+  pub async fn apply_companion_snapshot(
+    &self,
+    addr: Address,
+    snapshot: libbridgething::PlayerState,
+  ) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyCompanionSnapshot(addr, snapshot)).await
   }
 
   pub async fn apply_transport_intent(&self, playing: bool) -> PlayerResult<()> {
@@ -92,8 +101,8 @@ impl Player {
     self.send(PlayerCommand::ApplySeekIntent(position_ms)).await
   }
 
-  pub async fn reset_companion(&self) -> PlayerResult<()> {
-    self.send(PlayerCommand::ResetCompanion).await
+  pub async fn reset_companion(&self, addr: Address) -> PlayerResult<()> {
+    self.send(PlayerCommand::ResetCompanion(addr)).await
   }
 
   pub async fn note_authority_changed(&self) -> PlayerResult<()> {
@@ -214,11 +223,11 @@ async fn run_actor(
           PlayerCommand::SendState => {}
           PlayerCommand::ApplyNowPlaying(update) => state.apply_now_playing(update),
           PlayerCommand::ApplyArtworkId(id) => state.apply_artwork_id(id),
-          PlayerCommand::ApplyCompanionQueue(snapshot) => state.apply_companion_queue(snapshot),
-          PlayerCommand::ApplyCompanionSnapshot(snap) => state.apply_companion_snapshot(snap),
+          PlayerCommand::ApplyCompanionQueue(addr, snapshot) => state.apply_companion_queue(addr, snapshot),
+          PlayerCommand::ApplyCompanionSnapshot(addr, snap) => state.apply_companion_snapshot(addr, snap),
           PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
           PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
-          PlayerCommand::ResetCompanion => state.reset_companion(),
+          PlayerCommand::ResetCompanion(addr) => state.reset_companion(addr),
           PlayerCommand::NoteAuthorityChanged => state.note_authority_changed(),
           PlayerCommand::NoteLibraryChanged => state.note_library_changed(),
         }
@@ -320,7 +329,7 @@ fn forces_broadcast(cmd: &PlayerCommand) -> bool {
     PlayerCommand::SendState
       | PlayerCommand::ApplyTransportIntent(..)
       | PlayerCommand::ApplySeekIntent(..)
-      | PlayerCommand::ResetCompanion
+      | PlayerCommand::ResetCompanion(..)
   )
 }
 
@@ -333,7 +342,7 @@ enum ProcessedKind {
 impl ProcessedKind {
   fn for_command(cmd: &PlayerCommand) -> Self {
     match cmd {
-      PlayerCommand::ApplyCompanionQueue(_) => Self::QueueOnly,
+      PlayerCommand::ApplyCompanionQueue(..) => Self::QueueOnly,
       _ => Self::Full,
     }
   }
@@ -449,6 +458,7 @@ mod tests {
   #[test]
   fn companion_snapshot_rides_the_signature_gate() {
     assert!(!forces_broadcast(&PlayerCommand::ApplyCompanionSnapshot(
+      Address::default(),
       libbridgething::PlayerState::default()
     )));
   }

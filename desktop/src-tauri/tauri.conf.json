@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "bridgething",
+  "identifier": "com.bridgething.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "bridgething",
+        "width": 1024,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 520,
+        "label": "main",
+        "visible": false,
+        "backgroundColor": "#0a0c0e"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://ota.bridgething.com/desktop/stable/{{target}}-{{arch}}.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1ODJGQTFGMjc1RUY0RApSV1JONzNYeW9TOVlEaGZVVjAxcE8rZjJ5NmFvMmtlMEtDTlJoU3l5b1dHdG40N2ltSVVGSElNbgo="
+    }
+  }
+}

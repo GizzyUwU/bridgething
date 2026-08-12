@@ -1,0 +1,182 @@
+{
+  "scenario": [
+    "the link comes up and both sides announce",
+    "a provider attaches and publishes a track the daemon adopts",
+    "every inbound request surface is routed once, in probe order, each driven to its reply"
+  ],
+  "normalized": [
+    "request ids are sequence numbers in first-seen order; a reply carries the number of the request it answers",
+    "commands and events carry no id at all: theirs is a fresh uuid per run and correlates nothing",
+    "payloads are not recorded, so no uuid, clock reading or daemon-side identifier enters the fixture",
+    "within a direction nothing is reordered: every step is driven to its wire effect before the next one starts, and the two concurrent request arms (asset.request, system.otaAssetRange) are awaited on the wire like the inline ones",
+    "the two directions are recorded as two lists rather than one interleaving: a lane is ordered, but nothing orders a frame the daemon composed against one the session composed at the same moment, and the daemon's ancs echo of an announce lands on either side of the connect sequence's time.snapshot depending on how loaded the box is",
+    "system.deviceNicknameChanged is dropped: the daemon's nickname observer broadcasts once when it spawns, to whoever is connected at that instant, so whether the rig's link exists yet is a race between daemon bring-up and the first gateway connection and has nothing to do with the session",
+    "notifications.ancsAuthStateChanged is dropped: the daemon echoes one per capabilities announce, composed on its own task, so its place among the replies the daemon writes at the same moment (the connect-time webapp shelf fetch) is scheduler order, not protocol order"
+  ],
+  "toHost": [
+    {
+      "lane": "normal",
+      "msg": "version",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "webapp.webapps",
+      "meta": "response",
+      "id": "#0"
+    },
+    {
+      "lane": "normal",
+      "msg": "webapp.active",
+      "meta": "response",
+      "id": "#1"
+    }
+  ],
+  "toDevice": [
+    {
+      "lane": "normal",
+      "msg": "capabilities.announce",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "capabilities.announce",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "time.snapshot",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "webapp.list",
+      "meta": "request",
+      "id": "#0"
+    },
+    {
+      "lane": "normal",
+      "msg": "webapp.getActive",
+      "meta": "request",
+      "id": "#1"
+    },
+    {
+      "lane": "normal",
+      "msg": "capabilities.announce",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "authority.claim",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "authority.claim",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "player.snapshot",
+      "meta": "event",
+      "id": "-"
+    },
+    {
+      "lane": "normal",
+      "msg": "asset.notFound",
+      "meta": "response",
+      "id": "#2"
+    },
+    {
+      "lane": "normal",
+      "msg": "system.keepaliveAck",
+      "meta": "response",
+      "id": "#3"
+    },
+    {
+      "lane": "normal",
+      "msg": "system.otaAssetRangeRejected",
+      "meta": "response",
+      "id": "#4"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#5"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#6"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#7"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#8"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#9"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#10"
+    },
+    {
+      "lane": "normal",
+      "msg": "lyrics.lyricsReply",
+      "meta": "response",
+      "id": "#11"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#12"
+    },
+    {
+      "lane": "normal",
+      "msg": "error",
+      "meta": "response",
+      "id": "#13"
+    },
+    {
+      "lane": "normal",
+      "msg": "net.fetchErrorReply",
+      "meta": "response",
+      "id": "#14"
+    },
+    {
+      "lane": "normal",
+      "msg": "net.wsErrorReply",
+      "meta": "response",
+      "id": "#15"
+    },
+    {
+      "lane": "normal",
+      "msg": "tunnel.errorReply",
+      "meta": "response",
+      "id": "#16"
+    }
+  ]
+}

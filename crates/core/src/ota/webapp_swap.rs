@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::staging::{self, StagePaths, StagedPiece};
 use crate::{
   paths::{ON_DEVICE_SENTINEL, is_on_device},
-  state::{HUB_WEBAPP_ID, STOCK_WEBAPP_ID, extract_zip},
+  state::{BROWSER_WEBAPP_ID, HUB_WEBAPP_ID, STOCK_WEBAPP_ID, extract_zip},
 };
 
 const WEBAPPS_DIR: &str = "/opt/bridgething/webapps";
@@ -115,9 +115,30 @@ async fn read_manifest(staging: &Path) -> Result<WebappManifest, SwapError> {
 fn builtin_dir_name(id: Uuid) -> Option<&'static str> {
   if id == HUB_WEBAPP_ID {
     Some("hub")
+  } else if id == BROWSER_WEBAPP_ID {
+    Some("browser")
   } else if id == STOCK_WEBAPP_ID {
     Some("stock")
   } else {
     None
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use bridgething_delivery::webapp::BUILTIN_WEBAPPS;
+
+  use super::*;
+
+  #[test]
+  fn every_builtin_the_poller_offers_has_a_swap_target() {
+    for (slug, id) in BUILTIN_WEBAPPS {
+      assert_eq!(
+        builtin_dir_name(id),
+        Some(slug),
+        "the OTA poller offers '{slug}' but the device has nowhere to swap it"
+      );
+    }
+    assert_eq!(builtin_dir_name(Uuid::nil()), None);
   }
 }

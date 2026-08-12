@@ -4,7 +4,9 @@ use std::{
   time::Duration,
 };
 
+use ::http::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use base64::Engine;
+use bridgething_io::{HttpMethod, WsConnect, WsEvent, WsFrame, WsInbox, WsTransport};
 use librespot_protocol::{
   connect::{
     Capabilities, Cluster, ClusterUpdate, ConnectLoggingParams, Device, DeviceInfo, MemberType, PutStateReason,
@@ -14,21 +16,41 @@ use librespot_protocol::{
   player::ProvidedTrack,
 };
 use protobuf::{Message, MessageField};
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::{
   error::{Error, Result},
   http::{ANDROID_CLIENT_ID, SPCLIENT, SpHttp, random_hex},
-  httpx::{HttpMethod, with_query},
+  httpx::with_query,
   model::LibraryScope,
-  transport::{TungsteniteTransport, WsEvent, WsInbox, WsTransport},
   util::now_ms,
 };
 
 const QUEUE_PROVIDER: &str = "queue";
 const IS_QUEUED: &str = "is_queued";
+
+#[cfg(feature = "native-io")]
+fn default_transport() -> Arc<dyn WsTransport> {
+  Arc::new(bridgething_io::TungsteniteTransport::new())
+}
+
+#[cfg(not(feature = "native-io"))]
+fn default_transport() -> Arc<dyn WsTransport> {
+  struct NoTransport;
+
+  impl WsTransport for NoTransport {
+    fn connect(&self, connect: WsConnect, inbox: Arc<WsInbox>) {
+      inbox.on_closed(connect.id, None, "no websocket transport installed".to_string());
+    }
+
+    fn send(&self, _id: uuid::Uuid, _frame: WsFrame) {}
+
+    fn disconnect(&self, _id: uuid::Uuid, _code: Option<u16>, _reason: Option<String>) {}
+  }
+
+  Arc::new(NoTransport)
+}
 
 #[derive(Clone)]
 pub struct Dealer {
@@ -44,7 +66,7 @@ impl Dealer {
       http,
       device_id,
       name: "bridgething".to_string(),
-      transport: Arc::new(Mutex::new(Arc::new(TungsteniteTransport::new()))),
+      transport: Arc::new(Mutex::new(default_transport())),
     }
   }
 
@@ -79,18 +101,36 @@ impl Dealer {
     let url = format!("wss://{host}/?access_token={bearer}");
     let transport = self.transport.lock().unwrap().clone();
     let (tx, mut rx) = mpsc::unbounded_channel::<WsEvent>();
-    transport.connect(url, Arc::new(WsInbox::new(tx)));
+    let socket = uuid::Uuid::new_v4();
+    transport.connect(
+      WsConnect {
+        id: socket,
+        url,
+        protocols: Vec::new(),
+        headers: Vec::new(),
+      },
+      Arc::new(WsInbox::new(tx)),
+    );
     let connection_id = loop {
       match rx.recv().await {
-        Some(WsEvent::Text(t)) => {
-          let v: Value = serde_json::from_str(t.as_str())?;
+        Some(WsEvent::Frame {
+          frame: WsFrame::Text(t),
+          ..
+        }) => {
+          let v: Value = match serde_json::from_str(t.as_str()) {
+            Ok(v) => v,
+            Err(e) => {
+              transport.disconnect(socket, None, None);
+              return Err(e.into());
+            }
+          };
           if let Some(cid) = v["headers"]["Spotify-Connection-Id"].as_str() {
             tracing::debug!(connection_id = %cid, "dealer: websocket connected");
             break cid.to_string();
           }
         }
-        Some(WsEvent::Open) => {}
-        Some(WsEvent::Closed(reason)) => {
+        Some(WsEvent::Frame { .. }) | Some(WsEvent::Open { .. }) => {}
+        Some(WsEvent::Closed { reason, .. }) => {
           return Err(Error::other(format!("dealer closed before connection-id: {reason}")));
         }
         None => return Err(Error::other("dealer closed before connection-id")),
@@ -107,6 +147,7 @@ impl Dealer {
     Ok((
       DealerStream {
         rx,
+        socket,
         transport,
         ping,
         awaiting_response: false,
@@ -125,9 +166,16 @@ pub enum DealerEvent {
 
 pub struct DealerStream {
   rx: mpsc::UnboundedReceiver<WsEvent>,
+  socket: uuid::Uuid,
   transport: Arc<dyn WsTransport>,
   ping: tokio::time::Interval,
   awaiting_response: bool,
+}
+
+impl Drop for DealerStream {
+  fn drop(&mut self) {
+    self.transport.disconnect(self.socket, None, None);
+  }
 }
 
 impl DealerStream {
@@ -141,7 +189,7 @@ impl DealerStream {
             return Ok(None);
           }
           tracing::debug!("dealer: ping");
-          self.transport.send_text(r#"{"type":"ping"}"#.to_string());
+          self.transport.send(self.socket, WsFrame::Text(r#"{"type":"ping"}"#.to_string()));
           self.awaiting_response = true;
           continue;
         }
@@ -149,9 +197,12 @@ impl DealerStream {
       let Some(event) = event else { return Ok(None) };
       self.awaiting_response = false;
       let text = match event {
-        WsEvent::Text(t) => t,
-        WsEvent::Open => continue,
-        WsEvent::Closed(_) => return Ok(None),
+        WsEvent::Frame {
+          frame: WsFrame::Text(t),
+          ..
+        } => t,
+        WsEvent::Frame { .. } | WsEvent::Open { .. } => continue,
+        WsEvent::Closed { .. } => return Ok(None),
       };
       let msg: Value = match serde_json::from_str(text.as_str()) {
         Ok(v) => v,
@@ -161,13 +212,15 @@ impl DealerStream {
       tracing::trace!(?kind, frame = %text, "dealer: raw frame");
       match kind {
         Some("ping") => {
-          self.transport.send_text(r#"{"type":"pong"}"#.to_string());
+          self
+            .transport
+            .send(self.socket, WsFrame::Text(r#"{"type":"pong"}"#.to_string()));
         }
         Some("pong") => {}
         Some("request") => {
           if let Some(key) = msg["key"].as_str() {
             let reply = json!({"type": "reply", "key": key, "payload": {"success": true}});
-            self.transport.send_text(reply.to_string());
+            self.transport.send(self.socket, WsFrame::Text(reply.to_string()));
           }
         }
         Some("message") => {
@@ -203,9 +256,19 @@ impl DealerStream {
                   }
                 };
                 if let Some(cluster) = upd.cluster.into_option() {
+                  let roster = cluster
+                    .device
+                    .iter()
+                    .map(|(id, d)| format!("{id}={}", d.name))
+                    .collect::<Vec<_>>()
+                    .join(",");
                   tracing::debug!(
                     active_device = %cluster.active_device_id,
+                    %roster,
+                    playing = cluster.player_state.is_playing,
+                    paused = cluster.player_state.is_paused,
                     track = %cluster.player_state.track.uri,
+                    context = %cluster.player_state.context_uri,
                     "dealer: cluster update"
                   );
                   return Ok(Some(DealerEvent::Cluster(cluster)));

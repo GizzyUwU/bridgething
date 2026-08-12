@@ -1,11 +1,26 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "tools/codegen"]
+members = [
+  "crates/*",
+  "crates/delivery/core",
+  "crates/delivery/napi",
+  "crates/delivery/wasm",
+  "tools/codegen",
+  "desktop/src-tauri",
+]
+default-members = [
+  "crates/*",
+  "crates/delivery/core",
+  "crates/delivery/napi",
+  "tools/codegen",
+  "desktop/src-tauri",
+]
+exclude = ["crates/delivery"]
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.94"
-version = "0.8.0"
+version = "0.9.0"
 license = "MIT"
 authors = ["Joey Eamigh"]
 homepage = "https://bridgething.com"
@@ -27,6 +42,7 @@ derive_more = { version = "2.1.1" }
 bluer = { version = "0.17.4" }
 futures = { version = "0.3.32" }
 tokio = { version = "1.52.1" }
+tokio-tungstenite = { version = "0.30.0" }
 tokio-util = { version = "0.7.18" }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }

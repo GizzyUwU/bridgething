@@ -1,0 +1,28 @@
+name = "bridgething-www"
+account_id = "0a665ba1f35a38354b3f623be13f14bd"
+compatibility_date = "2026-05-07"
+main = "worker/index.ts"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "404-page"
+run_worker_first = ["/api/*", "/apps/*"]
+
+[[kv_namespaces]]
+binding = "SOURCES"
+id = "fa32c5307e1448e295e85bc07555f945"
+
+[triggers]
+crons = ["17 */6 * * *"]
+
+[[routes]]
+pattern = "bridgething.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.bridgething.com"
+custom_domain = true
+
+[observability]
+enabled = true

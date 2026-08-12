@@ -2,10 +2,8 @@ use bridgething_macros::BridgeEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -13,7 +11,6 @@ pub struct SetVolume {
   pub level: f32,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -21,30 +18,25 @@ pub struct SetMute {
   pub muted: bool,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct Tts {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub text: String,
   pub voice: Option<String>,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct TtsCancel {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -52,7 +44,6 @@ pub struct Earcon {
   pub name: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

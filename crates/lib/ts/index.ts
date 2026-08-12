@@ -2,8 +2,6 @@ export * from './bindings/shared.js';
 export * from './bindings/stock.js';
 export * from './bindings/wire.js';
 
-export * from './codec.js';
-export * from './framing.js';
 export * from './logger.js';
 export * from './uuid.js';
 
@@ -21,4 +19,4 @@ export const BRIDGETHING_NETWORK_GATEWAY_URL = `ws://${BRIDGETHING_DEFAULT_HOST}
 
 import { version } from './version.js';
 export const LIB_VERSION = `v${version}`;
-export const LIBBRIDGETHING_VERSION = 'v0.8.0';
+export const LIBBRIDGETHING_VERSION = 'v0.9.0';

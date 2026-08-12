@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-function isActive(state: AppStateStatus | null): boolean {
+export function isAppActive(state: AppStateStatus | null): boolean {
   return state !== 'background';
 }
 
 export function useAppActive(): boolean {
-  const [active, setActive] = useState(() => isActive(AppState.currentState));
+  const [active, setActive] = useState(() =>
+    isAppActive(AppState.currentState),
+  );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', next =>
-      setActive(isActive(next)),
+      setActive(isAppActive(next)),
     );
     return () => sub.remove();
   }, []);

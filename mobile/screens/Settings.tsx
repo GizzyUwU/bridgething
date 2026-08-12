@@ -1,507 +1,135 @@
-import {
-  type BridgethingCapabilityFlags,
-  type BridgethingDeviceMeta,
-  type BridgethingOtaPollConfig,
-  type BridgethingProviderInfo,
-  type BridgethingSessionPeer,
-  type BridgethingVoiceModelState,
-} from '@bridgething/session-react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  Activity,
-  BatteryCharging,
-  Bell,
-  Bluetooth,
-  Cable,
-  ChevronDown,
-  ChevronRight,
-  Code,
-  Globe,
-  LifeBuoy,
-  LogIn,
-  LogOut,
-  MapPin,
-  MessageCircle,
-  Mic,
-  MoonStar,
-  MoreHorizontal,
-  Pencil,
-  Phone,
-  Play,
-  Plus,
-  RadioTower,
-  RefreshCw,
-  Speaker,
-  TerminalSquare,
-  UserRound,
-  Wifi,
-} from 'lucide-react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  AppState,
-  Linking,
-  Platform,
-  Switch,
-  Text,
-  ToastAndroid,
-  View,
-} from 'react-native';
-import {
-  check,
-  request,
-  PERMISSIONS,
-  RESULTS,
-  type PermissionStatus,
-} from 'react-native-permissions';
+import { describeError } from '@bridgething/ui/errors';
+import { useState } from 'react';
+import { Linking, Platform, View } from 'react-native';
 
-import { ActionMenu, type MenuAction } from '../components/ActionMenu';
-import { Button } from '../components/Button';
+import { AccountsSection } from '../components/accounts/AccountsSection';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
-import { OtaCard } from '../components/OtaCard';
-import { PendingAuth } from '../components/PendingAuth';
-import { Pill } from '../components/Pill';
-import { Press } from '../components/Press';
-import { RenameSheet } from '../components/RenameSheet';
+import { Note } from '../components/Note';
+import { AncsRows } from '../components/permissions/AncsRows';
+import { BackgroundLocationRow } from '../components/permissions/BackgroundLocationRow';
+import { BatteryExemptionRow } from '../components/permissions/BatteryExemptionRow';
+import { CapabilityRow } from '../components/permissions/CapabilityRow';
+import { DefaultDialerRow } from '../components/permissions/DefaultDialerRow';
+import { LocationRow } from '../components/permissions/LocationRow';
+import { NotificationAccessRow } from '../components/permissions/NotificationAccessRow';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ScrollScreen } from '../components/ScrollScreen';
-import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
-import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
-import { installLatestOta, useOta } from '../lib/ota';
+import { SectionHeader } from '../components/SectionHeader';
+import { VoiceSection } from '../components/VoiceSection';
 import {
-  connectedPeers,
-  forgetKnownDevice,
-  getSession,
-  type KnownDevice,
-  knownDevices,
-  peerDisplayName,
-  presentPairWithGuidance,
-  setDeviceName,
-  updateCapabilityFlags,
-  updateOtaPollConfig,
-  useSession,
-} from '../lib/session';
-import { relativeTime } from '../lib/utils';
-import { DEFAULT_OTA_POLL_CONFIG } from '../lib/storage';
-import type { RootStackParamList } from '../navigation';
+  CAPABILITIES,
+  type CapabilityGroup,
+  type CapabilityKey,
+} from '../lib/capabilities';
+import { updateCapabilityFlags, useSession } from '../lib/session';
+import type { SettingsScreenProps } from '../navigation';
 
 const REPO_URL = 'https://github.com/JoeyEamigh/bridgething';
 const DISCORD_URL = 'https://tl.mt/d';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
+type Props = SettingsScreenProps<'Settings'>;
+type Failure = { group: CapabilityGroup; text: string };
 
 export function SettingsScreen({ navigation }: Props) {
-  const session = getSession();
-
-  const providers = useSession(s => s.providers);
-  const priority = useSession(s => s.providerPriority);
-  const libraryProvider = useSession(s => s.libraryProvider);
-  const peers = useSession(s => s.peers);
   const flags = useSession(s => s.capabilityFlags);
-  const pollConfig = useSession(s => s.otaPollConfig);
-  const ledger = useSession(s => s.ledger);
-  const metaByDevice = useSession(s => s.deviceMeta);
   const host = useSession(s => s.hostInfo);
-  const otaAvailable = useOta(s => s.available);
+  const [failure, setFailure] = useState<Failure | null>(null);
 
-  const livePeers = connectedPeers(peers);
-  const known = knownDevices(ledger, peers);
+  const android = Platform.OS === 'android';
 
-  const [signOutBusy, setSignOutBusy] = useState(false);
-  const [pollBusy, setPollBusy] = useState(false);
-  const [signInBusy, setSignInBusy] = useState<string | null>(null);
-  const lastSignInId = useRef<string | null>(null);
-  const [addDeviceBusy, setAddDeviceBusy] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  const addDevice = async () => {
-    if (addDeviceBusy) return;
-    setAddDeviceBusy(true);
-    try {
-      await presentPairWithGuidance();
-    } catch (err) {
-      Alert.alert(
-        'pair failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setAddDeviceBusy(false);
-    }
-  };
-
-  const writeFlags = async (next: BridgethingCapabilityFlags) => {
-    try {
-      await updateCapabilityFlags(next);
-    } catch (err) {
-      Alert.alert(
-        'save failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  };
-
-  const writePollConfig = async (
-    partial: Partial<BridgethingOtaPollConfig>,
-  ) => {
-    const next: BridgethingOtaPollConfig = {
-      intervalSeconds:
-        partial.intervalSeconds ??
-        pollConfig?.intervalSeconds ??
-        DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
-      autoPush:
-        partial.autoPush ??
-        pollConfig?.autoPush ??
-        DEFAULT_OTA_POLL_CONFIG.autoPush,
-      rootUrl: partial.rootUrl ?? pollConfig?.rootUrl,
-    };
-    await updateOtaPollConfig(next);
-  };
-
-  const checkForUpdate = async () => {
-    setPollBusy(true);
-    try {
-      await session.checkForOtaUpdate(null);
-    } finally {
-      setPollBusy(false);
-    }
-  };
-
-  const installLatest = async (deviceId: string) => {
-    try {
-      await installLatestOta(deviceId, deviceChannel(deviceId));
-    } catch (err) {
-      Alert.alert(
-        'install failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  };
-
-  const deviceChannel = (deviceId: string) =>
-    metaByDevice[deviceId]?.channel || 'stable';
-
-  const signIn = async (id: string) => {
-    if (signInBusy) return;
-    lastSignInId.current = id;
-    setSignInBusy(id);
-    try {
-      await session.connectProvider(id);
-    } catch {
-      // failures surface via the provider's authState
-    } finally {
-      setSignInBusy(null);
-    }
-  };
-
-  const cancelAuth = (id: string) => {
-    void session.cancelAuth(id);
-    setSignInBusy(null);
-  };
-
-  const signOut = async (p: BridgethingProviderInfo) => {
-    Alert.alert(
-      'sign out?',
-      `${p.displayName} will be signed out on this phone.`,
-      [
-        { text: 'cancel', style: 'cancel' },
-        {
-          text: 'sign out',
-          style: 'destructive',
-          onPress: async () => {
-            setSignOutBusy(true);
-            try {
-              await session.disconnectProvider(p.id);
-            } catch (err) {
-              Alert.alert(
-                'sign-out failed',
-                err instanceof Error ? err.message : String(err),
-              );
-            } finally {
-              setSignOutBusy(false);
-            }
-          },
-        },
-      ],
+  const setFlag = (key: CapabilityKey) => (value: boolean) => {
+    setFailure(null);
+    void updateCapabilityFlags({ ...flags, [key]: value }).catch(
+      (err: unknown) =>
+        setFailure({
+          group: CAPABILITIES[key].group,
+          text: describeError(err),
+        }),
     );
-  };
-
-  const promote = async (id: string) => {
-    const rest = providers.map(p => p.id).filter(x => x !== id);
-    await session.setProviderPriority([id, ...rest]);
   };
 
   return (
     <ScrollScreen>
-      <ScreenHeader title="settings" />
-      <ServiceHealthBanner />
+      <ScreenHeader
+        title="settings"
+        subtitle="dials and knobs to turn and tweak"
+      />
 
-      <View className="mb-7">
-        <SectionHeader title="accounts" />
-        <ListGroup>
-          {providers
-            .filter(p => p.available)
-            .map(p =>
-              p.connected ? (
-                <ListRow
-                  key={p.id}
-                  icon={UserRound}
-                  iconTint="primary"
-                  title={p.displayName}
-                  subtitle={
-                    libraryProvider === p.id
-                      ? 'signed in · browsing'
-                      : 'signed in'
-                  }
-                  trailing={
-                    priority[0] === p.id ? (
-                      <Pill tone="success" dot={false}>
-                        preferred
-                      </Pill>
-                    ) : null
-                  }
-                  onPress={() => promote(p.id)}
-                />
-              ) : (
-                <ListRow
-                  key={p.id}
-                  icon={LogIn}
-                  iconTint="primary"
-                  title={`sign in to ${p.displayName}`}
-                  chevron
-                  onPress={() => signIn(p.id)}
-                  loading={signInBusy === p.id}
-                />
-              ),
-            )}
-          {providers
-            .filter(p => p.connected)
-            .map(p => (
-              <ListRow
-                key={`out-${p.id}`}
-                icon={LogOut}
-                iconTint="destructive"
-                title={
-                  signOutBusy ? 'signing out…' : `sign out of ${p.displayName}`
-                }
-                destructive
-                onPress={() => signOut(p)}
-                loading={signOutBusy}
-              />
-            ))}
-        </ListGroup>
-        {providers.length > 1 ? (
-          <Text className="mt-2 px-4 text-[12px] leading-[17px] text-muted-foreground">
-            whatever you play takes over the now-playing card on its own. tap a
-            signed-in account to prefer it for browsing and when nothing is
-            playing.
-          </Text>
-        ) : null}
-        {providers
-          .filter(
-            p =>
-              p.authState.kind === 'pending' || p.authState.kind === 'failed',
-          )
-          .map(p => (
-            <View className="mt-3" key={`auth-${p.id}`}>
-              <PendingAuth
-                state={p.authState}
-                onCancel={
-                  p.authState.kind === 'pending'
-                    ? () => cancelAuth(p.id)
-                    : undefined
-                }
-                onRetry={
-                  p.authState.kind === 'failed' && signInBusy === null
-                    ? () => signIn(p.id)
-                    : undefined
-                }
-              />
-            </View>
-          ))}
-      </View>
+      <AccountsSection />
 
-      <View className="mb-7">
-        <SectionHeader title="devices" />
-        {known.length === 0 ? (
-          <SectionEmpty>connect a Car Thing to see its details</SectionEmpty>
-        ) : (
-          <ListGroup>
-            {known.map(device => (
-              <React.Fragment key={device.id}>
-                <DeviceRow device={device} meta={metaByDevice[device.id]} />
-                <AutoResumeRow deviceId={device.id} />
-              </React.Fragment>
-            ))}
-          </ListGroup>
-        )}
-        <View className="mt-3">
-          <Button
-            onPress={addDevice}
-            loading={addDeviceBusy}
-            icon={Plus}
-            variant="tonal"
-            size="md"
-          >
-            add device
-          </Button>
-        </View>
-      </View>
-
-      <View className="mb-7">
+      <View className="mb-8">
         <SectionHeader
-          title="updates"
-          hint="applies to every connected Car Thing"
+          title="connections"
+          hint="what this phone has to allow for your car thing."
         />
-        <View className="rounded-2xl border border-border bg-surface p-4">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-3">
-              <Text className="text-[14px] font-semibold text-foreground">
-                install updates automatically
-              </Text>
-              <Text className="mt-0.5 text-[12px] text-muted-foreground">
-                flip off if you want to confirm each one
-              </Text>
-            </View>
-            <Switch
-              value={pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush}
-              onValueChange={autoPush => writePollConfig({ autoPush })}
+        <ListGroup>
+          {android ? (
+            <NotificationAccessRow
+              value={flags.notifications}
+              onChange={setFlag('notifications')}
             />
-          </View>
-        </View>
-
-        <View className="mt-3">
-          <Button
-            onPress={checkForUpdate}
-            loading={pollBusy}
-            variant="tonal"
-            icon={RefreshCw}
-          >
-            check for updates now
-          </Button>
-        </View>
-
-        {livePeers.map(peer => (
-          <OtaCard
-            key={peer.id}
-            name={peerDisplayName(peer, ledger)}
-            deviceId={peer.id}
-            available={otaAvailable[peer.id]}
-            onInstall={() => installLatest(peer.id)}
-            onPickVersion={() =>
-              navigation.navigate('OtaVersions', {
-                deviceId: peer.id,
-                channel: deviceChannel(peer.id),
-              })
-            }
-          />
-        ))}
-      </View>
-
-      <View className="mb-7">
-        <Press
-          onPress={() => setAdvancedOpen(v => !v)}
-          scaleTo={0.99}
-          fade={false}
-          className="mb-2 flex-row items-center gap-2 px-2 py-1"
-        >
-          {advancedOpen ? (
-            <ChevronDown size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
           ) : (
-            <ChevronRight
-              size={16}
-              color="hsl(215 14% 50%)"
-              strokeWidth={2.4}
+            <CapabilityRow
+              capability="notifications"
+              value={flags.notifications}
+              onChange={setFlag('notifications')}
             />
           )}
-          <Text className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-            advanced
-          </Text>
-        </Press>
-        <View style={{ display: advancedOpen ? 'flex' : 'none' }}>
-          <Text className="mb-2 px-2 text-[12px] leading-[18px] text-muted-foreground">
-            capabilities your phone offers to webapps on the Car Thing. most
-            users should leave these alone.
-          </Text>
-          <ListGroup>
-            <GeoFlagRow
-              value={flags.geo}
-              onChange={geo => writeFlags({ ...flags, geo })}
-            />
-            {Platform.OS === 'android' && flags.geo ? (
-              <BackgroundLocationRow />
-            ) : null}
-            {Platform.OS === 'ios' ? (
-              <FlagRow
-                icon={Bell}
-                iconTint={flags.notifications ? 'primary' : 'default'}
-                title="iPhone notifications"
-                subtitle="forward iPhone notifications to the Car Thing"
-                value={flags.notifications}
-                onChange={notifications =>
-                  writeFlags({ ...flags, notifications })
-                }
-              />
-            ) : null}
-            {Platform.OS === 'ios' ? <AncsPairingRows /> : null}
-            {Platform.OS === 'android' ? (
-              <NotificationListenerRow
-                value={flags.notifications}
-                onChange={notifications =>
-                  writeFlags({ ...flags, notifications })
-                }
-              />
-            ) : null}
-            {Platform.OS === 'android' ? <DefaultDialerRow /> : null}
-            {Platform.OS === 'android' ? <BatteryOptimizationRow /> : null}
-            <FlagRow
-              icon={Globe}
-              iconTint={flags.netFetch ? 'primary' : 'default'}
-              title="HTTP proxy"
-              subtitle="phone-relayed HTTP for webapps"
-              value={flags.netFetch}
-              onChange={netFetch => writeFlags({ ...flags, netFetch })}
-            />
-            <FlagRow
-              icon={Wifi}
-              iconTint={flags.netWs ? 'primary' : 'default'}
-              title="WebSocket proxy"
-              subtitle="phone-relayed websockets for webapps"
-              value={flags.netWs}
-              onChange={netWs => writeFlags({ ...flags, netWs })}
-            />
-            <FlagRow
-              icon={Speaker}
-              iconTint={flags.audioTts ? 'primary' : 'default'}
-              title="phone speaker"
-              subtitle="let the Car Thing play sound through this phone"
-              value={flags.audioTts}
-              onChange={audioTts => writeFlags({ ...flags, audioTts })}
-            />
-            <VoiceModelRow
-              value={flags.voiceModel}
-              onChange={voiceModel => writeFlags({ ...flags, voiceModel })}
-            />
-          </ListGroup>
-        </View>
+          {android ? null : <AncsRows />}
+          {android ? (
+            <BackgroundLocationRow locationShared={flags.geo} />
+          ) : null}
+          {android ? <DefaultDialerRow /> : null}
+          {android ? <BatteryExemptionRow /> : null}
+        </ListGroup>
+        <GroupNote failure={failure} group="connections" />
       </View>
 
-      <View className="mb-7">
+      <View className="mb-8">
+        <SectionHeader
+          title="app access"
+          hint="what your phone lends the apps on your car thing."
+        />
+        <ListGroup>
+          <LocationRow value={flags.geo} onChange={setFlag('geo')} />
+          <CapabilityRow
+            capability="netFetch"
+            value={flags.netFetch}
+            onChange={setFlag('netFetch')}
+          />
+          <CapabilityRow
+            capability="netWs"
+            value={flags.netWs}
+            onChange={setFlag('netWs')}
+          />
+          <CapabilityRow
+            capability="audioTts"
+            value={flags.audioTts}
+            onChange={setFlag('audioTts')}
+          />
+        </ListGroup>
+        <GroupNote failure={failure} group="sharing" />
+      </View>
+
+      <VoiceSection />
+
+      <View className="mb-8">
         <SectionHeader title="diagnostics" />
         <ListGroup>
           <ListRow
-            icon={Activity}
-            iconTint="primary"
+            icon="Activity"
+            iconTint="accent"
             title="debug inspector"
-            subtitle="now-playing merge, wire frames, companion state"
+            subtitle="internal state, useful for filing a bug"
             chevron
             onPress={() => navigation.navigate('Debug')}
           />
           <ListRow
-            icon={TerminalSquare}
-            iconTint="primary"
-            title="live log stream"
-            subtitle="device logs over Bluetooth (slows connection while active)"
+            icon="TerminalSquare"
+            iconTint="accent"
+            title="logs"
+            subtitle="stream device or phone logs"
             chevron
             onPress={() => navigation.navigate('Logs')}
           />
@@ -512,35 +140,32 @@ export function SettingsScreen({ navigation }: Props) {
         <SectionHeader title="about" />
         <ListGroup>
           <ListRow
-            icon={LifeBuoy}
-            iconTint="primary"
+            icon="LifeBuoy"
+            iconTint="accent"
             title={`${host?.appName ?? 'bridgething'} companion`}
-            subtitle={
-              host
-                ? `v${host.appVersion} · ${host.osName} ${host.osVersion}`
-                : 'loading…'
-            }
+            subtitle={host ? `${host.osName} ${host.osVersion}` : 'loading…'}
+            value={host ? `v${host.appVersion}` : undefined}
           />
           {host ? (
             <ListRow
-              icon={RadioTower}
-              iconTint="primary"
+              icon="RadioTower"
+              iconTint="accent"
               title="protocol"
-              subtitle={`lib ${host.libVersion} · wire ${host.libbridgethingVersion}`}
+              subtitle={`lib ${host.libVersion} · wire ${host.libbridgethingVersion} · diagnostic detail`}
               value={host.adapterVersion}
             />
           ) : null}
           <ListRow
-            icon={Code}
-            iconTint="primary"
+            icon="Code"
+            iconTint="accent"
             title="source"
             subtitle={REPO_URL.replace('https://', '')}
             chevron
             onPress={() => Linking.openURL(REPO_URL)}
           />
           <ListRow
-            icon={MessageCircle}
-            iconTint="primary"
+            icon="MessageCircle"
+            iconTint="accent"
             title="community discord"
             subtitle="tl.mt/d"
             chevron
@@ -552,717 +177,17 @@ export function SettingsScreen({ navigation }: Props) {
   );
 }
 
-function DeviceRow({
-  device,
-  meta,
+function GroupNote({
+  failure,
+  group,
 }: {
-  device: KnownDevice;
-  meta?: BridgethingDeviceMeta;
+  failure: Failure | null;
+  group: CapabilityGroup;
 }) {
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const connected = device.peer?.status === 'connected';
-  const linkFailed = device.peer?.status === 'linkFailed';
-  const title = device.displayName;
-
-  const menuActions: MenuAction[] = [];
-  if (!connected) {
-    menuActions.push({
-      label: 'forget this device',
-      destructive: true,
-      onPress: () => forgetKnownDevice(device.id),
-    });
-  }
-
-  const submitRename = (value: string | null) => {
-    void setDeviceName(device.id, value).catch((err: unknown) => {
-      Alert.alert(
-        'rename failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    });
-  };
-
-  const serial = meta?.serialNumber ?? device.serialNumber ?? null;
-  const statusText = connected
-    ? meta
-      ? 'connected'
-      : 'reading device info…'
-    : linkFailed
-      ? 'attached, but the link did not open'
-      : device.lastConnectedAt > 0
-        ? `last connected ${relativeTime(device.lastConnectedAt)}`
-        : 'not connected';
-  const subtitle = serial ? `${serial} · ${statusText}` : statusText;
-
+  if (!failure || failure.group !== group) return null;
   return (
-    <>
-      <ActionMenu
-        visible={menuOpen}
-        title={title}
-        actions={menuActions}
-        onClose={() => setMenuOpen(false)}
-      />
-      <RenameSheet
-        visible={renameOpen}
-        title="rename your Car Thing"
-        message="this renames the device and shows on its screen."
-        initialValue={device.nickname ?? ''}
-        placeholder={device.peer?.name ?? device.displayName}
-        onSubmit={submitRename}
-        onClose={() => setRenameOpen(false)}
-      />
-      <ListRow
-        icon={Cable}
-        iconTint={connected ? 'primary' : 'default'}
-        title={title}
-        subtitle={subtitle}
-        value={
-          connected && meta
-            ? `v${meta.daemonVersion}+${meta.imageVersion}`
-            : undefined
-        }
-        trailing={
-          connected ? (
-            <Pencil size={16} color="hsl(215 14% 60%)" strokeWidth={2.4} />
-          ) : (
-            <MoreHorizontal
-              size={18}
-              color="hsl(215 14% 60%)"
-              strokeWidth={2.2}
-            />
-          )
-        }
-        onPress={() => (connected ? setRenameOpen(true) : setMenuOpen(true))}
-      />
-    </>
-  );
-}
-
-function AutoResumeRow({ deviceId }: { deviceId: string }) {
-  const session = getSession();
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const value = await session.isDeviceAutoResumeEnabled(deviceId);
-        if (!cancelled) setEnabled(value);
-      } catch {
-        if (!cancelled) setEnabled(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [session, deviceId]);
-
-  const toggle = (next: boolean) => {
-    setEnabled(next);
-    void session.setDeviceAutoResume(deviceId, next).catch(() => {
-      setEnabled(!next);
-    });
-  };
-
-  return (
-    <ListRow
-      icon={Play}
-      iconTint={enabled ? 'primary' : 'default'}
-      title="resume playback on connect"
-      subtitle="wake your music app and pick up where you left off"
-      trailing={
-        <Switch
-          value={enabled ?? true}
-          onValueChange={toggle}
-          disabled={enabled == null}
-        />
-      }
-    />
-  );
-}
-
-function FlagRow({
-  icon,
-  iconTint = 'default',
-  title,
-  subtitle,
-  value,
-  onChange,
-}: {
-  icon: import('lucide-react-native').LucideIcon;
-  iconTint?: React.ComponentProps<typeof ListRow>['iconTint'];
-  title: string;
-  subtitle?: string;
-  value: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <ListRow
-      icon={icon}
-      iconTint={iconTint}
-      title={title}
-      subtitle={subtitle}
-      trailing={<Switch value={value} onValueChange={onChange} />}
-    />
-  );
-}
-
-function VoiceModelRow({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  const model = useSession(s => s.voiceModel);
-  const status = voiceModelStatusLine(value, model);
-
-  return (
-    <>
-      <FlagRow
-        icon={Mic}
-        iconTint={value ? 'primary' : 'default'}
-        title="voice model"
-        subtitle="downloads ~127 MB over wi-fi so voice understands more than set phrases"
-        value={value}
-        onChange={onChange}
-      />
-      {status ? (
-        <Text className="px-4 pb-3.5 pl-16 text-[12px] leading-[17px] text-muted-foreground">
-          {status}
-        </Text>
-      ) : null}
-    </>
-  );
-}
-
-function voiceModelStatusLine(
-  enabled: boolean,
-  model: BridgethingVoiceModelState,
-): string | null {
-  if (!enabled) return null;
-  switch (model.status) {
-    case 'downloading': {
-      const pct =
-        model.totalBytes > 0
-          ? Math.min(
-              99,
-              Math.floor((model.receivedBytes / model.totalBytes) * 100),
-            )
-          : 0;
-      return `downloading… ${pct}%`;
-    }
-    case 'ready':
-      return `installed${model.version ? ` · ${model.version}` : ''}`;
-    case 'failed':
-      return `download failed: ${model.error ?? 'unknown error'}. turn this off and back on to retry`;
-    case 'absent':
-      return 'not downloaded yet. starts on wi-fi';
-  }
-}
-
-function GeoFlagRow({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  const permission =
-    Platform.OS === 'android'
-      ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
-      : PERMISSIONS.IOS.LOCATION_WHEN_IN_USE;
-
-  const [status, setStatus] = useState<PermissionStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const s = await check(permission);
-      if (!cancelled) setStatus(s);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [permission]);
-
-  const denied = status === RESULTS.DENIED || status === RESULTS.BLOCKED;
-  const granted = status === RESULTS.GRANTED || status === RESULTS.LIMITED;
-  const blocked = status === RESULTS.BLOCKED;
-  const subtitle = blocked
-    ? 'denied at the system level'
-    : 'forward your phone’s location to webapps that ask';
-
-  const handleToggle = async (next: boolean) => {
-    if (!next) {
-      onChange(false);
-      return;
-    }
-    if (granted) {
-      onChange(true);
-      return;
-    }
-    if (blocked) return;
-    setBusy(true);
-    try {
-      const result = await request(permission);
-      setStatus(result);
-      if (result === RESULTS.GRANTED || result === RESULTS.LIMITED) {
-        onChange(true);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <ListRow
-      icon={MapPin}
-      iconTint={
-        denied ? 'destructive' : value && granted ? 'primary' : 'default'
-      }
-      title="location"
-      subtitle={subtitle}
-      onPress={blocked ? () => Linking.openSettings() : undefined}
-      trailing={
-        <Switch
-          value={value && granted}
-          onValueChange={handleToggle}
-          disabled={busy || blocked}
-        />
-      }
-    />
-  );
-}
-
-function BackgroundLocationRow() {
-  const permission = PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
-  const [status, setStatus] = useState<PermissionStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setStatus(await check(permission));
-  }, [permission]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active') refresh();
-    });
-    return () => sub.remove();
-  }, [refresh]);
-
-  const granted = status === RESULTS.GRANTED;
-  const blocked = status === RESULTS.BLOCKED;
-  const subtitle = granted
-    ? 'allowed all the time'
-    : blocked
-      ? 'denied at the system level'
-      : 'forward fixes even when the app is in the background';
-
-  const handleToggle = async (next: boolean) => {
-    if (!next) {
-      Alert.alert(
-        'restart bridgething?',
-        'to revoke location, android needs to kill + restart the app. revoke now?',
-        [
-          { text: 'later', style: 'cancel' },
-          {
-            text: 'revoke + restart',
-            style: 'destructive',
-            onPress: async () => {
-              setBusy(true);
-              try {
-                const session = getSession();
-                const scheduled = await session.revokeRuntimePermissions([
-                  PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION,
-                  PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
-                  PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
-                ]);
-                if (!scheduled) {
-                  Alert.alert(
-                    'revoke in settings',
-                    'this android version needs you to revoke location from system settings. open it?',
-                    [
-                      { text: 'cancel', style: 'cancel' },
-                      {
-                        text: 'open settings',
-                        onPress: () => Linking.openSettings(),
-                      },
-                    ],
-                  );
-                  return;
-                }
-                ToastAndroid.show(
-                  'restarting bridgething…',
-                  ToastAndroid.SHORT,
-                );
-                setTimeout(() => {
-                  session.killApp().catch(() => {});
-                }, 500);
-              } finally {
-                setBusy(false);
-              }
-            },
-          },
-        ],
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await request(permission);
-      setStatus(result);
-      if (result === RESULTS.BLOCKED) {
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            'tap "Allow all the time" in the perms screen',
-            ToastAndroid.LONG,
-          );
-        }
-        Alert.alert(
-          'background location blocked',
-          'android requires "Allow all the time" from the system settings page. open it?',
-          [
-            { text: 'cancel', style: 'cancel' },
-            { text: 'open settings', onPress: () => Linking.openSettings() },
-          ],
-        );
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <ListRow
-      icon={MoonStar}
-      iconTint={blocked ? 'destructive' : granted ? 'primary' : 'default'}
-      title="background location"
-      subtitle={subtitle}
-      onPress={blocked ? () => Linking.openSettings() : undefined}
-      trailing={
-        <Switch value={granted} onValueChange={handleToggle} disabled={busy} />
-      }
-    />
-  );
-}
-
-function AncsPairingRows() {
-  const peers = useSession(s => s.peers);
-  const connected = peers.filter(p => p.status === 'connected');
-
-  if (connected.length === 0) {
-    return (
-      <ListRow
-        icon={Bluetooth}
-        title="notification pairing"
-        subtitle="connect your Car Thing first"
-      />
-    );
-  }
-
-  return (
-    <>
-      {connected.map(peer => (
-        <AncsPairingRow key={peer.id} peer={peer} />
-      ))}
-    </>
-  );
-}
-
-function AncsPairingRow({ peer }: { peer: BridgethingSessionPeer }) {
-  const peerId = peer.id;
-  const status = useSession(s => s.ancsAuthStatus[peerId] ?? 'unknown');
-  const ledger = useSession(s => s.ledger);
-  const [busy, setBusy] = useState(false);
-
-  const subtitle =
-    status === 'authorized'
-      ? 'paired and authorized'
-      : status === 'unauthorized'
-        ? 'paired but not authorized - tap to fix'
-        : 'tap to pair for notifications and volume';
-
-  const run = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const result = await getSession().enableAncsNotifications(peerId);
-      if (result.kind === 'failed') {
-        Alert.alert(
-          'LE pairing failed',
-          result.message ?? 'try again with the Car Thing nearby.',
-        );
-      }
-    } catch (err) {
-      Alert.alert(
-        'LE pairing failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <ListRow
-      icon={Bluetooth}
-      iconTint={status === 'authorized' ? 'primary' : 'default'}
-      title={`notification pairing - ${peerDisplayName(peer, ledger)}`}
-      subtitle={subtitle}
-      onPress={status !== 'authorized' && !busy ? run : undefined}
-    />
-  );
-}
-
-function NotificationListenerRow({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  const session = getSession();
-  const [granted, setGranted] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      setGranted(await session.isNotificationAccessGranted());
-    } catch {
-      setGranted(false);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active') refresh();
-    });
-    return () => sub.remove();
-  }, [refresh]);
-
-  const subtitle = granted
-    ? 'forwarding to the Car Thing'
-    : 'tap to open notification access in Settings';
-
-  const openSettings = async (mode: 'grant' | 'revoke') => {
-    try {
-      await session.requestNotificationAccess();
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(
-          mode === 'grant'
-            ? 'tap bridgething and allow access'
-            : 'tap bridgething and revoke access',
-          ToastAndroid.LONG,
-        );
-      }
-    } catch (err) {
-      Alert.alert(
-        'failed to open settings',
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  };
-
-  const handleToggle = async (next: boolean) => {
-    if (!next) {
-      Alert.alert(
-        'revoke in settings',
-        'android only lets you revoke notification access from system settings. open it?',
-        [
-          { text: 'leave as-is', style: 'cancel' },
-          {
-            text: 'open settings',
-            onPress: () => {
-              onChange(false);
-              openSettings('revoke');
-            },
-          },
-        ],
-      );
-      return;
-    }
-    if (granted) {
-      onChange(true);
-      return;
-    }
-    setBusy(true);
-    try {
-      await openSettings('grant');
-      onChange(true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <ListRow
-      icon={Bell}
-      iconTint={value && granted ? 'primary' : 'default'}
-      title="notification access"
-      subtitle={subtitle}
-      onPress={!granted ? () => openSettings('grant') : undefined}
-      trailing={
-        <Switch
-          value={Boolean(value && granted)}
-          onValueChange={handleToggle}
-          disabled={busy}
-        />
-      }
-    />
-  );
-}
-
-function DefaultDialerRow() {
-  const session = getSession();
-  const [granted, setGranted] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      setGranted(await session.isDefaultDialer());
-    } catch {
-      setGranted(false);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active') refresh();
-    });
-    return () => sub.remove();
-  }, [refresh]);
-
-  const subtitle = granted
-    ? 'mirroring calls to the Car Thing'
-    : 'tap to make bridgething your default phone app';
-
-  const request = async () => {
-    setBusy(true);
-    try {
-      await session.requestDefaultDialer();
-      await refresh();
-    } catch (err) {
-      Alert.alert(
-        'failed to request',
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleToggle = async (next: boolean) => {
-    if (!next) {
-      Alert.alert(
-        'change in settings',
-        'android only lets you change the default phone app from system settings.',
-      );
-      return;
-    }
-    if (!granted) await request();
-  };
-
-  return (
-    <ListRow
-      icon={Phone}
-      iconTint={granted ? 'primary' : 'default'}
-      title="phone calls"
-      subtitle={subtitle}
-      onPress={!granted ? request : undefined}
-      trailing={
-        <Switch
-          value={Boolean(granted)}
-          onValueChange={handleToggle}
-          disabled={busy}
-        />
-      }
-    />
-  );
-}
-
-function BatteryOptimizationRow() {
-  const session = getSession();
-  const [exempt, setExempt] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      setExempt(await session.isIgnoringBatteryOptimizations());
-    } catch {
-      setExempt(false);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active') refresh();
-    });
-    return () => sub.remove();
-  }, [refresh]);
-
-  const subtitle = exempt
-    ? 'background connection is protected from doze'
-    : 'tap to keep the Car Thing connected in the background';
-
-  const request = async () => {
-    setBusy(true);
-    try {
-      await session.requestIgnoreBatteryOptimizations();
-      await refresh();
-    } catch (err) {
-      Alert.alert(
-        'failed to request',
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleToggle = async (next: boolean) => {
-    if (!next) {
-      Alert.alert(
-        'change in settings',
-        'android only lets you re-enable battery optimization from system settings.',
-      );
-      return;
-    }
-    if (!exempt) await request();
-  };
-
-  return (
-    <ListRow
-      icon={BatteryCharging}
-      iconTint={exempt ? 'primary' : 'default'}
-      title="background connection"
-      subtitle={subtitle}
-      onPress={!exempt ? request : undefined}
-      trailing={
-        <Switch
-          value={Boolean(exempt)}
-          onValueChange={handleToggle}
-          disabled={busy}
-        />
-      }
-    />
+    <Note tone="err" className="mt-2">
+      {failure.text}
+    </Note>
   );
 }

@@ -8,30 +8,33 @@ license.workspace = true
 authors.workspace = true
 homepage.workspace = true
 
+[lib]
+name = "bridgething_host_gateway"
+path = "src/lib.rs"
+
 [[bin]]
 name = "host-gateway"
 path = "src/main.rs"
 
 [dependencies]
+bridgething-delivery = { path = "../delivery/core" }
+bridgething-gateway = { path = "../gateway-rs", features = ["native-ws"] }
+bridgething-io = { path = "../io", features = ["native-io"] }
+bridgething-sdk-runtime = { path = "../sdk-runtime" }
 libbridgething = { path = "../lib" }
 
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["codec"] }
-futures = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-flate2 = { workspace = true }
-rmp-serde = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 
-clap = { version = "4.5", features = ["derive"] }
-tokio-tungstenite = "0.29.0"
-sha2 = "0.10"
-hex = "0.4"
-rand = "0.9"
-bytes = "1.11.1"
 anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+rand = "0.9"
 zstd = "0.13.3"
+
+[dev-dependencies]
+bridgething-test-harness = { path = "../test-harness", default-features = false }
+tempfile = "3.27.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

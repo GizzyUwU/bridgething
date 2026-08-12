@@ -1,31 +1,18 @@
-//! Walks `crates/lib/src/` and builds an `Inventory` of wire-protocol
-//! structural pieces across both transports:
-//!
-//! - **Gateway** (Bluetooth, msgpack+gzip): `BridgeToGatewayMsgData` /
-//!   `GatewayToBridgeMsgData`.
-//! - **Client** (local WebSocket, JSON): `BridgeToClientMsgData` /
-//!   `ClientToBridgeMsgData`.
-//!
-//! Discovers top-level enums, inner enums, marker trait impls (inferred
-//! from `#[derive(BridgeEnum)]` per-variant tags + parent ident's
-//! direction prefix, plus standalone `#[derive(WireEvent/...)]` derives
-//! keyed off `#[wire(<Direction>, ...)]`), and typed-request declarations
-//! (`#[derive(WireRequest)]` keyed off `#[wire_request(...)]`).
-//!
-//! The plan layer groups results by `Protocol` and emits per-protocol
-//! per-language helper files.
-
 use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Context, Result};
-use syn::{Attribute, Fields, GenericArgument, Item, ItemEnum, ItemStruct, Meta, PathArguments, Type, Variant};
+use syn::{
+  Attribute, Fields, GenericArgument, Item, ItemEnum, ItemStruct, Meta, PathArguments, Type, Variant,
+  ext::IdentExt,
+  parse::{Parse, ParseStream},
+  punctuated::Punctuated,
+};
 
 pub const BRIDGE_TO_GATEWAY: &str = "BridgeToGatewayMsgData";
 pub const GATEWAY_TO_BRIDGE: &str = "GatewayToBridgeMsgData";
 pub const BRIDGE_TO_CLIENT: &str = "BridgeToClientMsgData";
 pub const CLIENT_TO_BRIDGE: &str = "ClientToBridgeMsgData";
 
-/// Wire-direction tag - one per recognized parent-ident prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
   BridgeToGateway,
@@ -68,9 +55,6 @@ impl Direction {
     }
   }
 
-  /// Opposite direction in the same protocol family. Used for typed
-  /// requests where the response arrives on the opposite-direction
-  /// wire.
   pub fn opposite(self) -> Self {
     match self {
       Self::BridgeToGateway => Self::GatewayToBridge,
@@ -81,57 +65,28 @@ impl Direction {
   }
 }
 
-/// Coarse-grained protocol family. Each protocol owns one pair of
-/// `Direction`s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Protocol {
   Gateway,
   Client,
 }
 
-impl Protocol {
-  pub fn of(direction: Direction) -> Self {
-    match direction {
-      Direction::BridgeToGateway | Direction::GatewayToBridge => Self::Gateway,
-      Direction::BridgeToClient | Direction::ClientToBridge => Self::Client,
-    }
-  }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MarkerKind {
   Event,
   Command,
-  Unicast,
 }
 
 #[derive(Debug, Clone)]
 pub struct WireVariant {
   pub name: String,
-  /// Single-field tuple-variant payload. `None` for unit variants AND
-  /// for struct-shaped variants - the latter are exposed only at the
-  /// parent enum level because per-language type-paths to them differ
-  /// enough that codegen for the inner field set isn't worth the
-  /// surface.
   pub payload: Option<PayloadType>,
-  /// True for `Foo { ... }` named-field variants. Outbound codegen
-  /// skips these because constructing the variant requires per-field
-  /// args and per-language struct shapes that the dispatch layer
-  /// doesn't model.
   pub is_struct: bool,
-  /// Per-variant `#[bridge_*]` tag. Lets codegen pick the right wire
-  /// `meta.kind` per variant inside an inner enum that mixes events
-  /// with commands. `None` for outer wire enums (no per-variant tag).
+  pub boxed: bool,
   pub tag: Option<VariantTag>,
-  /// `///` doc on the variant, joined by newline. ts-rs drops these
-  /// from the generated `.d.ts`, but the docs emitter reads them from
-  /// source here so per-method prose survives.
   pub docs: Option<String>,
 }
 
-/// Per-variant tag inferred from `#[bridge_event]` / `#[bridge_command]`
-/// / `#[bridge_request]` / `#[bridge_response]` attributes on inner
-/// enum variants. Drives per-variant outbound `meta.kind` selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VariantTag {
   Event,
@@ -140,18 +95,11 @@ pub enum VariantTag {
   Response,
 }
 
-/// Semantic categorization of a single-tuple variant payload.
-/// Per-language emitters translate these to their native types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PayloadType {
-  /// Named user type (struct or enum). Carries the bare ident
-  /// (last path segment).
   Named(String),
-  /// `Vec<u8>` - translates to per-language bytes type.
   Bytes,
-  /// `serde_json::Value` - translates to per-language unstructured-json type.
   JsonValue,
-  /// Plain `String`.
   StringScalar,
 }
 
@@ -164,48 +112,17 @@ impl PayloadType {
       Self::StringScalar => "string".to_string(),
     }
   }
-  pub fn kotlin(&self) -> String {
-    match self {
-      Self::Named(n) => n.clone(),
-      Self::Bytes => "ByteArray".to_string(),
-      Self::JsonValue => "Value".to_string(),
-      Self::StringScalar => "String".to_string(),
-    }
-  }
-  pub fn swift(&self) -> String {
-    match self {
-      Self::Named(n) => match n.as_str() {
-        // Disambiguate from Foundation.Notification.
-        "Notification" => "BridgethingSchema.Notification".to_string(),
-        _ => n.clone(),
-      },
-      Self::Bytes => "Data".to_string(),
-      Self::JsonValue => "Value".to_string(),
-      Self::StringScalar => "String".to_string(),
-    }
-  }
 }
 
 #[derive(Debug, Clone)]
 pub struct EnumDef {
   pub name: String,
   pub variants: Vec<WireVariant>,
-  /// Adjacent-tagged discriminator field name (e.g. `"event"` for most
-  /// inner enums, `"encoding"` for `ForwardMessage`, `"type"` for the
-  /// outer wire enums). Defaults to `"type"` if the enum isn't tagged.
   pub tag_field: String,
-  /// Adjacent-tagged content field name (serde `content = "..."`), when
-  /// the enum carries payloads. Lets the docs emitter render an accurate
-  /// TS discriminated union.
   pub content_field: Option<String>,
-  /// `///` doc on the enum container. For a surface's inner enum this
-  /// is the human description of the whole surface.
   pub docs: Option<String>,
 }
 
-/// A named DTO struct (payload, reply, or a `shared/` type) captured so
-/// the docs emitter can expand a method's payload shape field-by-field.
-/// Not consumed by any language emitter - docs only.
 #[derive(Debug, Clone)]
 pub struct StructDef {
   pub docs: Option<String>,
@@ -214,21 +131,13 @@ pub struct StructDef {
 
 #[derive(Debug, Clone)]
 pub struct FieldDef {
-  /// camelCase wire name (matches the JSON/`.d.ts` field).
   pub name: String,
-  /// Rendered TS-facing type string (e.g. `Track[]`, `string`).
   pub ty: String,
-  /// True when the Rust type is `Option<T>` (optional on the wire).
   pub optional: bool,
-  /// Base named type this field references, for cross-linking and
-  /// transitive type collection. `None` for scalars/bytes.
   pub type_ref: Option<String>,
   pub docs: Option<String>,
 }
 
-/// Markers attached to one named type, with the wire direction each
-/// marker applies to. A type may carry multiple markers across multiple
-/// directions (e.g. `ForwardMessage` is `WireEvent<W>` for three wires).
 #[derive(Debug, Clone, Default)]
 pub struct MarkerSet {
   pub entries: Vec<(MarkerKind, Direction)>,
@@ -244,26 +153,15 @@ impl MarkerSet {
 pub struct Inventory {
   pub wire_enums: HashMap<String, EnumDef>,
   pub enums: HashMap<String, EnumDef>,
-  /// Named DTO structs by name. Docs-only; the language emitters lean on
-  /// ts-rs/typeshare for the actual type bindings.
   pub structs: HashMap<String, StructDef>,
   pub markers: HashMap<String, MarkerSet>,
   pub typed_requests: Vec<TypedRequest>,
-  /// camelCase names of every struct field whose Rust type is `Uuid`.
-  /// Per-language codecs use this to bridge the on-wire representation
-  /// (msgpack 16-byte `bin` on the gateway, JSON hyphenated string on
-  /// the local websocket) and the SDK-surface UUID type.
   pub uuid_field_names: BTreeSet<String>,
 }
 
-/// A single typed-request declaration, captured in structured form.
-/// Codegen reads these to emit typed query methods and typed-handle
-/// inbound dispatch in each per-language SDK.
 #[derive(Debug, Clone)]
 pub struct TypedRequest {
   pub request: String,
-  /// Outbound direction: the direction the request enters. Response
-  /// arrives on `direction.opposite()`.
   pub direction: Direction,
   pub surface: String,
   pub request_variant: String,
@@ -342,14 +240,9 @@ fn walk_items(
         } else {
           enums.insert(name.clone(), def);
         }
-        // Standalone marker derives can appear on enums too
-        // (e.g. `ForwardMessage`).
         for (kind, dir) in standalone_markers(&en.attrs) {
           markers.entry(name.clone()).or_default().entries.push((kind, dir));
         }
-        // BridgeEnum-derived enums infer their parent-level marker from
-        // per-variant `#[bridge_*]` tags. Direction comes from the parent
-        // ident prefix.
         if has_derive(&en.attrs, "BridgeEnum")
           && let Some(direction) = Direction::from_parent_ident(&name)
         {
@@ -390,10 +283,6 @@ fn walk_items(
   }
 }
 
-/// Returns the markers declared via standalone derives on this item:
-/// `WireEvent`, `WireCommand`, `WireUnicast`, each paired with one or
-/// more directions read from the `#[wire(<Direction>, ...)]` attribute
-/// on the same item.
 fn standalone_markers(attrs: &[Attribute]) -> Vec<(MarkerKind, Direction)> {
   let mut kinds: Vec<MarkerKind> = Vec::new();
   for attr in attrs {
@@ -405,7 +294,6 @@ fn standalone_markers(attrs: &[Attribute]) -> Vec<(MarkerKind, Direction)> {
         match seg.ident.to_string().as_str() {
           "WireEvent" => kinds.push(MarkerKind::Event),
           "WireCommand" => kinds.push(MarkerKind::Command),
-          "WireUnicast" => kinds.push(MarkerKind::Unicast),
           _ => {}
         }
       }
@@ -461,13 +349,6 @@ fn has_derive(attrs: &[Attribute], name: &str) -> bool {
   false
 }
 
-/// For an enum with `#[derive(BridgeEnum)]`, infer the parent-level
-/// marker traits from the per-variant `#[bridge_*]` tags. A variant
-/// tagged `#[bridge_event]` contributes the Event marker;
-/// `#[bridge_command]` contributes Command. Request and Response tags
-/// don't contribute parent-level markers (typed requests route through
-/// `WireRequest` on the request payload type; responses go through
-/// `respond_to` and don't need a marker).
 fn infer_bridge_enum_markers(variants: &[&Variant]) -> Vec<MarkerKind> {
   let mut has_event = false;
   let mut has_command = false;
@@ -490,18 +371,6 @@ fn infer_bridge_enum_markers(variants: &[&Variant]) -> Vec<MarkerKind> {
   out
 }
 
-/// Parse a `#[wire_request(...)]` attribute off a struct decorated with
-/// `#[derive(WireRequest)]`. Format:
-///
-/// ```text
-/// direction = <Ident>,
-/// surface = <Ident>,
-/// request_variant = <Ident>,
-/// response = <TypePath>,
-/// response_variant = <Ident>,
-/// [error = <TypePath>,
-///  error_variant = <Ident>,]
-/// ```
 fn parse_wire_request_attr(s: &ItemStruct) -> Option<TypedRequest> {
   let attr = s.attrs.iter().find(|a| a.path().is_ident("wire_request"))?;
   let mut direction: Option<Direction> = None;
@@ -562,6 +431,7 @@ fn collect_enum(en: &ItemEnum) -> EnumDef {
       name: v.ident.to_string(),
       payload: variant_single_payload(&v.fields),
       is_struct: matches!(v.fields, Fields::Named(_)),
+      boxed: variant_payload_is_boxed(&v.fields),
       tag: variant_tag(&v.attrs),
       docs: doc_string(&v.attrs),
     })
@@ -583,7 +453,10 @@ fn collect_struct(s: &ItemStruct) -> StructDef {
       .iter()
       .filter_map(|f| {
         let ident = f.ident.as_ref()?;
-        let (ty, optional, type_ref) = render_ts_type(&f.ty);
+        let (ty, optional, type_ref) = match ts_type_override(&f.attrs) {
+          Some(ty) => (ty, false, None),
+          None => render_ts_type(&f.ty),
+        };
         Some(FieldDef {
           name: snake_to_camel(&ident.to_string()),
           ty,
@@ -601,9 +474,42 @@ fn collect_struct(s: &ItemStruct) -> StructDef {
   }
 }
 
-/// Join a Rust item's `///` doc lines (each a `#[doc = "..."]` attribute)
-/// into one string. Strips the single leading space rustdoc inserts,
-/// preserves paragraph breaks, and returns `None` when there is no doc.
+fn ts_type_override(attrs: &[Attribute]) -> Option<String> {
+  for attr in attrs {
+    if !attr.path().is_ident("ts") {
+      continue;
+    }
+    let Ok(args) = attr.parse_args_with(Punctuated::<TsArg, syn::Token![,]>::parse_terminated) else {
+      continue;
+    };
+    if let Some(found) = args.into_iter().find_map(|arg| arg.ts_type) {
+      return Some(found);
+    }
+  }
+  None
+}
+
+struct TsArg {
+  ts_type: Option<String>,
+}
+
+impl Parse for TsArg {
+  fn parse(input: ParseStream) -> syn::Result<Self> {
+    let key = syn::Ident::parse_any(input)?;
+    let mut ts_type = None;
+    if input.peek(syn::Token![=]) {
+      input.parse::<syn::Token![=]>()?;
+      let value: syn::Lit = input.parse()?;
+      if key == "type"
+        && let syn::Lit::Str(s) = value
+      {
+        ts_type = Some(s.value());
+      }
+    }
+    Ok(Self { ts_type })
+  }
+}
+
 fn doc_string(attrs: &[Attribute]) -> Option<String> {
   let mut lines: Vec<String> = Vec::new();
   for attr in attrs {
@@ -627,10 +533,6 @@ fn doc_string(attrs: &[Attribute]) -> Option<String> {
   (!joined.is_empty()).then_some(joined)
 }
 
-/// Render a Rust field type to a TS-facing string plus the base named
-/// type it references (for cross-linking and transitive collection).
-/// Returns `(display, is_optional, type_ref)`. `Option<T>` sets the
-/// optional flag and unwraps to `T`.
 fn render_ts_type(ty: &Type) -> (String, bool, Option<String>) {
   let Type::Path(p) = ty else {
     return (quote::ToTokens::to_token_stream(ty).to_string(), false, None);
@@ -760,9 +662,19 @@ fn variant_single_payload(fields: &Fields) -> Option<PayloadType> {
   }
 }
 
-/// Walk a struct's named fields and add the camelCase form of every
-/// `Uuid`-typed field to `out`. Wrappers like `Option<Uuid>` are
-/// recognized; anything else is skipped.
+fn variant_payload_is_boxed(fields: &Fields) -> bool {
+  let Fields::Unnamed(unnamed) = fields else {
+    return false;
+  };
+  if unnamed.unnamed.len() != 1 {
+    return false;
+  }
+  let Type::Path(p) = &unnamed.unnamed[0].ty else {
+    return false;
+  };
+  p.path.segments.last().is_some_and(|s| s.ident == "Box")
+}
+
 fn collect_uuid_field_names(s: &ItemStruct, out: &mut BTreeSet<String>) {
   let Fields::Named(named) = &s.fields else {
     return;
@@ -838,4 +750,49 @@ fn payload_type(ty: &Type) -> PayloadType {
     return PayloadType::StringScalar;
   }
   PayloadType::Named(name)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn field(source: &str, name: &str) -> FieldDef {
+    let item: ItemStruct = syn::parse_str(source).expect("parse struct");
+    collect_struct(&item)
+      .fields
+      .into_iter()
+      .find(|f| f.name == name)
+      .unwrap_or_else(|| panic!("no field {name}"))
+  }
+
+  #[test]
+  fn ts_type_attribute_wins_over_the_rust_type() {
+    let f = field(
+      r#"struct AssetGot {
+        #[debug(skip)]
+        #[ts(type = "Uint8Array")]
+        pub bytes: Bytes,
+      }"#,
+      "bytes",
+    );
+
+    assert_eq!(f.ty, "Uint8Array", "docs must report the type the ts binding emits");
+    assert_eq!(
+      f.type_ref, None,
+      "an inline ts type is not a named surface type, so it must not be linked as one"
+    );
+  }
+
+  #[test]
+  fn unannotated_named_types_still_link_to_their_definition() {
+    let f = field(
+      r#"struct Holder {
+        pub retention: AssetRetention,
+      }"#,
+      "retention",
+    );
+
+    assert_eq!(f.ty, "AssetRetention");
+    assert_eq!(f.type_ref.as_deref(), Some("AssetRetention"));
+  }
 }

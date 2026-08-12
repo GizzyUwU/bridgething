@@ -19,12 +19,10 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 /// `repeat` is a typed enum (Off/All/One) shared across the player
 /// surface and the iAP2 NowPlaying CSM / MediaSession backends, which
 /// all expose three repeat states.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -39,7 +37,6 @@ pub enum RepeatMode {
 /// from album-level shuffle; companion gateways without that distinction
 /// project to `Songs` when on. Webapps that just need an on/off signal
 /// read `shuffle_on` (None when the underlying mode is unknown).
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -59,7 +56,6 @@ impl ShuffleMode {
 /// The kind of media currently playing. Multi-typed: an item can be
 /// e.g. both `Podcast` and `AudioBook` (rare). Drives webapp UI choices
 /// like skip-15s-vs-skip-track and chapter UI.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -73,7 +69,6 @@ pub enum MediaType {
 /// attribute changes. Every field is optional: producers send partial
 /// updates populating only what changed, and fields left unset keep
 /// their prior value.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +93,6 @@ impl NowPlayingUpdate {
 /// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
 /// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
 /// Webapps treat the value as opaque.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -156,7 +150,6 @@ impl MediaItemUpdate {
 /// `set_elapsed_time_available` is the gate webapps must honor for
 /// scrub UI: when false, scrubbing is unsupported by the foreground
 /// app and the seek button must be disabled.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]

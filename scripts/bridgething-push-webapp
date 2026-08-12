@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Push a bridgething webapp bundle into the user-installed webapps root.
-#
-# Usage:
-#   bridgething-push-webapp <local-path>             # rsync into /var/bridgething/webapps/$(basename <local-path>)/
-#   bridgething-push-webapp <local-path> <name>      # rsync into /var/bridgething/webapps/<name>/
-#
-# Examples:
-#   bridgething-push-webapp ./dist                   # serves /var/bridgething/webapps/dist
-#   bridgething-push-webapp ./build spotify          # serves /var/bridgething/webapps/spotify
-
 set -euo pipefail
 
 if [ $# -lt 1 ]; then

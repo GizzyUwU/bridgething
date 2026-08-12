@@ -6,13 +6,15 @@ on:
     paths:
       - "Cargo.toml"
       - "crates/lib/**"
-      - "packages/gateway/typescript/**"
-      - "packages/adapter-network/**"
+      - "packages/browser/**"
+      - "crates/delivery/wasm/**"
+      - "crates/delivery/napi/**"
       - "packages/updater/**"
       - "packages/client-ts/**"
       - "packages/create-bridgething/**"
       - "scripts/publish-packages.ts"
       - ".github/workflows/publish-packages.yml"
+      - ".github/workflows/publish-core-node.yml"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -29,7 +31,14 @@ permissions:
   id-token: write
 
 jobs:
+  core-node:
+    uses: ./.github/workflows/publish-core-node.yml
+    with:
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    secrets: inherit
+
   publish:
+    needs: core-node
     runs-on: ubuntu-latest
     env:
       # provenance attestations are unsupported from a private repository. flip to true when published
@@ -40,6 +49,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: jetli/wasm-pack-action@v0.4.0
 
       - uses: actions/setup-node@v4
         with:

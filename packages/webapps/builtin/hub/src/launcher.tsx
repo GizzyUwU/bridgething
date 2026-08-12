@@ -106,12 +106,12 @@ export function Launcher({ client }: { client: BridgethingClient }) {
   const grid = tiles === null ? null : gridShape(tiles.length + 1);
 
   const body = error ? (
-    <div className="flex flex-1 items-center justify-center text-red-400">
-      <div>{error}</div>
+    <div className="flex flex-1 items-center justify-center">
+      <div className="border border-err/40 bg-err-soft px-5 py-3 font-mono text-body text-err">{error}</div>
     </div>
   ) : tiles === null || grid === null ? (
-    <div className="flex flex-1 items-center justify-center text-bt-soft-gray">
-      <div className="text-sm">loading apps...</div>
+    <div className="flex flex-1 items-center justify-center text-dim">
+      <div className="font-mono text-body tracking-[0.12em] uppercase">loading apps</div>
     </div>
   ) : (
     <div className={`flex-1 ${grid.fits ? 'flex items-center justify-center' : 'overflow-y-auto'}`}>
@@ -144,9 +144,9 @@ export function Launcher({ client }: { client: BridgethingClient }) {
 
 function Shell({ status, children }: { status?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="relative flex h-full w-full flex-col bg-bt-charcoal px-4 py-3">
-      <div className="mb-2 flex h-9 items-center gap-3">
-        <div className="bt-wordmark text-xs font-medium uppercase tracking-[0.25em] text-bt-soft-gray">apps</div>
+    <div className="relative flex h-full w-full flex-col bg-bg px-4 py-3">
+      <div className="mb-3 flex h-9 items-center gap-3 border-b border-rule pb-2">
+        <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">apps</div>
         {status}
       </div>
       {children}
@@ -176,9 +176,9 @@ function OtaChip({ snapshot, onResume }: { snapshot: OtaSnapshot; onResume: () =
     <button
       type="button"
       onClick={onResume}
-      className="flex items-center gap-2 rounded-full bg-black/30 py-1.5 pr-3.5 pl-3 text-xs transition active:scale-95">
-      <span className={`h-1.5 w-1.5 rounded-full ${error ? 'bg-red-400' : 'animate-pulse bg-bt-blue'}`} />
-      <span className={error ? 'text-red-300' : 'text-bt-soft-gray'}>
+      className="flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-eyebrow tracking-[0.08em] transition active:bg-neutral-soft">
+      <span className={`size-1.5 ${error ? 'bg-err' : 'animate-pulse bg-accent'}`} />
+      <span className={error ? 'text-err' : 'text-soft'}>
         {error ? 'update failed' : progress ? OTA_PHASES[progress.phase].label : null}
       </span>
     </button>
@@ -213,38 +213,40 @@ function isNewRun(prev: OtaProgress, next: OtaProgress): boolean {
 function OtaOverlay({ snapshot, onDismiss }: { snapshot: OtaSnapshot; onDismiss: () => void }) {
   const { progress, error } = snapshot;
   return (
-    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-bt-charcoal/90 backdrop-blur-sm">
+    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-screen">
       {error ? (
         <>
-          <div className="text-base font-medium text-red-300">update failed</div>
-          <div className="max-w-[28rem] text-center text-xs text-bt-soft-gray">
+          <div className="font-mono text-body tracking-[0.2em] text-err uppercase">update failed</div>
+          <div className="max-w-md border border-rule bg-bg px-4 py-3 text-center font-mono text-hint text-soft">
             {error.code}: {error.msg}
           </div>
           <button
             type="button"
             onClick={onDismiss}
-            className="mt-2 rounded-full bg-bt-soft-gray/20 px-4 py-1.5 text-xs text-bt-off-white active:scale-95">
+            className="mt-2 border border-edge px-6 py-2.5 font-mono text-hint text-near active:bg-neutral-soft">
             dismiss
           </button>
         </>
       ) : progress ? (
         <>
-          <div className="text-xs uppercase tracking-[0.25em] text-bt-soft-gray">system update</div>
-          <div className="text-lg font-medium text-bt-off-white">{OTA_PHASES[progress.phase].label}</div>
-          <div className="h-2 w-64 overflow-hidden rounded-full bg-bt-soft-gray/20">
+          <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">system update</div>
+          <div className="font-display text-title font-medium tracking-display text-off-white">
+            {OTA_PHASES[progress.phase].label}
+          </div>
+          <div className="h-1.5 w-72 border border-rule bg-bg">
             <div
-              className="h-full bg-bt-blue transition-[width] duration-200"
+              className="h-full bg-accent transition-[width] duration-200"
               style={{ width: `${Math.min(100, Math.max(0, progress.percent))}%` }}
             />
           </div>
-          <div className="text-xs text-bt-soft-gray">{progress.percent}%</div>
+          <div className="font-mono text-hint tabular-nums text-accent">{progress.percent}%</div>
           <button
             type="button"
             onClick={onDismiss}
-            className="mt-2 rounded-full bg-bt-soft-gray/20 px-4 py-1.5 text-xs text-bt-off-white active:scale-95">
+            className="mt-2 border border-edge px-6 py-2.5 font-mono text-hint text-near active:bg-neutral-soft">
             hide
           </button>
-          <div className="text-[0.6875rem] text-bt-soft-gray/70">installing continues in the background</div>
+          <div className="font-mono text-eyebrow text-dim">installing continues in the background</div>
         </>
       ) : null}
     </div>
@@ -269,13 +271,11 @@ function TileShell({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full flex-col items-center gap-2 rounded-2xl bg-black/30 p-3 transition-transform active:scale-95 disabled:opacity-60">
-      <div
-        className="flex items-center justify-center overflow-hidden rounded-xl"
-        style={{ height: icon, width: icon }}>
+      className="flex w-full flex-col items-center gap-2 border border-rule bg-screen p-3 transition-colors active:border-edge active:bg-neutral-soft disabled:opacity-60">
+      <div className="flex items-center justify-center overflow-hidden" style={{ height: icon, width: icon }}>
         {children}
       </div>
-      <span className="line-clamp-2 h-10 w-full text-center text-sm font-medium leading-5 text-bt-off-white">
+      <span className="line-clamp-2 h-10 w-full text-center text-row font-medium leading-5 text-off-white">
         {label}
       </span>
     </button>
@@ -304,7 +304,7 @@ function Tile({
         <div
           className="flex h-full w-full items-center justify-center"
           style={{ background: fallback.background, color: fallback.foreground }}>
-          <span className="bt-wordmark text-2xl font-medium">{fallback.letter}</span>
+          <span className="font-display text-2xl font-medium tracking-wordmark">{fallback.letter}</span>
         </div>
       )}
     </TileShell>
@@ -314,7 +314,7 @@ function Tile({
 function SettingsTile({ icon, onOpen, disabled }: { icon: number; onOpen: () => void; disabled: boolean }) {
   return (
     <TileShell label="Settings" icon={icon} onClick={onOpen} disabled={disabled}>
-      <div className="flex h-full w-full items-center justify-center bg-white/8 text-bt-soft-gray">
+      <div className="flex h-full w-full items-center justify-center bg-neutral-soft text-soft">
         <GearIcon size={Math.round(icon * 0.45)} />
       </div>
     </TileShell>
@@ -325,18 +325,18 @@ function ActivatingOverlay({ entry }: { entry: TileEntry }) {
   const { info, iconUrl } = entry;
   const fallback = useMemo(() => fallbackStyle(info), [info]);
   return (
-    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-bt-charcoal">
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-screen">
       <div
-        className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl"
+        className="flex h-28 w-28 items-center justify-center overflow-hidden border border-rule"
         style={iconUrl ? undefined : { background: fallback.background, color: fallback.foreground }}>
         {iconUrl ? (
           <img src={iconUrl} alt="" className="h-full w-full object-contain" draggable={false} />
         ) : (
-          <span className="bt-wordmark text-4xl font-medium">{fallback.letter}</span>
+          <span className="font-display text-4xl font-medium tracking-wordmark">{fallback.letter}</span>
         )}
       </div>
-      <div className="text-lg font-medium text-bt-off-white">{info.name}</div>
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-bt-soft-gray/30 border-t-bt-blue" />
+      <div className="font-display text-title font-medium tracking-display text-off-white">{info.name}</div>
+      <div className="size-6 animate-spin border border-rule-strong border-t-accent" />
     </div>
   );
 }
@@ -347,7 +347,7 @@ function fallbackStyle(info: WebappInfo): { letter: string; background: string; 
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   const hue = h % 360;
-  const background = `hsl(${hue}deg 55% 32%)`;
-  const foreground = `hsl(${hue}deg 30% 92%)`;
+  const background = `hsl(${hue}deg 42% 13%)`;
+  const foreground = `hsl(${hue}deg 62% 74%)`;
   return { letter, background, foreground };
 }

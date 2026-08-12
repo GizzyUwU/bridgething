@@ -6,14 +6,6 @@ import android.content.Intent
 import android.os.Bundle
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Process-wide pointer to the currently-resumed [Activity]. Nitro modules
- * read from it when they need to launch an OS picker; CompanionDeviceManager
- * requires `startIntentSenderForResult`, which is an Activity-only API.
- *
- * Also routes `onActivityResult` back to one-shot handlers keyed by request
- * code, since `ReactActivity` doesn't expose pluggable per-request-code dispatch.
- */
 public object BridgethingActivityRegistry {
     private val currentRef = AtomicReference<Activity?>(null)
 
@@ -38,11 +30,6 @@ public object BridgethingActivityRegistry {
         })
     }
 
-    /**
-     * Register a one-shot result handler for [requestCode]. The handler
-     * is removed after firing. Caller is expected to have already
-     * launched the corresponding intent via [currentActivity].
-     */
     public fun expectResult(requestCode: Int, handler: (resultCode: Int, data: Intent?) -> Unit) {
         synchronized(handlers) { handlers[requestCode] = handler }
     }

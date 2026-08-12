@@ -18,7 +18,7 @@ use crate::{
     CachedAsset, Retention, builtin,
     wait::{ASSET_STREAM_TIMEOUT, ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
   },
-  bluetooth::BluetoothMan,
+  bluetooth::{Address, BluetoothMan},
   state::State,
   transfer::sinks::TransferSinks,
 };
@@ -69,7 +69,7 @@ impl AssetHandler {
       .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
         request_id,
         id,
-        bytes: asset.bytes.to_vec(),
+        bytes: asset.bytes,
         mime: asset.mime,
       }))
       .await
@@ -155,6 +155,7 @@ fn non_empty(bytes: Bytes, mime: Option<String>, id: &str) -> Option<(Bytes, Opt
 pub(crate) async fn request_asset_body(
   sinks: &TransferSinks,
   bluetooth: &BluetoothMan,
+  primary: Option<Address>,
   id: &str,
 ) -> Option<(Bytes, Option<String>)> {
   let _permit = ASSET_PULL_GATE.acquire().await;
@@ -164,7 +165,7 @@ pub(crate) async fn request_asset_body(
     id: id.to_string(),
     request_id,
   };
-  match bluetooth.gateway_man.request(None, req).await {
+  match bluetooth.gateway_man.request(primary, req).await {
     Ok(got) => match got.body {
       TransferBody::Inline(bytes) => {
         sinks.unbind(request_id);
@@ -211,10 +212,11 @@ pub(crate) async fn fetch_via_companion(
   let sinks = state.transfer_sinks.clone();
   let bluetooth = bluetooth.clone();
   let id_owned = id.to_string();
+  let primary = state.capabilities.primary_addr();
   state
     .asset_wait
     .fetch_or_wait(id, move || async move {
-      match request_asset_body(&sinks, &bluetooth, &id_owned).await {
+      match request_asset_body(&sinks, &bluetooth, primary, &id_owned).await {
         Some((bytes, mime)) => {
           if let Err(err) = cache
             .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), retention)
@@ -246,12 +248,13 @@ pub(crate) async fn preload_assets(state: State, bluetooth: BluetoothMan, ids: V
     tokio::spawn(async move {
       let cache = state.assets.clone();
       let sinks = state.transfer_sinks.clone();
+      let primary = state.capabilities.primary_addr();
       let id_owned = id.clone();
       let _ = state
         .asset_wait
         .fetch_or_wait(&id, move || async move {
           let _permit = PRELOAD_GATE.acquire().await;
-          match request_asset_body(&sinks, &bluetooth, &id_owned).await {
+          match request_asset_body(&sinks, &bluetooth, primary, &id_owned).await {
             Some((bytes, mime)) => {
               if let Err(err) = cache
                 .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), Retention::DISK_LRU)

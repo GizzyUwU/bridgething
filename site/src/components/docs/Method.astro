@@ -1,0 +1,44 @@
+---
+import type { Method, TypeDoc } from '../../../sdk/types.ts';
+import { methodExample, requestResultCode, resultRefId, signatureHtml } from '../../lib/example.ts';
+import { renderMdInline } from '../../lib/md.ts';
+import Snippet from './Snippet.astro';
+
+export type Props = {
+  surface: string;
+  method: Method;
+  kind: 'events' | 'requests' | 'commands' | 'handlers';
+  types: Record<string, TypeDoc>;
+  known: Set<string>;
+};
+
+const { surface, method: m, kind, types, known } = Astro.props;
+const example = methodExample(surface, m, kind, types);
+const sig = signatureHtml(m, kind, known);
+---
+
+<div class="scroll-mt-24 border-t border-white/10 py-7 first:border-t-0 first:pt-0" id={`m-${m.method}`}>
+  <h3 class="m-0 font-mono text-sm leading-relaxed font-normal" set:html={sig} />
+
+  {
+    m.response_event && (
+      <p class="mt-1 mb-0 text-xs text-white/45">
+        push form: <code class="text-white/70">{m.response_event}</code> (subscribe instead of awaiting)
+      </p>
+    )
+  }
+
+  {m.description && <p class="mt-3 mb-0 text-sm text-white/60" set:html={renderMdInline(m.description)} />}
+
+  <div class="mt-4">
+    <Snippet code={example} />
+  </div>
+
+  {
+    kind === 'requests' && (
+      <div id={`type-${resultRefId(m.method)}`} hidden>
+        <Snippet code={requestResultCode(m)} />
+      </div>
+    )
+  }
+</div>

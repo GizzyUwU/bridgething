@@ -1,0 +1,25 @@
+---
+const now = new Date();
+const rev = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}`;
+---
+
+<footer class="container-site w-full pb-16">
+  <div class="grid grid-cols-2 border border-white/25 font-mono text-sm md:grid-cols-4">
+    <div class="flex flex-col gap-1 border-r border-b border-white/25 p-4 md:border-b-0">
+      <span class="text-xs text-white/40">title</span>
+      <span class="text-white/80">bridgething</span>
+    </div>
+    <div class="flex flex-col gap-1 border-b border-white/25 p-4 md:border-r md:border-b-0">
+      <span class="text-xs text-white/40">rev</span>
+      <span class="text-white/80 tabular-nums">{rev}</span>
+    </div>
+    <div class="flex flex-col gap-1 border-r border-white/25 p-4">
+      <span class="text-xs text-white/40">drawn by</span>
+      <span class="text-white/80">the community</span>
+    </div>
+    <div class="flex flex-col gap-1 p-4">
+      <span class="text-xs text-white/40">notes</span>
+      <span class="text-white/80">not affiliated with spotify</span>
+    </div>
+  </div>
+</footer>

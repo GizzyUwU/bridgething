@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+  collections::BTreeMap,
+  path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -26,7 +29,7 @@ fn bundle() -> Option<PathBuf> {
   std::env::var("BRIDGETHING_NLU_BUNDLE").ok().map(PathBuf::from)
 }
 
-fn fixtures(dir: &PathBuf) -> Vec<Fixture> {
+fn fixtures(dir: &Path) -> Vec<Fixture> {
   std::fs::read_to_string(dir.join("fixtures.jsonl"))
     .expect("fixtures.jsonl in bundle dir")
     .lines()
@@ -41,9 +44,9 @@ fn tokenization_matches_the_training_side() {
     eprintln!("BRIDGETHING_NLU_BUNDLE unset; skipping");
     return;
   };
-  let decoder = nlu::NluDecoder::load(dir.to_string_lossy().into()).expect("bundle loads");
+  let decoder = nlu::NluDecoder::load(&dir).expect("bundle loads");
   for fixture in fixtures(&dir) {
-    let tokens = decoder.tokenize(fixture.utterance.clone()).expect("tokenizes");
+    let tokens = decoder.tokenize(&fixture.utterance).expect("tokenizes");
     assert_eq!(tokens.input_ids, fixture.input_ids, "ids for {:?}", fixture.utterance);
     assert_eq!(
       tokens.attention_mask, fixture.attention_mask,
@@ -69,16 +72,16 @@ fn decode_matches_the_trainers_own_frames() {
     eprintln!("BRIDGETHING_NLU_BUNDLE unset; skipping");
     return;
   };
-  let decoder = nlu::NluDecoder::load(dir.to_string_lossy().into()).expect("bundle loads");
+  let decoder = nlu::NluDecoder::load(&dir).expect("bundle loads");
   for fixture in fixtures(&dir) {
-    let tokens = decoder.tokenize(fixture.utterance.clone()).expect("tokenizes");
+    let tokens = decoder.tokenize(&fixture.utterance).expect("tokenizes");
     let frame = decoder
       .decode(
-        fixture.utterance.clone(),
-        tokens,
-        fixture.intent_logits.clone(),
-        fixture.bio_logits.clone(),
-        fixture.closed_logits.clone(),
+        &fixture.utterance,
+        &tokens,
+        &fixture.intent_logits,
+        &fixture.bio_logits,
+        &fixture.closed_logits,
       )
       .expect("decodes");
     assert_eq!(

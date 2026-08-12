@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+key="${1:?usage: r2-log <key> <json-line>}"
+line="${2:?missing json line}"
+
+: "${R2_BUCKET:?r2-log: R2_BUCKET is required}"
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+rclone cat "r2:${R2_BUCKET}/${key}" >"$tmp" 2>/dev/null || true
+printf '%s\n' "$line" >>"$tmp"
+
+echo "r2-log: $(wc -l <"$tmp" | tr -d ' ') entries  ->  ${key}" >&2
+rclone copyto "$tmp" "r2:${R2_BUCKET}/${key}" \
+  --header-upload "Content-Type: application/x-ndjson" \
+  --header-upload "Cache-Control: no-store"

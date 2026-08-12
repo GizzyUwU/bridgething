@@ -5,9 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -22,7 +20,6 @@ pub enum BrightnessMode {
 /// Backlight state. `level` is the user-set value (only respected in
 /// `Manual`); `effective_level` is what's actually on the panel - equal
 /// to `level` in `Manual`, ALS-derived in `Auto`.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -35,7 +32,6 @@ pub struct BrightnessState {
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
 /// `hardware.state.get` and re-broadcast on any change. `ambient_level`
 /// is the 0-255 ambient light reading.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -44,7 +40,6 @@ pub struct HardwareState {
   pub ambient_level: u8,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

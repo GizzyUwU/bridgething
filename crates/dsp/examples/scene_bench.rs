@@ -1,51 +1,18 @@
-//! Scores the acoustic front end end to end against rendered multichannel scenes.
-//!
-//! ```text
-//! cargo run --release --example scene_bench -- <scene-dir> <phrase-model> [noise-prerolls] [recent-tau] [threshold]
-//! ```
-
 use std::{collections::BTreeMap, env, path::Path};
 
 use bridgething_dsp::{
   beamformer::Design,
+  bench::{Scene, read_scene},
   geometry::CHANNELS,
   highpass::HighPass,
   pipeline::{Beamformer, Config},
   scene,
 };
 use bridgething_wakeword::{WakeWord, features::CHUNK_SAMPLES};
-use serde::Deserialize;
 
 const RATE: f64 = 16_000.0;
 const DEFAULT_THRESHOLD: f32 = 0.35;
 const MARGIN: usize = RATE as usize;
-
-#[derive(Deserialize)]
-struct Scene {
-  audio: String,
-  archetype: String,
-  talker_deg: f64,
-  n_speakers: usize,
-  snr_db: Option<f64>,
-  speech_start: usize,
-  speech_len: usize,
-  #[serde(default)]
-  speech_spans: Vec<[usize; 2]>,
-}
-
-impl Scene {
-  fn has_speech(&self) -> bool {
-    self.speech_len > 0
-  }
-
-  fn spans(&self) -> Vec<(usize, usize)> {
-    if self.speech_spans.is_empty() {
-      vec![(self.speech_start, self.speech_len)]
-    } else {
-      self.speech_spans.iter().map(|span| (span[0], span[1])).collect()
-    }
-  }
-}
 
 #[derive(Default, Clone, Copy)]
 struct Tally {
@@ -75,25 +42,6 @@ impl Tally {
       self.false_alarms as f64 / hours
     }
   }
-}
-
-fn read_scene(path: &Path) -> Option<Vec<i32>> {
-  let mut reader = hound::WavReader::open(path).ok()?;
-  let spec = reader.spec();
-  assert_eq!(spec.channels as usize, CHANNELS, "scene {path:?} is not 4-channel");
-  let samples: Vec<i32> = match spec.sample_format {
-    hound::SampleFormat::Float => reader
-      .samples::<f32>()
-      .filter_map(Result::ok)
-      .map(|s| (s.clamp(-1.0, 1.0) as f64 * i32::MAX as f64) as i32)
-      .collect(),
-    hound::SampleFormat::Int => reader
-      .samples::<i32>()
-      .filter_map(Result::ok)
-      .map(|s| s << (32 - spec.bits_per_sample))
-      .collect(),
-  };
-  Some(samples)
 }
 
 fn channel_average(interleaved: &[i32]) -> Vec<f32> {
@@ -190,25 +138,18 @@ fn run_wakeword(detector: &mut WakeWord, mono: &mut [f32], scene: &Scene) -> (bo
   HighPass::at_array_knee(RATE).process(mono);
   detector.reset().expect("the detector should reset");
 
-  let window = scene
-    .has_speech()
-    .then(|| scene.speech_start.saturating_sub(MARGIN)..scene.speech_start + scene.speech_len + MARGIN);
-  let spoken: Vec<std::ops::Range<usize>> = if scene.has_speech() {
-    scene
-      .spans()
-      .into_iter()
-      .map(|(start, len)| start.saturating_sub(MARGIN)..start + len + MARGIN)
-      .collect()
-  } else {
-    Vec::new()
-  };
+  let spoken: Vec<std::ops::Range<usize>> = scene
+    .spans()
+    .into_iter()
+    .map(|(start, len)| start.saturating_sub(MARGIN)..start + len + MARGIN)
+    .collect();
   let (mut detected, mut false_alarms) = (false, 0usize);
   for (index, chunk) in mono.chunks(CHUNK_SAMPLES).enumerate() {
     let Ok(Some(_)) = detector.push(chunk) else { continue };
     let at = index * CHUNK_SAMPLES;
-    if window.as_ref().is_some_and(|range| range.contains(&at)) {
+    if spoken.iter().any(|range| range.contains(&at)) {
       detected = true;
-    } else if !spoken.iter().any(|range| range.contains(&at)) {
+    } else {
       false_alarms += 1;
     }
   }

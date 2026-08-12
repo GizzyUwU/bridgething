@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use super::{MediaType, RepeatMode, ShuffleMode};
 use crate::to_slug;
@@ -10,7 +9,6 @@ pub const CARTHING_HACKS_LOGO: &str = "/9j/4AAQSkZJRgABAQAAAQABAAD//gATQ3JlYXRlZ
 pub const IMAGE_SIZE: usize = 300;
 pub const THUMBNAIL_SIZE: usize = 96;
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +30,6 @@ pub struct Track {
   pub saved: bool,
 }
 
-#[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -49,7 +46,6 @@ pub enum Image {
   ),
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -72,7 +68,6 @@ impl From<String> for Album {
   }
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -105,7 +100,6 @@ pub struct CurrentlyActiveApplication {
   pub name: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
@@ -182,7 +176,6 @@ pub struct PlaybackQueue {
 /// Three-state playback. `Stopped` is the no-track-loaded resting state;
 /// `Paused` is "track is loaded, position is held"; `Playing` is the
 /// progressing state.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -201,7 +194,6 @@ pub enum PlaybackState {
 /// app refuses absolute-position seeks and webapps must disable the scrub
 /// thumb. `None` means unknown (no signal received yet); webapps treat
 /// unknown as "available" for backward compatibility with older gateways.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -225,7 +217,6 @@ pub struct Playback {
 /// `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
 /// distinguishes "user explicitly set zero" from "feature unsupported by
 /// gateway".
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -249,7 +240,6 @@ impl Default for PlayerOptions {
 /// playlist support honor it for skip-next semantics. A row inside the
 /// context is addressed by playing that row's own uri within it, so there
 /// is no index here.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -261,7 +251,6 @@ pub struct PlayContext {
 /// Where in the queue a `queue({ uri })` should land. `Append` (default)
 /// goes at the end; `Next` is play-next; `Index(n)` is an explicit 0-based slot
 /// in the upcoming list.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -277,7 +266,6 @@ pub enum QueuePosition {
 /// `uri` is required because every queued item must be addressable for
 /// `skipToIndex`. `persistent_id` is the platform-stable id when
 /// available; webapps treat it as opaque.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -303,7 +291,6 @@ fn bool_absent_or_null_is_false<'de, D: serde::Deserializer<'de>>(d: D) -> Resul
 /// What the current track is playing from: the playlist / album / show /
 /// artist context. Webapps render "playing from <name>"; `uri` lets them
 /// drill into it. `name` is `None` until the companion resolves it.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -317,7 +304,6 @@ pub struct PlaybackContext {
 /// provider vocabularies (Spotify Connect, AirPlay, Cast) do not agree in
 /// their long tails, and webapps only pick an icon from this. Anything
 /// unrecognized maps to `Unknown` rather than leaking a provider string.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -338,7 +324,6 @@ pub enum PlaybackTargetKind {
 /// meaningful when `SurfaceAvailability::playback_targets` is set.
 ///
 /// `volume_percent` is `None` when the endpoint does not report volume.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -357,7 +342,6 @@ pub struct PlaybackTarget {
 /// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
 /// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
 /// merges into the cached snapshot.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -376,7 +360,6 @@ pub struct PlayerState {
 /// stream has surfaced. All fields are optional because each one arrives
 /// as a separate attribute fetch on iAP2; the daemon accumulates and the
 /// snapshot reflects whatever's known so far.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -402,7 +385,6 @@ pub struct MediaItem {
   pub chapter_count: Option<u16>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

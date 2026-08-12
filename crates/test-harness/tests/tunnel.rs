@@ -134,7 +134,8 @@ async fn blast(companion: &Gateway, tunnel_id: uuid::Uuid, frames: u64) {
   }
 }
 
-const DAEMON_SEND_WINDOW: usize = 64 * 1024;
+const DAEMON_MIN_SEND_WINDOW: usize = 64 * 1024;
+const DAEMON_MAX_SEND_WINDOW: usize = 256 * 1024;
 const DAEMON_READ_CHUNK: usize = 4 * 1024;
 
 fn spawn_ack_tally(companion: &Gateway) -> Arc<AtomicU64> {
@@ -295,7 +296,7 @@ async fn the_daemon_acks_downstream_bytes_once_they_reach_the_socket() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_unacked_upstream_tunnel_stops_reading_from_the_socks_client() {
+async fn an_upstream_tunnel_stops_reading_once_the_companion_stops_acking() {
   let harness = Harness::start().await.expect("harness start");
   harness
     .activate_webapp_declaring(&["net.proxy"])
@@ -303,26 +304,36 @@ async fn an_unacked_upstream_tunnel_stops_reading_from_the_socks_client() {
     .expect("activate a net.proxy webapp");
   let companion = harness.connect_android().await.expect("connect companion");
 
-  let (socks, tunnel_id) = open_tunnel(&harness, &companion).await;
+  let (mut socks, tunnel_id) = open_tunnel(&harness, &companion).await;
   let forwarded = spawn_upstream_tally(&companion, tunnel_id);
 
-  let offered = DAEMON_SEND_WINDOW * 4;
+  socks
+    .write_all(&vec![0xab; DAEMON_READ_CHUNK])
+    .await
+    .expect("prime the tunnel");
+  assert!(
+    harness
+      .wait_for(|s| s.tunnel_routes.consumed(tunnel_id).is_some_and(|c| c > 0), SETTLE)
+      .await,
+    "the daemon registered the companion's one ack"
+  );
+
+  let offered = DAEMON_MAX_SEND_WINDOW * 4;
   let writer = tokio::spawn(async move {
-    let mut socks = socks;
     let _ = socks.write_all(&vec![0xab; offered]).await;
     socks
   });
 
   assert!(
-    wait_for_at_least(&forwarded, DAEMON_SEND_WINDOW as u64).await,
-    "the daemon forwards up to a full window past the one ack"
+    wait_for_at_least(&forwarded, DAEMON_MIN_SEND_WINDOW as u64).await,
+    "the daemon forwards at least a floor window past the one ack"
   );
   tokio::time::sleep(Duration::from_secs(1)).await;
 
   let seen = forwarded.load(Ordering::Relaxed) as usize;
   assert!(
-    seen <= DAEMON_SEND_WINDOW + 2 * DAEMON_READ_CHUNK,
-    "an unacked tunnel stalls at the window instead of draining {offered} bytes into the link; forwarded {seen}"
+    seen <= DAEMON_MAX_SEND_WINDOW + 2 * DAEMON_READ_CHUNK,
+    "a silent-ack tunnel stalls at the window instead of draining {offered} bytes into the link; forwarded {seen}"
   );
   writer.abort();
 }

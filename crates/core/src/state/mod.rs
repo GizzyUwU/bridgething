@@ -21,6 +21,7 @@ use crate::{
 
 mod audio;
 mod browse_content;
+mod cache;
 mod geo_watchers;
 pub mod log_tap;
 mod lyrics;

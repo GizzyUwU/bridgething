@@ -1,0 +1,1589 @@
+{
+  "version": 1,
+  "component": "FrameStream",
+  "phase": "frozen",
+  "description": "Hand-written frozen answers for stream-level frame decode. Not a copy of any one arm: every case was ruled against the reconcile classes in notes/companion-app/shared-core/plan.md and then assembled from the arm that already implements the ruling. The base is rust-bridge, because resync-past-bad-magic is the ratified decoder (Class D); the corrupt-gzip case comes from the mobile arms, because both Rust decoders wedge there (Class A). An arm conforms when its frame-stream-trace.<impl>.json matches these constants and every step of every case, skipping the fields its unobserved array declares. No arm conforms on every case today; Phase 3 replaces all five with one WireEndec, and that is what has to satisfy this file.",
+  "reconciled": {
+    "resync": "RESYNC, SILENTLY. Class D, ratified: bad magic, an unsupported version and an over-cap length all scan forward for the next 0xdead and keep decoding, and the scan holds back the last magic-length-1 bytes so a magic split across a read is not lost. No error event is emitted, because the seam is a tokio_util Decoder and any Err from decode ends a Framed stream for good, so a decoder that reports a resync as an error cannot also survive it; resyncs are a tracing concern, not a stream event. rust-bridge conforms. rust-gateway clears the whole buffer and errors, destroying every frame already read into it. swift, kotlin and ts throw without consuming, so the accumulator re-reads the same bad header forever and the connection is dead in a different way. Cases: bad-magic-mid-stream-then-valid-frame, leading-garbage-then-valid-frame, magic-straddling-a-read-boundary-in-garbage, bad-magic-with-no-valid-frame-after, unsupported-version-then-valid-frame, length-just-over-the-rust-cap-then-valid-frame, length-two-to-the-sixty-third-then-valid-frame, length-u64-max-then-valid-frame.",
+    "max_payload_bytes": "16777216. Class B, numeric, daemon wins: the daemon caps a declared payload at 16 MiB, the mobile accumulators at 8 MiB, and GatewayEndec has no cap at all. The cap is load-bearing, not cosmetic: without it u64::MAX in the length field overflows the header-plus-payload sum and panics (rust-gateway does exactly that), and 2^63 parks the decoder on a wait that can never be satisfied. Under the ruling an over-cap length is a resync, so a declared 16 MiB + 1 recovers the frame behind it instead of killing the stream. A length between the two caps (12 MiB) is legal and the decoder simply waits for the bytes: terminal incomplete, no event.",
+    "decompress_failure": "RECOVER AND CONTINUE. Class A, both Rust arms are defective. Framing is intact when inflation fails - the body was consumed off the front of the buffer before the gzip reader ran - so the next frame is decodable, and swift, kotlin and ts all decode it. Both Rust decoders return the io error through `?` while the parse state still holds the dead frame header, so every later call compares fresh bytes against the dead frame total_length, returns Ok(None) and never decodes anything again. The state reset must happen before decompression, not after it, and the error must be classified recoverable, which today means splitting decompression out of EndecError::Io - `is_recoverable` currently answers false for it and that answer contradicts this ruling.",
+    "unknown_compression_and_encoding": "COERCE. Class C, adopted default, flagged for review: an unrecognised compression byte reads as none and an unrecognised encoding byte reads as msgpack, per BridgeEndec. Framing never depends on either byte, so the frame is still consumed exactly and the stream stays aligned; a payload that really was in an unknown format then fails typed decode as a recoverable error. The mobile accumulators instead throw without consuming, which stalls the stream on a byte that costs nothing to survive. The alternative worth Joey overruling this with: reject the frame but skip its body, which keeps the stream aligned AND preserves the signal that a peer spoke something we do not understand. Coercion silently misdecodes a future compression scheme; rejection loses the frame either way but says so.",
+    "typed_decode_failure": "RECOVER AND CONTINUE, recoverable true. Every arm already agrees: the body is consumed, the error is reported, the next frame decodes. Covered by zero-length-frame-then-valid-frame and valid-framing-invalid-payload-then-valid-frame.",
+    "recoverable_field": "Class E, API asymmetry, recorded not asserted today. Only the Rust arms have an is_recoverable notion; swift, kotlin and ts report null because their error types carry none, which the differ counts as a divergence and is not one. The values here are the ratified Rust semantics. The asymmetry dissolves in Phase 3 when all five seams become one Rust decoder, at which point every arm can answer and the field becomes assertable.",
+    "compression_and_encoding_fields": "Recorded from the wire, not from rust-bridge. A tokio_util Decoder yields only priority plus the typed message, so both Rust arms declare compression and encoding unobserved and emit null; swift, kotlin and ts read them off the header and agree with each other everywhere. This file records the true header values so it stays a complete description of the stream, and a conforming Rust arm keeps declaring them unobserved rather than growing an item type to satisfy a corpus. The two coerced frames (unknown-compression-byte, unknown-encoding-byte) are recorded as the coerced values none and msgpack, which is what the ruling says the decoder saw.",
+    "auto_gzip_threshold_bytes": "16256, encoder-side, asserted by no case here. Swift and Kotlin auto-gzip a normal-priority payload over 16256 bytes when the caller did not pick a compression; Rust and ts never auto-gzip, so every gzip frame on the wire today came from a phone. Class C, adopted default is to keep the threshold when the unified core takes both encoder paths, because the phone-to-daemon direction carries the OTA and webapp-bundle payloads and that is the link with the bandwidth problem. Flagged rather than settled: it is an encoder question that a decode corpus cannot answer, and the number itself is unexplained by anything in the tree."
+  },
+  "asymmetries": {
+    "recoverable": "rust-only today; see reconciled.recoverable_field",
+    "compression": "not visible through a tokio_util Decoder; see reconciled.compression_and_encoding_fields",
+    "encoding": "not visible through a tokio_util Decoder; see reconciled.compression_and_encoding_fields"
+  },
+  "constants": {
+    "header_len": 16,
+    "magic": 57005,
+    "version": 2,
+    "max_payload_bytes": 16777216,
+    "resyncs_past_bad_magic": true,
+    "rejects_unknown_compression": false,
+    "rejects_unknown_encoding": false,
+    "decodes_typed_payload": true,
+    "auto_gzip_threshold_bytes": 16256
+  },
+  "cases": [
+    {
+      "name": "whole-frame-in-one-read",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-01",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-02",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-03",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-04",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-05",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-06",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-07",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-08",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-09",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-10",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-11",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-12",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-13",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-14",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-15",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "header-split-at-16",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "body-split-at-017",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "body-split-at-074",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "body-split-at-131",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "byte-at-a-time",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 131,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "empty-reads-around-a-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 6,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "only-empty-reads",
+      "steps": [],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 0,
+        "frames": 0,
+        "errors": 0
+      }
+    },
+    {
+      "name": "three-frames-in-one-read",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 463,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 150,
+          "payload_sha256": "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000003",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 463,
+        "frames": 3,
+        "errors": 0
+      }
+    },
+    {
+      "name": "three-frames-split-inside-the-second-header",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 463,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 150,
+          "payload_sha256": "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000003",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 463,
+        "frames": 3,
+        "errors": 0
+      }
+    },
+    {
+      "name": "three-frames-split-inside-the-second-body",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 463,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 150,
+          "payload_sha256": "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000003",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 463,
+        "frames": 3,
+        "errors": 0
+      }
+    },
+    {
+      "name": "two-frames-byte-at-a-time",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 131,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 296,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 297,
+        "frames": 2,
+        "errors": 0
+      }
+    },
+    {
+      "name": "mixed-priority-frames",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 297,
+          "priority": "bulk",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 463,
+          "priority": "background",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 150,
+          "payload_sha256": "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000003",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 580,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 101,
+          "payload_sha256": "efe9d26afeb9b354232b38c28a3fafd67040995268dd4f47a91eb921849b8ca9",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000004",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 580,
+        "frames": 4,
+        "errors": 0
+      }
+    },
+    {
+      "name": "nonzero-reserved-bytes",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "bad-magic-mid-stream-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 305,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 305,
+        "frames": 2,
+        "errors": 0
+      }
+    },
+    {
+      "name": "leading-garbage-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 138,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 138,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "magic-straddling-a-read-boundary-in-garbage",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 136,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 136,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "bad-magic-with-no-valid-frame-after",
+      "steps": [],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 1,
+        "consumed_bytes": 31,
+        "frames": 0,
+        "errors": 0
+      }
+    },
+    {
+      "name": "lone-magic-high-byte-at-end-of-stream",
+      "steps": [],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 1,
+        "consumed_bytes": 0,
+        "frames": 0,
+        "errors": 0
+      }
+    },
+    {
+      "name": "unsupported-version-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 297,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "unknown-compression-byte-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 165,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 297,
+        "frames": 2,
+        "errors": 0
+      }
+    },
+    {
+      "name": "unknown-encoding-byte-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 165,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 297,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 297,
+        "frames": 2,
+        "errors": 0
+      }
+    },
+    {
+      "name": "truncated-final-frame-mid-header",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 9,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "truncated-final-frame-mid-body",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 56,
+        "consumed_bytes": 132,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "truncated-only-frame",
+      "steps": [],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 56,
+        "consumed_bytes": 0,
+        "frames": 0,
+        "errors": 0
+      }
+    },
+    {
+      "name": "zero-length-frame-then-valid-frame",
+      "steps": [
+        {
+          "event": "error",
+          "after_chunk": 0,
+          "consumed_bytes": 16,
+          "priority": null,
+          "compression": null,
+          "encoding": null,
+          "payload_len": null,
+          "payload_sha256": null,
+          "frame_id": null,
+          "error_kind": "typed_decode_failed",
+          "error_stage": "typed",
+          "recoverable": true
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 148,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 148,
+        "frames": 1,
+        "errors": 1
+      }
+    },
+    {
+      "name": "length-above-the-mobile-cap-below-the-rust-cap-then-valid-frame",
+      "steps": [],
+      "terminal": {
+        "state": "incomplete",
+        "buffered_bytes": 156,
+        "consumed_bytes": 0,
+        "frames": 0,
+        "errors": 0
+      }
+    },
+    {
+      "name": "length-just-over-the-rust-cap-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 156,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 156,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "length-two-to-the-sixty-third-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 156,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 156,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "length-u64-max-then-valid-frame",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 156,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 156,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-frame-decompressing-to-16255",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 266,
+          "priority": "normal",
+          "compression": "gzip",
+          "encoding": "msgpack",
+          "payload_len": 16255,
+          "payload_sha256": "89694ba01d93fbcd81beb8b329658ad47a04739b049162737c4b759a9b10a7d3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000010",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 266,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-frame-decompressing-to-16256",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 267,
+          "priority": "normal",
+          "compression": "gzip",
+          "encoding": "msgpack",
+          "payload_len": 16256,
+          "payload_sha256": "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000011",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 267,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-frame-decompressing-to-16257",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 267,
+          "priority": "normal",
+          "compression": "gzip",
+          "encoding": "msgpack",
+          "payload_len": 16257,
+          "payload_sha256": "bd57b9c7b7489fe3ce16f83ab732ad848231a8a987925119653cafa63bc16dca",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000012",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 267,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-frame-split-mid-body",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 1,
+          "consumed_bytes": 267,
+          "priority": "normal",
+          "compression": "gzip",
+          "encoding": "msgpack",
+          "payload_len": 16256,
+          "payload_sha256": "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000011",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 267,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-and-plain-frames-interleaved",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 132,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 399,
+          "priority": "normal",
+          "compression": "gzip",
+          "encoding": "msgpack",
+          "payload_len": 16256,
+          "payload_sha256": "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000011",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 564,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 149,
+          "payload_sha256": "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000002",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 564,
+        "frames": 3,
+        "errors": 0
+      }
+    },
+    {
+      "name": "gzip-frame-with-corrupt-deflate-then-valid-frame",
+      "steps": [
+        {
+          "event": "error",
+          "after_chunk": 0,
+          "consumed_bytes": 267,
+          "priority": null,
+          "compression": null,
+          "encoding": null,
+          "payload_len": null,
+          "payload_sha256": null,
+          "frame_id": null,
+          "error_kind": "decompress_failed",
+          "error_stage": "decompress",
+          "recoverable": true
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 399,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 399,
+        "frames": 1,
+        "errors": 1
+      }
+    },
+    {
+      "name": "large-uncompressed-frame-in-1024-byte-reads",
+      "steps": [
+        {
+          "event": "frame",
+          "after_chunk": 15,
+          "consumed_bytes": 16272,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 16256,
+          "payload_sha256": "c466f40769eb6f3deaf45e732a58a8fff751ab34cc3be2a7bbbac6fe129c1c90",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000013",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 16272,
+        "frames": 1,
+        "errors": 0
+      }
+    },
+    {
+      "name": "valid-framing-invalid-payload-then-valid-frame",
+      "steps": [
+        {
+          "event": "error",
+          "after_chunk": 0,
+          "consumed_bytes": 19,
+          "priority": null,
+          "compression": null,
+          "encoding": null,
+          "payload_len": null,
+          "payload_sha256": null,
+          "frame_id": null,
+          "error_kind": "typed_decode_failed",
+          "error_stage": "typed",
+          "recoverable": true
+        },
+        {
+          "event": "frame",
+          "after_chunk": 0,
+          "consumed_bytes": 151,
+          "priority": "normal",
+          "compression": "none",
+          "encoding": "msgpack",
+          "payload_len": 116,
+          "payload_sha256": "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "frame_id": "0192f2a0-bbb0-7c00-a000-000000000001",
+          "error_kind": null,
+          "error_stage": null,
+          "recoverable": null
+        }
+      ],
+      "terminal": {
+        "state": "ok",
+        "buffered_bytes": 0,
+        "consumed_bytes": 151,
+        "frames": 1,
+        "errors": 1
+      }
+    }
+  ]
+}

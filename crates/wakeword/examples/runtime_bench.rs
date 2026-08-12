@@ -1,9 +1,3 @@
-//! Runs a raw audio stream through the detector and reports detections and cost.
-//!
-//! ```text
-//! cargo run --release --example runtime_bench -- <audio.raw> <models-dir> <phrase-model> [threshold]
-//! ```
-
 use std::{env, path::PathBuf, time::Instant};
 
 use bridgething_wakeword::{

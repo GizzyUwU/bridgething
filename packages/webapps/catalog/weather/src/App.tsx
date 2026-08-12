@@ -1,9 +1,6 @@
 import { BridgethingClient, type NetFetchReply } from '@bridgething/client';
+import { daemonUrl } from '@bridgething/webapp-shared/daemon';
 import { useEffect, useMemo, useState } from 'react';
-
-const wsUrl =
-  import.meta.env.VITE_BRIDGETHING_URL ??
-  (typeof window !== 'undefined' ? `ws://${window.location.host}/` : 'ws://127.0.0.1:8891/');
 
 type Coords = { lat: number; lon: number; label: string };
 
@@ -16,7 +13,7 @@ type Forecast = {
 type Phase = { kind: 'loading' } | { kind: 'ready'; data: Forecast } | { kind: 'error'; message: string };
 
 export default function App() {
-  const client = useMemo(() => new BridgethingClient({ url: wsUrl }), []);
+  const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
 
   useEffect(() => {
@@ -58,7 +55,7 @@ export default function App() {
   }, [client]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-bt-charcoal px-10 py-8 text-bt-off-white">
+    <div className="flex h-full w-full flex-col bg-bg px-10 py-8 text-off-white">
       {phase.kind === 'loading' && <Centered>loading weather...</Centered>}
       {phase.kind === 'error' && <Centered tone="muted">{phase.message}</Centered>}
       {phase.kind === 'ready' && <ForecastView data={phase.data} />}
@@ -74,26 +71,26 @@ function ForecastView({ data }: { data: Forecast }) {
       <div className="flex flex-1 items-center gap-10">
         <div className="text-[7rem] leading-none">{c.icon}</div>
         <div className="flex flex-col gap-1">
-          <div className="bt-wordmark text-7xl font-semibold leading-none">
+          <div className="font-display text-7xl font-medium tracking-wordmark tabular-nums text-off-white">
             {Math.round(current.temp)}
             {unit}
           </div>
-          <div className="text-2xl text-bt-off-white">{c.label}</div>
-          <div className="mt-2 text-sm text-bt-soft-gray">
-            humidity {current.humidity}% &nbsp;•&nbsp; wind {Math.round(current.wind)}
+          <div className="font-mono text-title tracking-[0.06em] text-near lowercase">{c.label}</div>
+          <div className="mt-2 font-mono text-hint tracking-[0.08em] text-dim uppercase">
+            humidity {current.humidity}% &nbsp;/&nbsp; wind {Math.round(current.wind)}
           </div>
         </div>
       </div>
-      <div className="flex gap-3">
+      <div className="flex gap-3 border-t border-rule pt-4">
         {days.slice(0, 5).map(d => {
           const dc = wmo(d.code);
           return (
-            <div key={d.date} className="flex flex-1 flex-col items-center gap-1 rounded-2xl bg-black/30 py-3">
-              <div className="text-xs uppercase tracking-wide text-bt-soft-gray">{weekday(d.date)}</div>
+            <div key={d.date} className="flex flex-1 flex-col items-center gap-1 border border-rule bg-screen py-3">
+              <div className="font-mono text-eyebrow tracking-[0.18em] text-dim uppercase">{weekday(d.date)}</div>
               <div className="text-3xl">{dc.icon}</div>
-              <div className="text-sm">
-                <span className="text-bt-off-white">{Math.round(d.hi)}</span>
-                <span className="text-bt-soft-gray"> / {Math.round(d.lo)}</span>
+              <div className="font-mono text-row tabular-nums">
+                <span className="text-off-white">{Math.round(d.hi)}</span>
+                <span className="text-dim"> / {Math.round(d.lo)}</span>
               </div>
             </div>
           );
@@ -106,8 +103,7 @@ function ForecastView({ data }: { data: Forecast }) {
 function Centered({ children, tone }: { children: React.ReactNode; tone?: 'muted' }) {
   return (
     <div className="flex h-full w-full items-center justify-center">
-      <div
-        className={`max-w-[32rem] text-center text-sm ${tone === 'muted' ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>
+      <div className={`max-w-lg text-center font-mono text-row ${tone === 'muted' ? 'text-near' : 'text-off-white'}`}>
         {children}
       </div>
     </div>

@@ -5,23 +5,21 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dir, '..');
 const doPublish = process.argv.includes('--publish');
 
-type Pkg = { name: string; dir: string; scoped: boolean };
+type Manifest = { name: string; dir: string };
+type Pkg = Manifest & { scoped: boolean };
 
 const PACKAGES: Pkg[] = [
   { name: '@bridgething/lib', dir: 'crates/lib', scoped: true },
-  { name: '@bridgething/gateway', dir: 'packages/gateway/typescript', scoped: true },
-  { name: '@bridgething/adapter-network', dir: 'packages/adapter-network', scoped: true },
+  { name: '@bridgething/browser', dir: 'packages/browser', scoped: true },
   { name: '@bridgething/updater', dir: 'packages/updater', scoped: true },
   { name: '@bridgething/client', dir: 'packages/client-ts', scoped: true },
   // { name: '@bridgething/catalog', dir: 'packages/catalog', scoped: true },
   { name: 'create-bridgething', dir: 'packages/create-bridgething', scoped: false },
 ];
 
-const BOOTSTRAP_PENDING = [
-  '@bridgething/adapter-react-native',
-  '@bridgething/session-react-native',
-  '@bridgething/webapp-shared',
-];
+const VERSION_ONLY: Manifest[] = [{ name: '@bridgething/core-node', dir: 'crates/delivery/napi' }];
+
+const BOOTSTRAP_PENDING = ['@bridgething/session-react-native', '@bridgething/webapp-shared'];
 
 const TEMPLATE_MANIFEST = 'packages/create-bridgething/template/package.json';
 const TEMPLATE_DEP = '@bridgething/client';
@@ -63,7 +61,7 @@ function patchLockfile(version: string): void {
   const full = join(ROOT, 'bun.lock');
   if (!existsSync(full)) return;
   let src = readFileSync(full, 'utf8');
-  for (const p of PACKAGES) {
+  for (const p of [...PACKAGES, ...VERSION_ONLY]) {
     const re = new RegExp(
       `("${reEscape(p.dir)}":\\s*\\{\\s*"name":\\s*"${reEscape(p.name)}",\\s*"version":\\s*")[^"]+(")`,
     );
@@ -114,7 +112,7 @@ console.log(`daemon version: ${version}`);
 console.log(doPublish ? 'mode: PUBLISH (real)\n' : 'mode: dry run (pass --publish to publish for real)\n');
 
 console.log('aligning package versions:');
-for (const p of PACKAGES) {
+for (const p of [...PACKAGES, ...VERSION_ONLY]) {
   const prev = setVersion(`${p.dir}/package.json`, version);
   console.log(`  ${p.name}: ${prev} -> ${version}`);
 }

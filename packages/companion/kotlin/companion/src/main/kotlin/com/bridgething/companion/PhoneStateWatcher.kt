@@ -5,15 +5,41 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.bridgething.schema.CallEndReason
-import com.bridgething.schema.CommunicationsState
-import com.bridgething.schema.PhoneCall
-import com.bridgething.schema.PhoneCallDirection
-import com.bridgething.schema.PhoneCallEnded
-import com.bridgething.schema.PhoneCallService
-import com.bridgething.schema.PhoneCallStatus
-import com.bridgething.schema.PhoneState
 import java.util.UUID
+import uniffi.bridgething_companion.CallEndReason
+import uniffi.bridgething_companion.CommunicationsState
+import uniffi.bridgething_companion.PhoneCall
+import uniffi.bridgething_companion.PhoneCallDirection
+import uniffi.bridgething_companion.PhoneCallEnded
+import uniffi.bridgething_companion.PhoneCallService
+import uniffi.bridgething_companion.PhoneCallStatus
+import uniffi.bridgething_companion.PhoneState
+
+internal fun telephonyCommunications(
+    currentCallCount: UByte,
+    muteStatus: Boolean?,
+    swapAvailable: Boolean,
+    mergeAvailable: Boolean,
+    holdAvailable: Boolean,
+): CommunicationsState = CommunicationsState(
+    signalStrength = null,
+    registrationStatus = null,
+    airplaneMode = null,
+    carrierName = null,
+    cellularSupported = null,
+    telephonyEnabled = true,
+    faceTimeAudioEnabled = null,
+    faceTimeVideoEnabled = null,
+    muteStatus = muteStatus,
+    currentCallCount = currentCallCount,
+    newVoicemailCount = null,
+    initiateCallAvailable = true,
+    endAndAcceptAvailable = null,
+    holdAndAcceptAvailable = null,
+    swapAvailable = swapAvailable,
+    mergeAvailable = mergeAvailable,
+    holdAvailable = holdAvailable,
+)
 
 public object PhoneStateTracker {
     private data class Tracked(
@@ -29,7 +55,7 @@ public object PhoneStateTracker {
     private var current: Tracked? = null
 
     public fun currentState(): PhoneState =
-        PhoneState(activeCalls = current?.let { listOf(toWire(it)) } ?: emptyList())
+        PhoneState(activeCalls = current?.let { listOf(toCore(it)) } ?: emptyList())
 
     internal fun handle(state: String, number: String) {
         if (PhoneBridgeRegistry.service != null) return
@@ -40,17 +66,17 @@ public object PhoneStateTracker {
                     val call = Tracked(
                         id = UUID.randomUUID().toString(),
                         remoteId = number,
-                        direction = PhoneCallDirection.Incoming,
-                        status = PhoneCallStatus.Ringing,
+                        direction = PhoneCallDirection.INCOMING,
+                        status = PhoneCallStatus.RINGING,
                         connectedAtUnixS = null,
                         answered = false,
                     )
                     current = call
                     Log.i(TAG, "incoming ringing ${call.id} (num=${number.isNotEmpty()})")
-                    emit(PhoneOutEvent.CallStarted(toWire(call)))
+                    emit(PhoneOutEvent.CallStarted(toCore(call)))
                 } else if (current?.remoteId.isNullOrEmpty() && number.isNotEmpty()) {
                     current = current?.copy(remoteId = number)
-                    current?.let { emit(PhoneOutEvent.CallUpdated(toWire(it))) }
+                    current?.let { emit(PhoneOutEvent.CallUpdated(toCore(it))) }
                 }
             }
 
@@ -60,23 +86,23 @@ public object PhoneStateTracker {
                     val call = Tracked(
                         id = UUID.randomUUID().toString(),
                         remoteId = "",
-                        direction = PhoneCallDirection.Outgoing,
-                        status = PhoneCallStatus.Active,
+                        direction = PhoneCallDirection.OUTGOING,
+                        status = PhoneCallStatus.ACTIVE,
                         connectedAtUnixS = nowUnixS(),
                         answered = true,
                     )
                     current = call
                     Log.i(TAG, "outgoing active ${call.id}")
-                    emit(PhoneOutEvent.CallStarted(toWire(call)))
-                } else if (existing.status == PhoneCallStatus.Ringing) {
+                    emit(PhoneOutEvent.CallStarted(toCore(call)))
+                } else if (existing.status == PhoneCallStatus.RINGING) {
                     val answered = existing.copy(
-                        status = PhoneCallStatus.Active,
+                        status = PhoneCallStatus.ACTIVE,
                         connectedAtUnixS = nowUnixS(),
                         answered = true,
                     )
                     current = answered
                     Log.i(TAG, "call answered ${answered.id}")
-                    emit(PhoneOutEvent.CallUpdated(toWire(answered)))
+                    emit(PhoneOutEvent.CallUpdated(toCore(answered)))
                 }
             }
 
@@ -84,7 +110,7 @@ public object PhoneStateTracker {
                 val ended = current ?: return
                 current = null
                 Log.i(TAG, "call ended ${ended.id}")
-                val reason = if (!ended.answered && ended.direction == PhoneCallDirection.Incoming) {
+                val reason = if (!ended.answered && ended.direction == PhoneCallDirection.INCOMING) {
                     CallEndReason.Missed
                 } else {
                     CallEndReason.Remote
@@ -95,7 +121,7 @@ public object PhoneStateTracker {
         emitSnapshots()
     }
 
-    private fun toWire(c: Tracked): PhoneCall = PhoneCall(
+    private fun toCore(c: Tracked): PhoneCall = PhoneCall(
         callId = c.id,
         remoteId = c.remoteId,
         displayName = "",
@@ -104,19 +130,17 @@ public object PhoneStateTracker {
         startedAtUnixS = c.connectedAtUnixS?.coerceIn(0L, UInt.MAX_VALUE.toLong())?.toUInt(),
         label = null,
         addressBookId = null,
-        service = PhoneCallService.Telephony,
+        service = PhoneCallService.TELEPHONY,
         isConferenced = null,
         conferenceGroup = null,
     )
 
-    private fun communications(): CommunicationsState = CommunicationsState(
-        muteStatus = null,
+    private fun communications(): CommunicationsState = telephonyCommunications(
         currentCallCount = (if (current != null) 1 else 0).toUByte(),
-        telephonyEnabled = true,
-        initiateCallAvailable = true,
-        holdAvailable = false,
+        muteStatus = null,
         swapAvailable = false,
         mergeAvailable = false,
+        holdAvailable = false,
     )
 
     private fun emitSnapshots() {

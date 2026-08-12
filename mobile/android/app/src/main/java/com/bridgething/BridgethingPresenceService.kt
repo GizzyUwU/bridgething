@@ -4,11 +4,6 @@ import android.companion.AssociationInfo
 import android.companion.CompanionDeviceService
 import androidx.annotation.RequiresApi
 
-/**
- * Bound by the system when an associated Car Thing appears in BT range (API
- * 31+). Wakes the connection foreground service from cold so the link comes
- * back without the user opening the app.
- */
 @RequiresApi(31)
 public class BridgethingPresenceService : CompanionDeviceService() {
     override fun onDeviceAppeared(associationInfo: AssociationInfo) {

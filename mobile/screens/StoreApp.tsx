@@ -1,38 +1,51 @@
-import { sortNewestFirst, type AppVersion } from '@bridgething/catalog';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  Bell,
-  Cable,
-  Globe,
-  LayoutGrid,
-  type LucideIcon,
-  MapPin,
-  Mic,
-  Shield,
-  Speaker,
-  Wifi,
-} from 'lucide-react-native';
+  compareVersions,
+  sortNewestFirst,
+  versionCompatible,
+  type AppVersion,
+} from '@bridgething/catalog';
+import { describeError } from '@bridgething/ui/errors';
 import { useState } from 'react';
-import { Alert, Linking, Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
 import { CatalogIcon } from '../components/CatalogIcon';
+import { ConfirmSheet } from '../components/ConfirmSheet';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
+import { Note } from '../components/Note';
+import { PairNote } from '../components/PairNote';
 import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
+import { Progress } from '../components/Progress';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
-import { installApp, useSourceListings } from '../lib/catalog';
+import { Spinner } from '../components/Spinner';
+import {
+  describeVersionInstall,
+  deviceLibVersion,
+  installApp,
+  useSourceListings,
+} from '../lib/catalog';
 import { useOtaProgress } from '../lib/ota';
-import type { RootStackParamList } from '../navigation';
+import {
+  describePairOutcome,
+  type PairNotice,
+  presentPairWithGuidance,
+  useSession,
+} from '../lib/session';
+import { TEXT } from '../lib/theme';
+import { formatBytes } from '../lib/utils';
+import { humanizePermission } from '../lib/webapp-permissions';
+import type { StoreScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'StoreApp'>;
+type Props = StoreScreenProps<'StoreApp'>;
 
-export function StoreAppScreen({ route }: Props) {
+export function StoreAppScreen({ navigation, route }: Props) {
   const { deviceId, appId, sourceUrl } = route.params;
   const listings = useSourceListings(sourceUrl, deviceId);
   const listing = listings.find(l => l.app.id === appId) ?? null;
+  const libVersion = useSession(s => deviceLibVersion(s, deviceId));
 
   const progress = useOtaProgress(deviceId);
   const installingThis =
@@ -41,99 +54,152 @@ export function StoreAppScreen({ route }: Props) {
       : null;
 
   const [failed, setFailed] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [asking, setAsking] = useState<AppVersion | null>(null);
+  const [asked, setAsked] = useState<AppVersion | null>(null);
+  const [pairing, setPairing] = useState(false);
+  const [pairNotice, setPairNotice] = useState<PairNotice | null>(null);
   const [showAllVersions, setShowAllVersions] = useState(false);
 
   if (!listing) {
     return (
       <ScrollScreen>
         <SectionEmpty>this app is no longer listed by that source</SectionEmpty>
+        <View className="mt-4">
+          <Button
+            onPress={() => navigation.navigate('Store')}
+            variant="secondary"
+            icon="Store"
+          >
+            back to the store
+          </Button>
+        </View>
       </ScrollScreen>
     );
   }
 
   const { app, newestCompatible, installedVersion, updateAvailable } = listing;
   const incompatible = !newestCompatible;
-  const canAct = !incompatible && (!installedVersion || updateAvailable);
+  const canAct =
+    deviceId != null && !incompatible && (!installedVersion || updateAvailable);
 
-  const install = async () => {
-    if (!deviceId) {
-      Alert.alert(
-        'No Car Thing connected',
-        `connect one to install ${app.name}. browsing works without it.`,
-      );
+  const install = async (version: AppVersion) => {
+    if (!deviceId) return;
+    setFailed(null);
+    setInstalling(version.version);
+    try {
+      await installApp(deviceId, listing, version);
+    } catch (err) {
+      setFailed(describeError(err));
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const start = (version: AppVersion) => {
+    if (newestCompatible && version.version !== newestCompatible.version) {
+      setAsked(version);
+      setAsking(version);
       return;
     }
-    setFailed(null);
-    setStarting(true);
+    void install(version);
+  };
+
+  const pair = async () => {
+    if (pairing) return;
+    setPairing(true);
+    setPairNotice(null);
     try {
-      await installApp(deviceId, listing);
+      setPairNotice((await presentPairWithGuidance()).notice);
     } catch (err) {
-      setFailed(err instanceof Error ? err.message : String(err));
+      setPairNotice(
+        describePairOutcome({ kind: 'error', message: describeError(err) }),
+      );
     } finally {
-      setStarting(false);
+      setPairing(false);
     }
   };
 
   const ordered = sortNewestFirst(app.versions);
   const visibleVersions = showAllVersions ? ordered : ordered.slice(0, 1);
+  const question = asked
+    ? describeVersionInstall({
+        version: asked,
+        newest: newestCompatible,
+        installedVersion,
+      })
+    : null;
 
   return (
     <ScrollScreen contentContainerStyle={{ paddingTop: 12 }}>
-      <View className="mb-6 flex-row items-center gap-4">
+      <ConfirmSheet
+        visible={asking != null}
+        title={question?.title ?? ''}
+        body={question?.body}
+        warning={question?.warning}
+        detail={question?.detail}
+        confirmLabel="install it anyway"
+        onConfirm={() => {
+          const version = asking;
+          setAsking(null);
+          if (version) void install(version);
+        }}
+        onClose={() => setAsking(null)}
+      />
+
+      <View className="mb-6 flex-row items-center gap-4 border border-rule bg-screen p-4">
         <CatalogIcon url={app.icon} name={app.name} size={64} />
-        <View className="flex-1">
+        <View className="min-w-0 flex-1">
           <Text
-            className="text-[20px] font-extrabold leading-[24px] text-foreground"
+            className="font-display text-fg"
+            style={TEXT.title}
             numberOfLines={2}
-            style={{ letterSpacing: -0.4 }}
           >
             {app.name}
           </Text>
-          <Text className="mt-0.5 text-[13px] text-muted-foreground">
+          <Text className="mt-0.5 font-sans text-muted" style={TEXT.hint}>
             {app.author}
           </Text>
           <View className="mt-2 flex-row flex-wrap gap-1.5">
             {installedVersion ? (
-              <Pill tone="primary">{`installed v${installedVersion}`}</Pill>
+              <Pill tone="accent">{`installed v${installedVersion}`}</Pill>
             ) : null}
             {newestCompatible?.role === 'launcher' ? (
-              <Pill tone="neutral" dot={false}>
-                home screen
-              </Pill>
+              <Pill tone="neutral">home screen</Pill>
             ) : null}
             {newestCompatible?.provides_overlay ? (
-              <Pill tone="neutral" dot={false}>
-                overlay
-              </Pill>
+              <Pill tone="neutral">overlay</Pill>
             ) : null}
           </View>
         </View>
       </View>
 
+      {newestCompatible?.provides_overlay ? (
+        <Text className="mb-6 px-1 font-sans text-muted" style={TEXT.hint}>
+          an overlay app draws on top of whatever else is on the screen.
+        </Text>
+      ) : null}
+
       {installingThis ? (
-        <View className="mb-6 rounded-2xl border border-border bg-surface p-4">
+        <View className="mb-6 border border-rule bg-screen p-4">
           <View className="flex-row items-baseline justify-between">
-            <Text className="text-[13px] font-semibold text-foreground">
+            <Text className="font-sans text-fg" style={TEXT.hint}>
               {installingThis.stepLabel ?? 'installing'}
             </Text>
-            <Text className="text-[12px] text-muted-foreground">
+            <Text className="font-mono text-soft" style={TEXT.hint}>
               {installingThis.percent}%
             </Text>
           </View>
-          <View className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-            <View
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${installingThis.percent}%` }}
-            />
-          </View>
+          <Progress percent={installingThis.percent} className="mt-2" />
         </View>
       ) : (
-        <View className="mb-6">
+        <View className="mb-6 gap-2">
           <Button
-            onPress={install}
-            disabled={!canAct || starting}
-            loading={starting}
+            onPress={() => {
+              if (newestCompatible) void install(newestCompatible);
+            }}
+            disabled={!canAct || installing != null}
+            loading={installing === newestCompatible?.version}
           >
             {incompatible
               ? 'needs a newer firmware'
@@ -143,16 +209,22 @@ export function StoreAppScreen({ route }: Props) {
                   ? 'installed'
                   : `install v${newestCompatible?.version}`}
           </Button>
+          {deviceId == null ? (
+            <Note tone="warn" action="pair" onAction={() => void pair()}>
+              connect a car thing to install
+            </Note>
+          ) : null}
+          <PairNote notice={pairNotice} />
         </View>
       )}
 
       {failed ? (
-        <View className="mb-6 rounded-2xl border border-destructive/30 bg-destructive-soft px-4 py-3">
-          <Text className="text-[12px] text-destructive">{failed}</Text>
+        <View className="mb-6">
+          <Note tone="err">{failed}</Note>
         </View>
       ) : null}
 
-      <Text className="mb-6 px-1 text-[14px] leading-[20px] text-foreground">
+      <Text className="mb-6 px-1 font-sans text-fg" style={TEXT.body}>
         {app.description}
       </Text>
 
@@ -169,7 +241,6 @@ export function StoreAppScreen({ route }: Props) {
                   <ListRow
                     key={p}
                     icon={meta.icon}
-                    iconTint="default"
                     title={meta.title}
                     subtitle={meta.subtitle}
                   />
@@ -187,18 +258,23 @@ export function StoreAppScreen({ route }: Props) {
             <VersionRow
               key={v.version}
               version={v}
-              installed={v.version === installedVersion}
+              installedVersion={installedVersion}
+              libVersion={libVersion}
+              busy={installing}
+              blocked={deviceId == null || installingThis != null}
+              onInstall={() => start(v)}
             />
           ))}
         </ListGroup>
         {app.versions.length > 1 ? (
           <Press
             onPress={() => setShowAllVersions(v => !v)}
-            scaleTo={0.99}
-            fade={false}
-            className="mt-2 py-1"
+            className="mt-2 self-start px-1 py-1"
           >
-            <Text className="text-[13px] font-semibold text-primary">
+            <Text
+              className="font-mono uppercase text-accent"
+              style={TEXT.eyebrow}
+            >
               {showAllVersions
                 ? 'show fewer'
                 : `show all ${app.versions.length} versions`}
@@ -210,10 +286,10 @@ export function StoreAppScreen({ route }: Props) {
       <View>
         <SectionHeader title="where this came from" />
         <ListGroup>
-          <ListRow icon={LayoutGrid} title="source" subtitle={sourceUrl} />
+          <ListRow icon="LayoutGrid" title="source" subtitle={sourceUrl} />
           {app.homepage ? (
             <ListRow
-              icon={Globe}
+              icon="Globe"
               title="homepage"
               subtitle={app.homepage}
               onPress={() => void Linking.openURL(app.homepage as string)}
@@ -221,16 +297,15 @@ export function StoreAppScreen({ route }: Props) {
           ) : null}
           {app.source ? (
             <ListRow
-              icon={Globe}
+              icon="Globe"
               title="source code"
               subtitle={app.source}
               onPress={() => void Linking.openURL(app.source as string)}
             />
           ) : null}
         </ListGroup>
-        <Text className="mt-2 px-1 text-[11.5px] leading-[16px] text-muted-foreground">
-          apps are not reviewed. a listing means a source published it, never
-          that anyone checked what it does.
+        <Text className="mt-2 px-1 font-sans text-muted" style={TEXT.hint}>
+          apps are not reviewed. buyer beware.
         </Text>
       </View>
     </ScrollScreen>
@@ -239,83 +314,67 @@ export function StoreAppScreen({ route }: Props) {
 
 function VersionRow({
   version,
-  installed,
+  installedVersion,
+  libVersion,
+  busy,
+  blocked,
+  onInstall,
 }: {
   version: AppVersion;
-  installed: boolean;
+  installedVersion: string | null;
+  libVersion: string | null;
+  busy: string | null;
+  blocked: boolean;
+  onInstall: () => void;
 }) {
+  const installed = version.version === installedVersion;
+  const compatible = versionCompatible(version, libVersion);
+  const older =
+    installedVersion != null &&
+    compareVersions(version.version, installedVersion) < 0;
+  const actionable = !installed && compatible && !blocked;
+  const running = busy === version.version;
+
   return (
-    <View className="px-4 py-3">
-      <View className="flex-row items-center gap-2">
-        <Text className="font-mono text-[13px] font-semibold text-foreground">
-          v{version.version}
-        </Text>
-        {installed ? <Pill tone="primary">installed</Pill> : null}
-        <Text className="ml-auto text-[11px] text-muted-foreground">
-          {new Date(version.released_at).toLocaleDateString()}
-        </Text>
+    <Press onPress={onInstall} disabled={!actionable || busy != null}>
+      <View className="px-4 py-3">
+        <View className="flex-row items-center gap-2">
+          <Text className="font-mono text-fg" style={TEXT.hint}>
+            v{version.version}
+          </Text>
+          {installed ? <Pill tone="ok">installed</Pill> : null}
+          {!installed && !compatible ? (
+            <Pill tone="warn">needs newer firmware</Pill>
+          ) : null}
+          <Text className="ml-auto font-mono text-dim" style={TEXT.eyebrow}>
+            {new Date(version.released_at).toLocaleDateString()}
+          </Text>
+        </View>
+        {version.changelog ? (
+          <Text className="mt-1 font-sans text-muted" style={TEXT.hint}>
+            {version.changelog}
+          </Text>
+        ) : null}
+        <View className="mt-1 flex-row items-center gap-2">
+          <Text
+            className="min-w-0 flex-1 font-mono text-dim"
+            style={TEXT.eyebrow}
+          >
+            needs firmware {version.min_libbridgething_version} ·{' '}
+            {formatBytes(version.download.size)}
+          </Text>
+          {running ? (
+            <Spinner />
+          ) : actionable ? (
+            <Text
+              className="font-mono uppercase text-accent"
+              style={TEXT.eyebrow}
+            >
+              {older ? 'roll back' : 'install'}
+            </Text>
+          ) : null}
+        </View>
       </View>
-      {version.changelog ? (
-        <Text className="mt-1 text-[12.5px] leading-[18px] text-muted-foreground">
-          {version.changelog}
-        </Text>
-      ) : null}
-      <Text className="mt-1 text-[11px] text-muted-foreground">
-        needs libbridgething {version.min_libbridgething_version} ·{' '}
-        {formatBytes(version.download.size)}
-      </Text>
-    </View>
+    </Press>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function humanizePermission(perm: string): {
-  icon: LucideIcon;
-  title: string;
-  subtitle?: string;
-} {
-  switch (perm) {
-    case 'net.fetch':
-      return {
-        icon: Globe,
-        title: 'use the internet',
-        subtitle: 'data fetched via your phone',
-      };
-    case 'net.ws':
-      return {
-        icon: Wifi,
-        title: 'real-time data',
-        subtitle: 'websockets via your phone',
-      };
-    case 'net.proxy':
-      return {
-        icon: Cable,
-        title: 'tunnel TCP traffic',
-        subtitle: 'general TCP via your phone',
-      };
-    case 'geo':
-      return {
-        icon: MapPin,
-        title: 'see your location',
-        subtitle: 'forwarded from your phone',
-      };
-    case 'notifications':
-      return { icon: Bell, title: 'show phone notifications' };
-    case 'audio.tts':
-    case 'audio':
-      return {
-        icon: Speaker,
-        title: 'play sound',
-        subtitle: 'plays through your phone',
-      };
-    case 'mic':
-      return { icon: Mic, title: 'use the Car Thing microphone' };
-    default:
-      return { icon: Shield, title: perm };
-  }
 }

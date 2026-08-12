@@ -24,26 +24,28 @@ pairing, settings, and new apps live.
 
 <p>
   <img src="https://bridgething.com/screenshots/companion-home.png" width="240" alt="companion home">
-  <img src="https://bridgething.com/screenshots/companion-update.png" width="240" alt="update available">
+  <img src="https://bridgething.com/screenshots/companion-store.png" width="240" alt="the store">
   <img src="https://bridgething.com/screenshots/companion-settings.png" width="240" alt="companion settings">
 </p>
 
 ## What's in here
 
-| path                                       | what it is                                                        |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| `crates/lib`                               | `libbridgething` - the wire-protocol crate. DTOs, codec, framing. |
-| `crates/core`                              | `bridgething` - the daemon                                        |
-| `crates/client-rs`                         | Rust client of `libbridgething`.                                  |
-| `crates/mfi`, `crates/mfi-proxy`           | iAP2 / MFi link layer                                             |
-| `crates/swupdate-sys`                      | FFI to libswupdate for in-band system OTA                         |
-| `packages/gateway`, `packages/companion`   | Phone-side gateway (TS + native)                                  |
-| `packages/client-ts`, `packages/adapter-*` | Generated SDKs                                                    |
-| `packages/webapps/builtin`                 | Webapps delivered with the daemon (hub, browser)                  |
-| `packages/webapps/catalog`                 | Webapps published to the app catalog                              |
-| `packages/create-bridgething`              | `bun create bridgething`                                          |
-| `mobile/`                                  | Phone-side app                                                    |
-| `docs/protocol.md`                         | Wire-protocol reference                                           |
+| path                                     | what it is                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `crates/lib`                             | `libbridgething` - the wire-protocol crate. DTOs, codec, framing. |
+| `crates/core`                            | `bridgething` - the daemon                                        |
+| `crates/client-rs`                       | Rust client of `libbridgething`.                                  |
+| `crates/mfi`, `crates/mfi-proxy`         | iAP2 / MFi link layer                                             |
+| `crates/swupdate-sys`                    | FFI to libswupdate for in-band system OTA                         |
+| `crates/delivery`, `crates/companion`    | The shared phone-side core in Rust, plus its wasm/napi bindings   |
+| `packages/companion`                     | Swift + Kotlin platform shells over that core                     |
+| `packages/{client-ts,browser}`           | The webapp TS SDK, and the delivery core for browsers             |
+| `desktop/`                               | Tauri shell over the shared core                                  |
+| `packages/webapps/builtin`               | Webapps delivered with the daemon (hub, browser)                  |
+| `packages/webapps/catalog`               | Webapps published to the app catalog                              |
+| `packages/create-bridgething`            | `bun create bridgething`                                          |
+| `mobile/`                                | Phone-side app                                                    |
+| `docs/protocol.md`                       | Wire-protocol reference                                           |
 
 ## Dataflow
 
@@ -60,8 +62,9 @@ The webapp talks to the daemon over a local WebSocket on `127.0.0.1:8891`.
 The daemon talks to the phone-side gateway over Bluetooth RFCOMM, with
 an iAP2 link layer for iOS. The gateway sources playback, streams audio
 out, and proxies arbitrary HTTP/WS via the `Tunnel` surface. Everything
-that crosses a boundary is typed in `libbridgething`; SDKs in TS,
-Swift, and Kotlin are generated from those types.
+that crosses a boundary is typed in `libbridgething`; the TS SDKs and the
+Rust surface facades are generated from those types, and the phone side
+reaches them through the shared Rust core.
 
 ## Build a webapp
 

@@ -1,0 +1,60 @@
+---
+import { METHOD_GROUPS } from '../../../sdk/types.ts';
+import Method from '../../components/docs/Method.astro';
+import TypeDef from '../../components/docs/TypeDef.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { surfaceReferencedTypes } from '../../lib/docs.ts';
+import { renderMd } from '../../lib/md.ts';
+import { loadSurfaceDocs } from '../../lib/sdk.ts';
+
+export async function getStaticPaths() {
+  const docs = await loadSurfaceDocs();
+  return docs.surfaces.map(surface => ({ params: { surface: surface.name }, props: { surface, docs } }));
+}
+
+const { surface, docs } = Astro.props;
+const referenced = surfaceReferencedTypes(surface, docs.types);
+const known = new Set(referenced.map(([name]) => name));
+const groups = METHOD_GROUPS.filter(g => surface[g.key].length > 0);
+
+const refdes = 'text-accent m-0 font-mono text-sm font-normal tracking-normal';
+---
+
+<DocsLayout
+  title={`${surface.title.toLowerCase()} sdk`}
+  description={`the client.${surface.name} surface of the bridgething webapp sdk.`}
+  current={surface.name}>
+  <header class="mb-12">
+    <h1 class="mb-1">{surface.title.toLowerCase()}</h1>
+    <code class="text-accent text-base">client.{surface.name}</code>
+    {surface.description && <div class="mt-4 text-white/60" set:html={renderMd(surface.description)} />}
+  </header>
+
+  {
+    groups.map(group => (
+      <section class="mb-14">
+        <div class="mb-1 border-b border-white/20 pb-2">
+          <h2 class={refdes}>{group.label.toLowerCase()}</h2>
+          <p class="m-0 mt-1 text-sm text-white/45">{group.blurb}</p>
+        </div>
+        {surface[group.key].map(method => (
+          <Method surface={surface.name} method={method} kind={group.key} types={docs.types} known={known} />
+        ))}
+      </section>
+    ))
+  }
+
+  {
+    referenced.length > 0 && (
+      <section>
+        <div class="mb-1 border-b border-white/20 pb-2">
+          <h2 class={refdes}>types</h2>
+          <p class="m-0 mt-1 text-sm text-white/45">shapes referenced above, as the sdk types them</p>
+        </div>
+        {referenced.map(([name, def]) => (
+          <TypeDef name={name} def={def} />
+        ))}
+      </section>
+    )
+  }
+</DocsLayout>

@@ -1,0 +1,43 @@
+[package]
+name = "bridgething-delivery-wasm"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bridgething-delivery = { path = "../core" }
+bridgething-gateway = { path = "../../gateway-rs" }
+bridgething-io = { path = "../../io", default-features = false, features = [
+  "web-io",
+] }
+libbridgething = { path = "../../lib" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bytes = "1.12.1"
+console_error_panic_hook = "0.1.7"
+futures.workspace = true
+js-sys = "0.3.103"
+serde = { workspace = true, features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "registry"] }
+uuid = { workspace = true, features = ["v7", "js"] }
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+web-sys = { version = "0.3.103", features = ["console"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.76"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false

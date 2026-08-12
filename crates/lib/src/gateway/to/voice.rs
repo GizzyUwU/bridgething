@@ -2,12 +2,10 @@ use bridgething_macros::BridgeEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{VoiceDispatchErrorCode, VoiceDispatchTarget};
+use crate::{VoiceCaptureReason, VoiceDispatchErrorCode, VoiceDispatchTarget};
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -16,7 +14,6 @@ pub enum VoiceCodec {
   Opus,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -26,33 +23,33 @@ pub struct VoiceFormat {
   pub channels: u16,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceStreamOpen {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub format: VoiceFormat,
+  #[serde(default, skip_serializing_if = "reason_is_default")]
+  pub reason: VoiceCaptureReason,
 }
 
-#[typeshare]
+fn reason_is_default(reason: &VoiceCaptureReason) -> bool {
+  *reason == VoiceCaptureReason::default()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceFrame {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub seq: u32,
   #[debug(skip)]
   #[ts(type = "Uint8Array")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub packet: bytes::Bytes,
 }
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -64,18 +61,15 @@ pub enum VoiceCloseReason {
   Error,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceStreamClose {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub reason: VoiceCloseReason,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -86,7 +80,6 @@ pub struct VoiceDispatched {
   pub webapp_id: Option<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -97,7 +90,6 @@ pub struct VoiceDispatchFailed {
   pub msg: String,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

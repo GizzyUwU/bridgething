@@ -1,16 +1,13 @@
 import { BridgethingClient, type NetFetchReply } from '@bridgething/client';
+import { daemonUrl } from '@bridgething/webapp-shared/daemon';
 import { useEffect, useMemo, useState } from 'react';
-
-const wsUrl =
-  import.meta.env.VITE_BRIDGETHING_URL ??
-  (typeof window !== 'undefined' ? `ws://${window.location.host}/` : 'ws://127.0.0.1:8891/');
 
 type CalEvent = { start: Date; allDay: boolean; title: string; location: string | null };
 
 type Phase = { kind: 'loading' } | { kind: 'ready'; events: CalEvent[] } | { kind: 'error'; message: string };
 
 export default function App() {
-  const client = useMemo(() => new BridgethingClient({ url: wsUrl }), []);
+  const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [now, setNow] = useState<Date>(new Date());
 
@@ -62,12 +59,12 @@ export default function App() {
   }, [client]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-bt-charcoal text-bt-off-white">
-      <header className="flex items-baseline justify-between px-8 pt-6 pb-3">
-        <div className="bt-wordmark text-2xl font-semibold">
+    <div className="flex h-full w-full flex-col bg-bg text-off-white">
+      <header className="mb-3 flex items-baseline justify-between border-b border-rule px-8 pt-6 pb-3">
+        <div className="font-display text-hero font-medium tracking-display">
           {now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
         </div>
-        <div className="text-sm text-bt-soft-gray">upcoming</div>
+        <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">upcoming</div>
       </header>
       <main className="flex-1 overflow-y-auto px-8 pb-6">
         {phase.kind === 'loading' && <Note>loading calendar...</Note>}
@@ -86,18 +83,18 @@ function Agenda({ events }: { events: CalEvent[] }) {
       {groups.map(g => (
         <div key={g.key} className="flex gap-4">
           <div className="w-28 shrink-0 pt-1 text-right">
-            <div className="text-xs uppercase tracking-wide text-bt-soft-gray">{g.weekday}</div>
-            <div className="bt-wordmark text-xl font-medium">{g.dayLabel}</div>
+            <div className="font-mono text-eyebrow tracking-[0.18em] text-dim uppercase">{g.weekday}</div>
+            <div className="font-display text-row-lg font-medium tracking-display">{g.dayLabel}</div>
           </div>
           <div className="flex flex-1 flex-col gap-2">
             {g.events.map((e, i) => (
-              <div key={i} className="flex items-baseline gap-3 rounded-xl bg-black/30 px-4 py-2.5">
-                <div className="w-16 shrink-0 text-sm tabular-nums text-bt-blue">
+              <div key={i} className="flex items-baseline gap-3 border border-rule bg-screen px-4 py-2.5">
+                <div className="w-16 shrink-0 font-mono text-hint tabular-nums text-accent">
                   {e.allDay ? 'all day' : e.start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-bt-off-white">{e.title}</div>
-                  {e.location && <div className="truncate text-xs text-bt-soft-gray">{e.location}</div>}
+                  <div className="truncate text-row font-medium text-off-white">{e.title}</div>
+                  {e.location && <div className="truncate font-mono text-hint text-dim">{e.location}</div>}
                 </div>
               </div>
             ))}
@@ -111,7 +108,7 @@ function Agenda({ events }: { events: CalEvent[] }) {
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="max-w-[34rem] text-center text-sm text-bt-soft-gray">{children}</div>
+      <div className="max-w-136 text-center font-mono text-row text-near">{children}</div>
     </div>
   );
 }
@@ -182,7 +179,6 @@ function unfold(raw: string): string[] {
   return out;
 }
 
-// TZID-qualified times are treated as device-local; good enough for a sample.
 function parseDt(left: string, value: string): { date: Date; allDay: boolean } {
   if (/VALUE=DATE\b/i.test(left) || /^\d{8}$/.test(value)) {
     return { date: new Date(+value.slice(0, 4), +value.slice(4, 6) - 1, +value.slice(6, 8)), allDay: true };

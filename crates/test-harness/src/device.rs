@@ -6,10 +6,10 @@ use bridgething::FRAME_TAP_PORT;
 use bridgething_gateway::Gateway;
 use bridgething_iap2::{
   DeviceEaStream, DeviceEmulator, DeviceEmulatorHandle, EmulatorEvent, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event,
-  Link, LinkConfig, Lsp, SessionTriple, session::EaPriority,
+  Link, LinkConfig, Lsp, SessionTriple,
 };
 use futures::StreamExt;
-use libbridgething::{BRIDGETHING_RFCOMM_CHANNEL, BRIDGETHING_WS_MODERN_PORT};
+use libbridgething::{BRIDGETHING_RFCOMM_CHANNEL, BRIDGETHING_WS_MODERN_PORT, Priority};
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   sync::mpsc,
@@ -241,7 +241,7 @@ fn bridge_ea_stream(stream: DeviceEaStream) -> Gateway {
         Ok(0) | Err(_) => break,
         Ok(n) => {
           if outbound
-            .send(EaPriority::Normal, Bytes::copy_from_slice(&buf[..n]))
+            .send(Priority::Normal, Bytes::copy_from_slice(&buf[..n]))
             .await
             .is_err()
           {

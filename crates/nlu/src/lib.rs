@@ -3,22 +3,19 @@ pub mod error;
 pub mod manifest;
 pub mod tokenize;
 
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 pub use decode::{DecodedFrame, SlotValue};
 pub use error::{NluError, Result};
 pub use manifest::{Manifest, Rejection};
 pub use tokenize::TokenizedInput;
 
-uniffi::setup_scaffolding!();
-
-#[derive(uniffi::Object)]
 pub struct NluDecoder {
   manifest: Manifest,
   tokenizer: tokenize::TranscriptTokenizer,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone)]
 pub struct ManifestInfo {
   pub schema_version: String,
   pub max_len: u32,
@@ -28,14 +25,11 @@ pub struct ManifestInfo {
   pub rejection: Option<Rejection>,
 }
 
-#[uniffi::export]
 impl NluDecoder {
-  #[uniffi::constructor]
-  pub fn load(bundle_dir: String) -> Result<Arc<Self>> {
-    let dir = Path::new(&bundle_dir);
-    let manifest = Manifest::load(&dir.join("manifest.json"))?;
-    let tokenizer = tokenize::TranscriptTokenizer::load(&dir.join("tokenizer.json"), manifest.max_len as usize)?;
-    Ok(Arc::new(Self { manifest, tokenizer }))
+  pub fn load(bundle_dir: &Path) -> Result<Self> {
+    let manifest = Manifest::load(&bundle_dir.join("manifest.json"))?;
+    let tokenizer = tokenize::TranscriptTokenizer::load(&bundle_dir.join("tokenizer.json"), manifest.max_len as usize)?;
+    Ok(Self { manifest, tokenizer })
   }
 
   pub fn info(&self) -> ManifestInfo {
@@ -54,25 +48,25 @@ impl NluDecoder {
     }
   }
 
-  pub fn tokenize(&self, transcript: String) -> Result<TokenizedInput> {
-    self.tokenizer.encode(&transcript)
+  pub fn tokenize(&self, transcript: &str) -> Result<TokenizedInput> {
+    self.tokenizer.encode(transcript)
   }
 
   pub fn decode(
     &self,
-    transcript: String,
-    tokens: TokenizedInput,
-    intent_logits: Vec<f32>,
-    bio_logits: Vec<f32>,
-    closed_logits: Vec<Vec<f32>>,
+    transcript: &str,
+    tokens: &TokenizedInput,
+    intent_logits: &[f32],
+    bio_logits: &[f32],
+    closed_logits: &[Vec<f32>],
   ) -> Result<DecodedFrame> {
     decode::decode(
       &self.manifest,
-      &transcript,
-      &tokens,
-      &intent_logits,
-      &bio_logits,
-      &closed_logits,
+      transcript,
+      tokens,
+      intent_logits,
+      bio_logits,
+      closed_logits,
     )
   }
 }

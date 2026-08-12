@@ -1,0 +1,1329 @@
+{
+  "cases" : [
+    {
+      "name" : "whole-frame-in-one-read",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-01",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-02",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-03",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-04",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-05",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-06",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-07",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-08",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-09",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-10",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-11",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-12",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-13",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-14",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-15",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "header-split-at-16",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "body-split-at-017",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "body-split-at-074",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "body-split-at-131",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "byte-at-a-time",
+      "steps" : [
+        {
+          "after_chunk" : 131,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "empty-reads-around-a-frame",
+      "steps" : [
+        {
+          "after_chunk" : 6,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "only-empty-reads",
+      "steps" : [
+
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 0,
+        "errors" : 0,
+        "frames" : 0,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "three-frames-in-one-read",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 297,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 463,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000003",
+          "payload_len" : 150,
+          "payload_sha256" : "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 463,
+        "errors" : 0,
+        "frames" : 3,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "three-frames-split-inside-the-second-header",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 297,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 463,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000003",
+          "payload_len" : 150,
+          "payload_sha256" : "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 463,
+        "errors" : 0,
+        "frames" : 3,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "three-frames-split-inside-the-second-body",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 297,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 1,
+          "compression" : "none",
+          "consumed_bytes" : 463,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000003",
+          "payload_len" : 150,
+          "payload_sha256" : "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 463,
+        "errors" : 0,
+        "frames" : 3,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "two-frames-byte-at-a-time",
+      "steps" : [
+        {
+          "after_chunk" : 131,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 296,
+          "compression" : "none",
+          "consumed_bytes" : 297,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 297,
+        "errors" : 0,
+        "frames" : 2,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "mixed-priority-frames",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 297,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "bulk"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 463,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000003",
+          "payload_len" : 150,
+          "payload_sha256" : "5d39977dc4f872cbec326ada3973a005a91c235dc88df19fb0bbe47b6c3ad926",
+          "priority" : "background"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 580,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000004",
+          "payload_len" : 101,
+          "payload_sha256" : "efe9d26afeb9b354232b38c28a3fafd67040995268dd4f47a91eb921849b8ca9",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 580,
+        "errors" : 0,
+        "frames" : 4,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "nonzero-reserved-bytes",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "bad-magic-mid-stream-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 132,
+          "error_kind" : "invalid_magic",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 173,
+        "consumed_bytes" : 132,
+        "errors" : 1,
+        "frames" : 1,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "leading-garbage-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "invalid_magic",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 138,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "magic-straddling-a-read-boundary-in-garbage",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "consumed_bytes" : 0,
+          "error_kind" : "invalid_magic",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 136,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "bad-magic-with-no-valid-frame-after",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "invalid_magic",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 16,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "lone-magic-high-byte-at-end-of-stream",
+      "steps" : [
+
+      ],
+      "terminal" : {
+        "buffered_bytes" : 1,
+        "consumed_bytes" : 0,
+        "errors" : 0,
+        "frames" : 0,
+        "state" : "incomplete"
+      }
+    },
+    {
+      "name" : "unsupported-version-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "unsupported_version",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 297,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "unknown-compression-byte-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "unsupported_compression",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 297,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "unknown-encoding-byte-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "unsupported_encoding",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 297,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "truncated-final-frame-mid-header",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 9,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "incomplete"
+      }
+    },
+    {
+      "name" : "truncated-final-frame-mid-body",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 56,
+        "consumed_bytes" : 132,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "incomplete"
+      }
+    },
+    {
+      "name" : "truncated-only-frame",
+      "steps" : [
+
+      ],
+      "terminal" : {
+        "buffered_bytes" : 56,
+        "consumed_bytes" : 0,
+        "errors" : 0,
+        "frames" : 0,
+        "state" : "incomplete"
+      }
+    },
+    {
+      "name" : "zero-length-frame-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 16,
+          "error_kind" : "typed_decode_failed",
+          "error_stage" : "typed",
+          "event" : "error"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 148,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 148,
+        "errors" : 1,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "length-above-the-mobile-cap-below-the-rust-cap-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "payload_too_large",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 156,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "length-just-over-the-rust-cap-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "payload_too_large",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 156,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "length-two-to-the-sixty-third-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "payload_too_large",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 156,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "length-u64-max-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 0,
+          "error_kind" : "payload_too_large",
+          "error_stage" : "framing",
+          "event" : "error"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 156,
+        "consumed_bytes" : 0,
+        "errors" : 1,
+        "frames" : 0,
+        "state" : "stalled"
+      }
+    },
+    {
+      "name" : "gzip-frame-decompressing-to-16255",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "gzip",
+          "consumed_bytes" : 266,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000010",
+          "payload_len" : 16255,
+          "payload_sha256" : "89694ba01d93fbcd81beb8b329658ad47a04739b049162737c4b759a9b10a7d3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 266,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "gzip-frame-decompressing-to-16256",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "gzip",
+          "consumed_bytes" : 267,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000011",
+          "payload_len" : 16256,
+          "payload_sha256" : "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 267,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "gzip-frame-decompressing-to-16257",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "gzip",
+          "consumed_bytes" : 267,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000012",
+          "payload_len" : 16257,
+          "payload_sha256" : "bd57b9c7b7489fe3ce16f83ab732ad848231a8a987925119653cafa63bc16dca",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 267,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "gzip-frame-split-mid-body",
+      "steps" : [
+        {
+          "after_chunk" : 1,
+          "compression" : "gzip",
+          "consumed_bytes" : 267,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000011",
+          "payload_len" : 16256,
+          "payload_sha256" : "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 267,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "gzip-and-plain-frames-interleaved",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 132,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "gzip",
+          "consumed_bytes" : 399,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000011",
+          "payload_len" : 16256,
+          "payload_sha256" : "ecc18a7204bd794dd576e5ff9335d296d86f5f7a1e37b9222d8e94f4eb803dc2",
+          "priority" : "normal"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 564,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000002",
+          "payload_len" : 149,
+          "payload_sha256" : "23455c6c214dbcf81222a9f9bdf9c9482b04f38d29cddb65a75460017cb80f26",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 564,
+        "errors" : 0,
+        "frames" : 3,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "gzip-frame-with-corrupt-deflate-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 267,
+          "error_kind" : "decompress_failed",
+          "error_stage" : "decompress",
+          "event" : "error"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 399,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 399,
+        "errors" : 1,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "large-uncompressed-frame-in-1024-byte-reads",
+      "steps" : [
+        {
+          "after_chunk" : 15,
+          "compression" : "none",
+          "consumed_bytes" : 16272,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000013",
+          "payload_len" : 16256,
+          "payload_sha256" : "c466f40769eb6f3deaf45e732a58a8fff751ab34cc3be2a7bbbac6fe129c1c90",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 16272,
+        "errors" : 0,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    },
+    {
+      "name" : "valid-framing-invalid-payload-then-valid-frame",
+      "steps" : [
+        {
+          "after_chunk" : 0,
+          "consumed_bytes" : 19,
+          "error_kind" : "typed_decode_failed",
+          "error_stage" : "typed",
+          "event" : "error"
+        },
+        {
+          "after_chunk" : 0,
+          "compression" : "none",
+          "consumed_bytes" : 151,
+          "encoding" : "msgpack",
+          "event" : "frame",
+          "frame_id" : "0192f2a0-bbb0-7c00-a000-000000000001",
+          "payload_len" : 116,
+          "payload_sha256" : "c36a84de12260d383aacba20b9f8fffc48b781e93fe86bbf20609a5da05e5bb3",
+          "priority" : "normal"
+        }
+      ],
+      "terminal" : {
+        "buffered_bytes" : 0,
+        "consumed_bytes" : 151,
+        "errors" : 1,
+        "frames" : 1,
+        "state" : "ok"
+      }
+    }
+  ],
+  "constants" : {
+    "auto_gzip_threshold_bytes" : 16256,
+    "decodes_typed_payload" : true,
+    "header_len" : 16,
+    "magic" : 57005,
+    "max_payload_bytes" : 8388608,
+    "rejects_unknown_compression" : true,
+    "rejects_unknown_encoding" : true,
+    "resyncs_past_bad_magic" : false,
+    "version" : 2
+  },
+  "impl" : "swift",
+  "notes" : "FrameAccumulator composed with Codec.decode, matching Gateway.ingest. Swift has no catch-all for runtime traps (array bounds, integer overflow, force-unwrap); only thrown Errors are catchable, and none of these 53 cases threw anything outside FrameAccumulator.Error, CodecError or GzipError.",
+  "unobserved" : [
+
+  ]
+}

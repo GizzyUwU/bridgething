@@ -2,11 +2,9 @@ use bridgething_macros::BridgeEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use crate::{PlaybackTarget, PlayerError, PlayerState, QueueItem};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -15,7 +13,6 @@ pub struct PlayerErrorReply {
   pub error: PlayerError,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +22,6 @@ pub struct QueueSnapshot {
   pub items: Vec<QueueItem>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -34,8 +30,12 @@ pub struct PlaybackTargets {
   pub targets: Vec<PlaybackTarget>,
 }
 
-#[typeshare]
-#[allow(clippy::large_enum_variant)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PlayerSnapshotAck {}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -43,7 +43,7 @@ pub struct PlaybackTargets {
 #[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
 pub enum GatewayToBridgePlayerMsg {
   #[bridge_event]
-  Snapshot(PlayerState),
+  Snapshot(Box<PlayerState>),
   #[bridge_event]
   QueueChanged(QueueSnapshot),
   #[bridge_event]
@@ -52,4 +52,8 @@ pub enum GatewayToBridgePlayerMsg {
   ErrorEvent(PlayerErrorReply),
   #[bridge_command]
   RequestSpotifyWake,
+  #[bridge_response]
+  SnapshotAck(PlayerSnapshotAck),
+  #[bridge_response]
+  ErrorReply(PlayerErrorReply),
 }

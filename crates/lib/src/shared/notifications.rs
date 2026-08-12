@@ -5,9 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -31,7 +29,6 @@ pub enum NotificationCategory {
 /// (`com.apple.MobileSMS`, `com.spotify.client`, etc.); `display_name`
 /// and `icon_asset_id` are best-effort and may be missing on Android
 /// gateways that don't surface them cheaply.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -46,7 +43,6 @@ pub struct NotificationApp {
 /// audibly" hint and `important` is the high-importance flag. Only
 /// notifications posted while the daemon is connected are surfaced, so
 /// there is no pre-existing/backfill marker.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -57,7 +53,6 @@ pub struct NotificationFlags {
 
 /// One ANCS-style action slot. `label` is the gateway-localized prompt
 /// the webapp renders on the action button.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -70,7 +65,6 @@ pub struct NotificationAction {
 /// - webapps pass it to `invokePositive`/`invokeNegative` and listen for
 /// `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
 /// optional because ANCS treats them as separate attribute fetches.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -91,7 +85,6 @@ pub struct Notification {
 /// Why a notification went away. `Acted` covers both positive and
 /// negative invokes; gateways that distinguish dismiss-vs-acted may
 /// surface both as `Acted`.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -111,7 +104,6 @@ pub enum DismissReason {
 ///   OR iAP2 just detached and we expect to re-probe on reconnect.
 /// - `Authorized`: ANCS attribute fetches are succeeding.
 /// - `Unauthorized`: ANCS service hidden, or auth-gate detected.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -125,7 +117,6 @@ pub enum AncsAuthState {
 
 /// Why a notification action slot could not be invoked. Both invoke verbs are
 /// fire-and-forget commands, so a refusal has no reply to ride on.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

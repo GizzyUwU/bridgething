@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# xcodebuild only exists on macos.
 [ "$(uname -s)" = Darwin ] || { echo "ipa build requires macos" >&2; exit 1; }
 
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.." # mobile root
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 
 WORKSPACE="ios/bridgething.xcworkspace"
 SCHEME="bridgething"
 ARCHIVE="ios/build/bridgething.xcarchive"
 PAYLOAD="ios/build/Payload"
 IPA="ios/build/bridgething.ipa"
+
+source scripts/rn-prebuilt-markers.sh
+trap reset_rn_prebuilt_markers EXIT
 
 echo "== xcodebuild archive (unsigned) =="
 xcodebuild archive \

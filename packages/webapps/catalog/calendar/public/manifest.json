@@ -1,14 +1,19 @@
 {
   "id": "019e6701-13f8-71b5-ba04-85d326630e98",
   "name": "Calendar",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "Upcoming events from an iCalendar (.ics) feed.",
   "icon": "icon.svg",
   "config": [
     {
       "type": "string",
-      "data": { "key": "ics_url", "label": "iCalendar (.ics) URL" }
+      "data": {
+        "key": "ics_url",
+        "label": "iCalendar (.ics) URL"
+      }
     }
   ],
-  "permissions": ["net.fetch"]
+  "permissions": [
+    "net.fetch"
+  ]
 }

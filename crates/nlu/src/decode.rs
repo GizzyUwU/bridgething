@@ -4,13 +4,13 @@ use crate::{
   tokenize::TokenizedInput,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotValue {
   pub name: String,
   pub value: String,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone)]
 pub struct DecodedFrame {
   pub intent: String,
   pub slots: Vec<SlotValue>,

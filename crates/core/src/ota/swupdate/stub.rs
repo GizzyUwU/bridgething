@@ -3,14 +3,25 @@ use std::path::Path;
 use libbridgething::OtaPhase;
 use tokio::{sync::watch, time::Duration};
 
-use super::{Error, ProgressTick};
+use super::{Error, ProgressTick, Selector};
 
-pub async fn install_swu<F>(swu_path: &Path, progress: &F, cancel_rx: &mut watch::Receiver<bool>) -> Result<(), Error>
+pub async fn install_swu<F>(
+  swu_path: &Path,
+  selector: &Selector,
+  progress: &F,
+  cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<(), Error>
 where
   F: Fn(ProgressTick) + Send + Sync,
 {
   let metadata = tokio::fs::metadata(swu_path).await?;
-  tracing::info!(path = %swu_path.display(), bytes = metadata.len(), "swupdate stub: would install .swu");
+  tracing::info!(
+    path = %swu_path.display(),
+    bytes = metadata.len(),
+    software_set = %selector.software_set,
+    running_mode = %selector.running_mode,
+    "swupdate stub: would install .swu"
+  );
 
   for tick in 0..=10u8 {
     if *cancel_rx.borrow_and_update() {

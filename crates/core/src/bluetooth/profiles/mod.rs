@@ -1,13 +1,91 @@
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
 
-use bluer::{Adapter, AdapterEvent, AdapterProperty, Address};
+#[cfg(target_os = "linux")]
+use bluer::{Adapter, AdapterEvent, AdapterProperty};
+#[cfg(target_os = "linux")]
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
+use tokio::sync::{mpsc, oneshot};
 
-use super::{BluetoothResult, iap2::Iap2ReconnectHandle};
+#[cfg(target_os = "linux")]
+use super::iap2::Iap2ReconnectHandle;
+use super::{Address, BluetoothError, BluetoothResult};
+#[cfg(target_os = "linux")]
 use crate::{net::WireEventBus, peer::PeerTracker, state::DeviceStore, stock::StockSetupSend};
 
+pub(crate) const PROFILE_COMMAND_CAPACITY: usize = 16;
+
+#[derive(Debug)]
+pub enum ProfileCommand {
+  SetAlias {
+    alias: String,
+    reply: Reply<()>,
+  },
+  SetDiscoverable {
+    discoverable: bool,
+    reply: Reply<()>,
+  },
+  Forget {
+    mac: String,
+    reply: Reply<()>,
+  },
+  Reset {
+    reply: Reply<()>,
+  },
+  UpsertPairedDevice {
+    mac: Address,
+    device_type: libbridgething::DeviceType,
+    reply: Reply<libbridgething::Device>,
+  },
+}
+
+pub type Reply<T> = oneshot::Sender<BluetoothResult<T>>;
+
+impl ProfileCommand {
+  fn reject_no_radio(self) {
+    match self {
+      Self::SetAlias { alias, reply } => {
+        tracing::debug!(%alias, "profile set-alias rejected: no radio attached");
+        let _ = reply.send(Err(BluetoothError::NoRadio));
+      }
+      Self::SetDiscoverable { discoverable, reply } => {
+        tracing::debug!(discoverable, "profile set-discoverable rejected: no radio attached");
+        let _ = reply.send(Err(BluetoothError::NoRadio));
+      }
+      Self::Forget { mac, reply } => {
+        tracing::debug!(%mac, "profile forget rejected: no radio attached");
+        let _ = reply.send(Err(BluetoothError::NoRadio));
+      }
+      Self::Reset { reply } => {
+        tracing::debug!("profile reset rejected: no radio attached");
+        let _ = reply.send(Err(BluetoothError::NoRadio));
+      }
+      Self::UpsertPairedDevice {
+        mac,
+        device_type,
+        reply,
+      } => {
+        tracing::debug!(%mac, ?device_type, "profile upsert-paired rejected: no radio attached");
+        let _ = reply.send(Err(BluetoothError::NoRadio));
+      }
+    }
+  }
+}
+
+pub(crate) fn spawn_no_radio_actor(mut rx: ProfileCommandRx) -> tokio::task::JoinHandle<()> {
+  tokio::spawn(async move {
+    while let Some(command) = rx.recv().await {
+      command.reject_no_radio();
+    }
+  })
+}
+pub type ProfileCommandTx = mpsc::Sender<ProfileCommand>;
+pub type ProfileCommandRx = mpsc::Receiver<ProfileCommand>;
+
+#[cfg(target_os = "linux")]
 pub type ProfileMan = Arc<ProfileManager>;
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct ProfileManager {
   adapter: Adapter,
@@ -17,6 +95,7 @@ pub struct ProfileManager {
   iap2_reconnect: Iap2ReconnectHandle,
 }
 
+#[cfg(target_os = "linux")]
 impl ProfileManager {
   pub fn init(
     adapter: Adapter,
@@ -36,12 +115,13 @@ impl ProfileManager {
     }
   }
 
-  pub async fn set_alias(&self, alias: String) -> bluer::Result<()> {
+  pub async fn set_alias(&self, alias: String) -> BluetoothResult<()> {
     tracing::debug!("setting bluetooth adapter alias to {:?}", &alias);
-    self.adapter.set_alias(alias).await
+    self.adapter.set_alias(alias).await?;
+    Ok(())
   }
 
-  pub async fn set_discoverable(&self, discoverable: bool) -> bluer::Result<()> {
+  pub async fn set_discoverable(&self, discoverable: bool) -> BluetoothResult<()> {
     tracing::debug!("setting bluetooth discoverable to {:?}", &discoverable);
     self.adapter.set_discoverable(discoverable).await?;
     if discoverable && let Err(err) = super::scan::apply_fast_inquiry_scan(&self.adapter) {
@@ -50,11 +130,11 @@ impl ProfileManager {
     Ok(())
   }
 
-  pub async fn forget(&self, mac: &str) -> bluer::Result<()> {
+  pub async fn forget(&self, mac: &str) -> BluetoothResult<()> {
     tracing::debug!("attempting to forget device with mac address {:?}", &mac);
 
     let address: Address = mac.parse()?;
-    self.adapter.remove_device(address).await?;
+    self.adapter.remove_device(address.into()).await?;
 
     Ok(())
   }
@@ -115,7 +195,7 @@ impl ProfileManager {
         // adapter
         BluetoothConnectionEvent::DeviceAdded { mac } => {
           tracing::info!("bluetooth device added with mac address: {:?}", &mac);
-          let bluez_device = self.adapter.device(mac)?;
+          let bluez_device = self.adapter.device(mac.into())?;
           if !bluez_device.is_paired().await.unwrap_or(false) {
             tracing::trace!("device added but not yet paired; awaiting Paired property change");
             return Ok(());
@@ -173,7 +253,7 @@ impl ProfileManager {
     mac: Address,
     device_type: libbridgething::DeviceType,
   ) -> BluetoothResult<libbridgething::Device> {
-    let bluez = self.adapter.device(mac)?;
+    let bluez = self.adapter.device(mac.into())?;
     if !bluez.is_trusted().await.unwrap_or(false) {
       let _ = bluez.set_trusted(true).await;
     }
@@ -213,6 +293,7 @@ impl ProfileManager {
   }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub enum BluetoothConnectionEvent {
   // auth/pairing
@@ -230,12 +311,43 @@ pub enum BluetoothConnectionEvent {
   ConnectedChanged { mac: Address, connected: bool },
 }
 
+#[cfg(target_os = "linux")]
 impl From<AdapterEvent> for BluetoothConnectionEvent {
   fn from(event: AdapterEvent) -> Self {
     match event {
-      AdapterEvent::DeviceAdded(address) => Self::DeviceAdded { mac: address },
-      AdapterEvent::DeviceRemoved(address) => Self::DeviceRemoved { mac: address },
+      AdapterEvent::DeviceAdded(address) => Self::DeviceAdded { mac: address.into() },
+      AdapterEvent::DeviceRemoved(address) => Self::DeviceRemoved { mac: address.into() },
       AdapterEvent::PropertyChanged(property) => Self::AdapterPropertyChanged(property),
     }
   }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn spawn_command_actor(profile_man: ProfileMan, mut rx: ProfileCommandRx) -> tokio::task::JoinHandle<()> {
+  tokio::spawn(async move {
+    while let Some(command) = rx.recv().await {
+      match command {
+        ProfileCommand::SetAlias { alias, reply } => {
+          let _ = reply.send(profile_man.set_alias(alias).await);
+        }
+        ProfileCommand::SetDiscoverable { discoverable, reply } => {
+          let _ = reply.send(profile_man.set_discoverable(discoverable).await);
+        }
+        ProfileCommand::Forget { mac, reply } => {
+          let _ = reply.send(profile_man.forget(&mac).await);
+        }
+        ProfileCommand::Reset { reply } => {
+          let _ = reply.send(profile_man.reset().await);
+        }
+        ProfileCommand::UpsertPairedDevice {
+          mac,
+          device_type,
+          reply,
+        } => {
+          let _ = reply.send(profile_man.upsert_paired_device(mac, device_type).await);
+        }
+      }
+    }
+    tracing::debug!("profile command actor exiting");
+  })
 }

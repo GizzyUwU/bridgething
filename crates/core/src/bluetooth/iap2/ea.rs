@@ -4,12 +4,11 @@ use std::{
   time::Instant,
 };
 
-use bluer::Address;
-use bridgething_iap2::session::{EaPriority, EaStreamSender};
+use bridgething_iap2::session::EaStreamSender;
 use libbridgething::{
   PeerCompanionStatus, Priority,
   gateway::BridgeToGatewayMsg,
-  protocol::{BridgeEndec, encode_bridge_frame},
+  protocol::{BridgeEndec, Compress, DecodedFrame, encode_frame},
   wire::MsgMeta,
 };
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -21,7 +20,7 @@ use tokio_util::{
 use super::super::BluetoothResult;
 use crate::{
   bluetooth::{
-    BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, auto_nack_for_failed_decode,
+    Address, BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, auto_nack_for_failed_decode,
     peer_owners::PeerOwners,
   },
   peer::PeerTracker,
@@ -252,16 +251,11 @@ impl Iap2EaGateway {
   async fn send_to_stream(&mut self, key: Key, msg: &BridgeToGatewayMsg, priority: Priority) {
     let Some(conn) = self.conns.get(&key) else { return };
     let mut buf = BytesMut::new();
-    if let Err(err) = encode_bridge_frame(priority, msg, &mut buf) {
+    if let Err(err) = encode_frame(priority, Compress::Auto, msg, &mut buf) {
       tracing::error!(stream_id = key.1, ?err, "iap2 ea gateway: encode failed");
       return;
     }
-    let ea_priority = match priority {
-      Priority::Normal => EaPriority::Normal,
-      Priority::Bulk => EaPriority::Bulk,
-      Priority::Background => EaPriority::Background,
-    };
-    if let Err(err) = conn.outbound.send(ea_priority, buf.freeze()).await {
+    if let Err(err) = conn.outbound.send(priority, buf.freeze()).await {
       tracing::warn!(stream_id = key.1, ?err, "iap2 ea gateway: chunker channel closed");
       self.tear_down(key).await;
       return;
@@ -297,7 +291,7 @@ async fn reader_task(
   loop {
     loop {
       match codec.decode(&mut buf) {
-        Ok(Some(frame)) => {
+        Ok(Some(DecodedFrame::Frame(frame))) => {
           let event = BluetoothEvent::Gateway(InboundGatewayMessage::new(
             Some(address),
             GatewayType::Iap2Ea,
@@ -310,7 +304,7 @@ async fn reader_task(
           }
         }
         Ok(None) => break,
-        Err(err) if err.is_recoverable() => {
+        Ok(Some(DecodedFrame::Failed(err))) => {
           if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = err {
             tracing::warn!(
               target: "bridgething::iap2_ea::decode",
@@ -320,9 +314,9 @@ async fn reader_task(
             );
             if let Some(nack) = auto_nack_for_failed_decode(&probe) {
               let mut nack_buf = BytesMut::new();
-              if let Err(e) = encode_bridge_frame(Priority::Normal, &nack, &mut nack_buf) {
+              if let Err(e) = encode_frame(Priority::Normal, Compress::Auto, &nack, &mut nack_buf) {
                 tracing::error!(%address, ?e, "iap2 ea gateway: encode auto-nack failed");
-              } else if let Err(e) = outbound.send(EaPriority::Normal, nack_buf.freeze()).await {
+              } else if let Err(e) = outbound.send(Priority::Normal, nack_buf.freeze()).await {
                 tracing::warn!(%address, ?e, "iap2 ea gateway: auto-nack send failed");
               }
             }

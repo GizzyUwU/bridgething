@@ -1,16 +1,14 @@
 #![cfg(feature = "emulator")]
 
-mod emu;
-
 use std::time::Duration;
 
 use bridgething_iap2::{
   EmulatorEvent, SessionEvent,
   csm::identification::{EaProtocol, EaProtocolMatchAction, IdentificationConfig},
-  session::EaPriority,
+  emulator::harness::{self as emu, recv_with_timeout},
 };
 use bytes::Bytes;
-use emu::recv_with_timeout;
+use libbridgething::Priority;
 
 const GATEWAY_BUNDLE: &str = "com.bridgething.gateway";
 const GATEWAY_EA_PROTOCOL_ID: u8 = 1;
@@ -68,7 +66,7 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
 
   dev_stream
     .outbound
-    .send(EaPriority::Normal, Bytes::from_static(b"hello accessory"))
+    .send(Priority::Normal, Bytes::from_static(b"hello accessory"))
     .await
     .unwrap();
   let got = recv_with_timeout(&mut acc_inbound, Duration::from_secs(5))
@@ -77,7 +75,7 @@ async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
   assert_eq!(&got[..], b"hello accessory");
 
   acc_outbound
-    .send(EaPriority::Normal, Bytes::from_static(b"hello device"))
+    .send(Priority::Normal, Bytes::from_static(b"hello device"))
     .await
     .unwrap();
   let got = recv_with_timeout(&mut dev_stream.inbound_rx, Duration::from_secs(5))

@@ -61,7 +61,16 @@ describe('voice model delivery state', () => {
     expect(state.error).toContain('no bundle for this platform');
   });
 
-  test('the retry hint is honest: toggling off and on re-asks native', async () => {
+  test('an explicit download asks native without touching the capability', async () => {
+    const r = rig();
+
+    await r.session.downloadVoiceModel();
+
+    expect(r.native.__calls).toContain('downloadVoiceModel');
+    expect(r.native.__calls).not.toContain('setCapabilityFlags');
+  });
+
+  test('the voice understanding switch reaches native both ways', async () => {
     const r = rig();
     const flags = r.session.useSessionStore.getState().capabilityFlags;
 

@@ -2,7 +2,6 @@ use bridgething_macros::BridgeOuterEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 mod from;
@@ -17,18 +16,15 @@ use crate::{
 };
 
 /// gateway -> bridgething
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: MsgMeta,
   pub data: GatewayToBridgeMsgData,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -75,18 +71,15 @@ pub enum GatewayToBridgeMsgData {
 }
 
 /// bridgething -> gateway
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: MsgMeta,
   pub data: BridgeToGatewayMsgData,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { Button } from './Button';
+import { Field } from './Field';
 import { Sheet } from './Sheet';
+import { TEXT } from '../lib/theme';
 
 export function RenameSheet({
   visible,
@@ -35,42 +37,33 @@ export function RenameSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose}>
-      <View className="gap-1">
-        <Text
-          className="text-[19px] font-bold text-foreground"
-          style={{ letterSpacing: -0.4 }}
-        >
+      <View className="gap-2">
+        <Text className="font-mono uppercase text-accent" style={TEXT.eyebrow}>
           {title}
         </Text>
         {message ? (
-          <Text className="text-[13px] leading-[18px] text-muted-foreground">
+          <Text className="font-sans text-muted" style={TEXT.body}>
             {message}
           </Text>
         ) : null}
       </View>
-      <TextInput
+      <Field
         value={draft}
         onChangeText={setDraft}
         placeholder={placeholder}
-        placeholderTextColor="hsl(215 14% 55%)"
         autoFocus
         returnKeyType="done"
         onSubmitEditing={submit}
         autoCapitalize="words"
         autoCorrect={false}
-        className="rounded-2xl border border-border bg-surface px-4 py-3.5 text-[16px] text-foreground"
       />
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <Button onPress={onClose} variant="secondary" size="lg">
-            cancel
-          </Button>
-        </View>
-        <View className="flex-1">
-          <Button onPress={submit} size="lg">
-            save
-          </Button>
-        </View>
+      <View className="flex-row justify-end gap-2">
+        <Button variant="ghost" size="md" full={false} onPress={onClose}>
+          cancel
+        </Button>
+        <Button variant="primary" size="md" full={false} onPress={submit}>
+          save
+        </Button>
       </View>
     </Sheet>
   );

@@ -16,8 +16,8 @@ pub enum TimeSysError {
   #[cfg(feature = "systemd")]
   #[error("timedated dbus call failed: {0}")]
   Dbus(#[from] zbus::Error),
+  #[cfg(not(feature = "systemd"))]
   #[error("systemd cargo feature disabled; system-clock control unavailable")]
-  #[allow(dead_code)]
   Disabled,
 }
 

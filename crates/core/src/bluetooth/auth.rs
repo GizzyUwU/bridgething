@@ -13,7 +13,7 @@ pub async fn request_authorization(profile: ProfileMan, req: RequestAuthorizatio
   );
 
   if let Err(err) = profile
-    .handle_event(BluetoothConnectionEvent::AuthRequest { mac: req.device })
+    .handle_event(BluetoothConnectionEvent::AuthRequest { mac: req.device.into() })
     .await
   {
     tracing::error!("failed to send bluetooth msg: {:?}", err);
@@ -32,7 +32,7 @@ pub async fn request_confirmation(profile: ProfileMan, req: RequestConfirmation)
 
   if let Err(err) = profile
     .handle_event(BluetoothConnectionEvent::PinCode {
-      mac: req.device,
+      mac: req.device.into(),
       pin: format!("\"{:06}\"", req.passkey),
     })
     .await
@@ -53,7 +53,7 @@ pub async fn authorize_service(profile: ProfileMan, req: AuthorizeService) -> Re
 
   if let Err(err) = profile
     .handle_event(BluetoothConnectionEvent::ServiceAuthRequest {
-      mac: req.device,
+      mac: req.device.into(),
       service: req.service,
     })
     .await
@@ -74,7 +74,7 @@ pub async fn display_pin_code(profile: ProfileMan, req: DisplayPinCode) -> ReqRe
 
   if let Err(err) = profile
     .handle_event(BluetoothConnectionEvent::PinCode {
-      mac: req.device,
+      mac: req.device.into(),
       pin: req.pincode,
     })
     .await
@@ -96,7 +96,7 @@ pub async fn display_passkey(profile: ProfileMan, req: DisplayPasskey) -> ReqRes
   // yes i know passkey and pin are different no i don't care
   if let Err(err) = profile
     .handle_event(BluetoothConnectionEvent::PinCode {
-      mac: req.device,
+      mac: req.device.into(),
       pin: format!("\"{:06}\"", req.passkey),
     })
     .await

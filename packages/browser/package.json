@@ -1,0 +1,54 @@
+{
+  "name": "@bridgething/browser",
+  "version": "0.4.0",
+  "description": "Drive a Spotify Car Thing from the browser: the bridgething delivery core compiled to wasm, plus the Web Serial and network transports.",
+  "license": "MIT",
+  "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
+  "homepage": "https://bridgething.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeyEamigh/bridgething.git",
+    "directory": "packages/browser"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeyEamigh/bridgething/issues"
+  },
+  "keywords": [
+    "bridgething",
+    "spotify",
+    "car-thing",
+    "superbird",
+    "web-serial",
+    "wasm"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ],
+  "scripts": {
+    "prebuild": "rm -rf dist && bun run wasm",
+    "wasm": "wasm-pack build ../../crates/delivery/wasm --target web --out-dir ../../../packages/browser/wasm --out-name core-wasm && rm -f wasm/package.json wasm/.gitignore",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@bridgething/lib": "workspace:*"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

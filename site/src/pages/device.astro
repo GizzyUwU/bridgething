@@ -1,0 +1,32 @@
+---
+import { DeviceManager } from '../components/device/DeviceManager';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout
+  title="device"
+  description="install and manage webapps on your bridgething-flashed car thing from your browser.">
+  <Header />
+  <main class="container-site w-full flex-1 py-12 md:py-16">
+    <section class="flex flex-col gap-8">
+      <header class="flex flex-col gap-3">
+        <h1 class="m-0">device</h1>
+        <p class="m-0 text-lg text-pretty text-white/70">
+          install and manage webapps on a paired bridgething device, straight from the browser
+        </p>
+        <p class="m-0 font-mono text-sm text-white/40">
+          over the cable needs chrome 147+. over bluetooth needs chrome 117+ on desktop or 138+ on android, and firefox
+          needs the webserial extension. if you use safari, don't.
+        </p>
+        <p class="m-0 font-mono text-sm text-white/40">
+          looking for something to install? browse the <a href="/apps">apps</a>.
+        </p>
+      </header>
+
+      <DeviceManager client:only="preact" />
+    </section>
+  </main>
+  <Footer />
+</Layout>

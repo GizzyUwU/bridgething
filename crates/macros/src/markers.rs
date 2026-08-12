@@ -1,30 +1,3 @@
-//! Standalone marker derives for top-level outer-wire variant payload
-//! types - types that appear directly as variants on a wire data enum
-//! without an intermediate inner enum (e.g. `BridgeThingMeta`,
-//! `GatewayMeta`, `ForwardMessage`, `NowPlayingUpdate`).
-//!
-//! Each derive emits one `impl WireEvent<W> for Self` /
-//! `impl WireCommand<W> for Self` / `impl WireUnicast<W> for Self` per
-//! wire-direction listed in the `#[wire(...)]` attribute. Recognized
-//! direction tokens - exactly the four known by `BridgeEnum`:
-//!
-//! - `BridgeToGateway` -> `BridgeToGatewayMsgData`
-//! - `GatewayToBridge` -> `GatewayToBridgeMsgData`
-//! - `BridgeToClient`  -> `BridgeToClientMsgData`
-//! - `ClientToBridge`  -> `ClientToBridgeMsgData`
-//!
-//! Usage:
-//!
-//! ```ignore
-//! #[derive(WireEvent)]
-//! #[wire(BridgeToGateway, BridgeToClient)]
-//! pub struct ForwardMessage { ... }
-//! ```
-//!
-//! For inner enums that already use `#[derive(BridgeEnum)]`, the marker
-//! impls land on the per-bucket sibling enums via direction inference -
-//! these standalone derives are only for the non-enum-wrapped case.
-
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;

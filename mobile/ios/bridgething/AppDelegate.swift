@@ -1,4 +1,4 @@
-import BridgethingGateway
+import BridgethingCompanion
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
@@ -17,7 +17,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RNAppAuthAuthorizationFlo
     _: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    LogStore.shared.install()
+    CompanionLogs.shared.install()
     bootstrapLogging()
     BridgethingApp.installBridgething()
 

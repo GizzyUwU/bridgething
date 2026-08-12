@@ -2,13 +2,8 @@ use std::fmt;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-#[uniffi(flat_error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-  #[error("http: {0}")]
-  Http(#[from] reqwest::Error),
-  #[error("websocket: {0}")]
-  Ws(#[from] tokio_tungstenite::tungstenite::Error),
   #[error("protobuf: {0}")]
   Protobuf(#[from] protobuf::Error),
   #[error("json: {0}")]

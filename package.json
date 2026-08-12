@@ -35,11 +35,14 @@
   },
   "workspaces": [
     "crates/lib",
+    "crates/companion",
+    "crates/delivery/napi",
     "packages/*",
-    "packages/gateway/*",
     "packages/webapps/builtin/*",
     "packages/webapps/catalog/*",
-    "mobile"
+    "mobile",
+    "site",
+    "desktop"
   ],
   "patchedDependencies": {
     "react-native-nitro-modules@0.35.5": "patches/react-native-nitro-modules@0.35.5.patch",

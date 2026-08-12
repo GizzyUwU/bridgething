@@ -1,0 +1,364 @@
+---
+import BootScreen from '../components/BootScreen.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import InstallCTA from '../components/InstallCTA.astro';
+import SchematicSection from '../components/SchematicSection.astro';
+import StoryTerminal from '../components/StoryTerminal.astro';
+import TraceRail from '../components/TraceRail.astro';
+import Wordmark from '../components/Wordmark.astro';
+import Layout from '../layouts/Layout.astro';
+
+const SCREENS = [
+  { src: '/screenshots/device-spotify-alt.png', alt: 'now playing on the stock spotify ui', name: 'stock ui' },
+  { src: '/screenshots/device-launcher.png', alt: 'the app launcher', name: 'launcher' },
+  { src: '/screenshots/device-calendar.png', alt: 'upcoming calendar events', name: 'calendar' },
+  { src: '/screenshots/device-weather.png', alt: 'current conditions and forecast', name: 'weather' },
+];
+
+const APPS = [
+  {
+    src: '/screenshots/device-spotify-alt.png',
+    name: 'stock ui',
+    body: "spotify's own interface, still here",
+  },
+  { src: '/screenshots/device-launcher.png', name: 'launcher', body: 'everything you installed' },
+  { src: '/screenshots/device-calendar.png', name: 'calendar', body: "what's next, from any icalendar feed" },
+  {
+    src: '/screenshots/device-home-assistant.png',
+    name: 'home assistant',
+    body: 'lights, covers, fans, climate',
+  },
+  { src: '/screenshots/device-weather.png', name: 'weather', body: 'current conditions and a five-day forecast' },
+  { src: '/screenshots/device-settings.png', name: 'settings', body: 'pairing, display, and power' },
+];
+---
+
+<Layout>
+  <Header />
+
+  <main class="container-site relative w-full flex-1">
+    <TraceRail />
+
+    <div class="flex flex-col gap-20 py-16 pl-7 md:py-20 md:pl-12">
+      <SchematicSection class="grid grid-cols-1 items-center gap-14 lg:grid-cols-[9fr_11fr]">
+        <div class="flex flex-col items-start gap-7">
+          <p class="text-accent m-0 font-mono text-sm">u1 - open firmware for the spotify car thing</p>
+          <Wordmark as="h1" class="m-0 text-6xl text-balance md:text-7xl" />
+          <p class="m-0 max-w-[48ch] text-lg text-pretty text-white/70">
+            a full system image, daemon, and companion app to restore your thing to its former glory
+          </p>
+          <div class="flex flex-wrap items-center gap-4">
+            <InstallCTA channel="stable" label="install" variant="primary" size="lg" />
+            <a href="/releases" class="btn btn-lg">release notes</a>
+          </div>
+          <p class="m-0 font-mono text-sm text-white/40">connect your phone, run the stock ui, or make your own apps</p>
+        </div>
+
+        <div class="@container w-full xl:mr-[-6vw] 2xl:mr-[-11vw]" aria-hidden="true">
+          <div class="relative mx-auto w-full max-w-xl pt-12 pr-20 pb-12 xl:max-w-2xl 2xl:max-w-3xl">
+            <BootScreen>
+              <div id="hero-screens" class="relative m-[-2.6cqw] h-[calc(100%+5.2cqw)] w-[calc(100%+5.2cqw)]">
+                {
+                  SCREENS.map((s, i) => (
+                    <img
+                      src={s.src}
+                      alt={s.alt}
+                      loading={i === 0 ? 'eager' : 'lazy'}
+                      data-hero-screen
+                      class:list={[
+                        'absolute inset-0 h-full w-full object-cover transition-opacity duration-700 motion-reduce:transition-none',
+                        i === 0 ? 'opacity-100' : 'opacity-0',
+                      ]}
+                    />
+                  ))
+                }
+              </div>
+
+              <Fragment slot="callouts">
+                <span class="absolute top-[-13%] left-[16.4%] -translate-x-1/2 font-mono text-xs text-white/50">1</span>
+                <span class="absolute top-[-5%] left-[16.4%] h-[19%] border-l border-dashed border-white/25"></span>
+                <span class="absolute top-[-13%] left-[33.8%] -translate-x-1/2 font-mono text-xs text-white/50">2</span>
+                <span class="absolute top-[-5%] left-[33.8%] h-[19%] border-l border-dashed border-white/25"></span>
+                <span class="absolute top-[-13%] left-[51%] -translate-x-1/2 font-mono text-xs text-white/50">3</span>
+                <span class="absolute top-[-5%] left-[51%] h-[19%] border-l border-dashed border-white/25"></span>
+                <span class="absolute top-[-13%] left-[68.3%] -translate-x-1/2 font-mono text-xs text-white/50">4</span>
+                <span class="absolute top-[-5%] left-[68.3%] h-[19%] border-l border-dashed border-white/25"></span>
+                <span class="absolute top-[-13%] left-[86.2%] -translate-x-1/2 font-mono text-xs text-white/50">m</span>
+                <span class="absolute top-[-5%] left-[86.2%] h-[20%] border-l border-dashed border-white/25"></span>
+
+                <span class="absolute top-[40.8%] left-[87%] w-[16%] border-t border-dashed border-white/25"></span>
+                <span class="absolute top-[40.8%] left-[104.5%] -translate-y-1/2 font-mono text-xs text-white/50">
+                  hscroll
+                </span>
+                <span class="absolute top-[71.8%] left-[90.5%] w-[12.5%] border-t border-dashed border-white/25"></span>
+                <span class="absolute top-[71.8%] left-[104.5%] -translate-y-1/2 font-mono text-xs text-white/50">
+                  esc
+                </span>
+
+                <div class="absolute top-[103.5%] left-[7.4%] flex w-[69.6%] items-center gap-3 font-mono text-xs">
+                  <span class="bg-accent/60 h-3 w-px"></span>
+                  <span class="border-accent/40 flex-1 border-t"></span>
+                  <span class="text-accent">800 × 480</span>
+                  <span class="border-accent/40 flex-1 border-t"></span>
+                  <span class="bg-accent/60 h-3 w-px"></span>
+                </div>
+              </Fragment>
+            </BootScreen>
+          </div>
+        </div>
+      </SchematicSection>
+
+      <SchematicSection refdes="d1 - what you get">
+        <p class="m-0 mb-8 max-w-[54ch] text-lg text-pretty text-white/70">
+          as many apps as you want from the app store
+        </p>
+
+        <ul role="list" class="m-0 grid list-none grid-cols-1 gap-8 p-0 sm:grid-cols-2 lg:grid-cols-3">
+          {
+            APPS.map(app => (
+              <li class="flex flex-col gap-3">
+                <img
+                  src={app.src}
+                  alt={app.name}
+                  loading="lazy"
+                  width="800"
+                  height="480"
+                  class="w-full border border-white/15"
+                />
+                <div>
+                  <p class="font-display m-0 text-base font-medium">{app.name}</p>
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+      </SchematicSection>
+
+      <SchematicSection refdes="nvram - the story">
+        <StoryTerminal />
+      </SchematicSection>
+
+      <SchematicSection refdes="u2-u4 - the system">
+        <div class="mb-8 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-sm text-white/60 max-sm:text-xs">
+          <span class="border border-white/25 px-3 py-1.5">your phone</span>
+          <span class="text-accent flex items-center gap-2">
+            <span class="bg-accent/50 h-px w-6 max-sm:w-3"></span>
+            bluetooth
+            <span class="bg-accent/50 h-px w-6 max-sm:w-3"></span>
+          </span>
+          <span class="border border-white/25 px-3 py-1.5">the thing</span>
+        </div>
+        <dl class="m-0 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div class="relative border border-dashed border-white/25 p-6 pt-7">
+            <span class="bg-bg absolute -top-2.5 left-4 px-2 font-mono text-sm text-white/45">u2 - image</span>
+            <dt class="font-display mb-2 text-xl font-medium tracking-tight">a real linux system</dt>
+            <dd class="m-0 text-base text-pretty text-white/60">
+              mainline linux 7.0.2, mainline u-boot, chrome 147, mesa + panfrost graphics for full acceleration
+            </dd>
+          </div>
+          <div class="relative border border-dashed border-white/25 p-6 pt-7">
+            <span class="bg-bg absolute -top-2.5 left-4 px-2 font-mono text-sm text-white/45">u3 - daemon</span>
+            <dt class="font-display mb-2 text-xl font-medium tracking-tight">a rust daemon runs the show</dt>
+            <dd class="m-0 text-base text-pretty text-white/60">
+              connects to the companion app and runs both the stock webapp and ones you create
+            </dd>
+          </div>
+          <div class="relative border border-dashed border-white/25 p-6 pt-7">
+            <span class="bg-bg absolute -top-2.5 left-4 px-2 font-mono text-sm text-white/45">u4 - companion</span>
+            <dt class="font-display mb-2 text-xl font-medium tracking-tight">an app for ios and android</dt>
+            <dd class="m-0 text-base text-pretty text-white/60">
+              rfcomm on android and iap2 on ios for the best possible performance
+            </dd>
+          </div>
+        </dl>
+      </SchematicSection>
+
+      <SchematicSection refdes="f1-f4 - firsts">
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse font-mono text-base max-sm:text-sm">
+            <thead>
+              <tr class="border-b border-white/20 text-left text-white/45">
+                <th class="py-3 pr-6 font-normal whitespace-nowrap">what</th>
+                <th class="py-3 pr-6 font-normal whitespace-nowrap">status</th>
+                <th class="py-3 font-normal whitespace-nowrap">why it matters</th>
+              </tr>
+            </thead>
+            <tbody class="text-white/75">
+              <tr class="border-b border-white/10">
+                <td class="py-3 pr-6">mainline linux 7.0.2</td>
+                <td class="text-accent py-3 pr-6">first on superbird</td>
+                <td class="py-3">17 patches bring the whole board to stock parity</td>
+              </tr>
+              <tr class="border-b border-white/10">
+                <td class="py-3 pr-6">mainline u-boot</td>
+                <td class="text-accent py-3 pr-6">first on superbird</td>
+                <td class="py-3">an open, signed boot chain you won't even notice</td>
+              </tr>
+              <tr class="border-b border-white/10">
+                <td class="py-3 pr-6">chrome 147</td>
+                <td class="text-accent py-3 pr-6">first on superbird</td>
+                <td class="py-3">stop running <code>vite-plugin-legacy</code></td>
+              </tr>
+              <tr class="border-b border-white/10">
+                <td class="py-3 pr-6">panfrost gpu acceleration</td>
+                <td class="text-accent py-3 pr-6">first on superbird</td>
+                <td class="py-3">open mesa drivers for the mali g31</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </SchematicSection>
+
+      <SchematicSection refdes="m1-m3 - measured">
+        <dl class="m-0 grid grid-cols-1 sm:grid-cols-3">
+          <div class="flex flex-col gap-1 py-2 max-sm:border-b max-sm:border-white/10 max-sm:pb-6 sm:pr-10">
+            <dt class="font-mono text-sm text-white/45">interaction speed</dt>
+            <dd class="font-display m-0 flex items-baseline gap-1 text-4xl font-medium tracking-tight tabular-nums">
+              2.1<span class="text-2xl">×</span>
+            </dd>
+            <p class="m-0 font-mono text-sm text-white/40">faster than spotify's stock build</p>
+            <p class="m-0 font-mono text-xs text-white/20">(touch-to-interaction latency on stock ui)</p>
+          </div>
+          <div
+            class="flex flex-col gap-1 border-white/10 py-2 max-sm:border-b max-sm:py-6 sm:border-l sm:pr-10 sm:pl-10">
+            <dt class="font-mono text-sm text-white/45">system image</dt>
+            <dd class="font-display m-0 flex items-baseline gap-2 text-4xl font-medium tracking-tight tabular-nums">
+              481<span class="text-lg text-white/50">mb</span>
+            </dd>
+            <p class="m-0 font-mono text-sm text-white/40">for the whole os</p>
+          </div>
+          <div class="flex flex-col gap-1 border-white/10 py-2 max-sm:pt-6 sm:border-l sm:pl-10">
+            <dt class="font-mono text-sm text-white/45">peak speed</dt>
+            <dd class="font-display m-0 flex items-baseline gap-2 text-4xl font-medium tracking-tight tabular-nums">
+              1.5<span class="text-lg text-white/50">mbps</span>
+            </dd>
+            <p class="m-0 font-mono text-sm text-white/40">over bluetooth</p>
+          </div>
+        </dl>
+      </SchematicSection>
+
+      <SchematicSection refdes="j1 - expansion">
+        <p class="m-0 mb-8 text-lg text-pretty text-white/70">
+          build your own webapp with 19 typed surfaces and internet access tunneled through your phone
+        </p>
+
+        <dl class="m-0 grid grid-cols-2 border-t border-white/10 lg:grid-cols-4">
+          <div class="flex flex-col gap-2 border-white/10 px-8 py-6 max-lg:border-b">
+            <dt class="font-display text-base font-medium">media</dt>
+            <dd class="m-0 font-mono text-sm text-pretty text-white/50">
+              player, queue, lyrics, text-to-speech, earcons.
+            </dd>
+          </div>
+          <div class="flex flex-col gap-2 border-white/10 py-6 pl-8 max-lg:border-b lg:border-l">
+            <dt class="font-display text-base font-medium">phone</dt>
+            <dd class="m-0 font-mono text-sm text-pretty text-white/50">
+              calls, notifications, contacts, all proxied over bluetooth.
+            </dd>
+          </div>
+          <div class="flex flex-col gap-2 border-white/10 py-6 max-lg:border-b sm:pr-8 lg:border-l lg:pl-8">
+            <dt class="font-display text-base font-medium">world</dt>
+            <dd class="m-0 font-mono text-sm text-pretty text-white/50">
+              geolocation, plus http + websockets tunneled through your phone.
+            </dd>
+          </div>
+          <div class="flex flex-col gap-2 border-white/10 px-8 py-6 lg:border-l">
+            <dt class="font-display text-base font-medium">system</dt>
+            <dd class="m-0 font-mono text-sm text-pretty text-white/50">
+              voice intents, config, key-value storage, asset cache.
+            </dd>
+          </div>
+        </dl>
+
+        <div class="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-[3fr_2fr]">
+          <div class="flex flex-col gap-4">
+            <p class="m-0 font-mono text-sm text-white/45">shipping today</p>
+            <ul role="list" class="m-0 flex list-none flex-wrap gap-3 p-0">
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                hub
+              </li>
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                stock ui
+              </li>
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                calendar
+              </li>
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                browser
+              </li>
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                weather
+              </li>
+              <li class="rounded-full px-4 py-1.5 font-mono text-sm text-white/70 inset-ring inset-ring-white/15">
+                home assistant
+              </li>
+              <li class="text-accent inset-ring-accent/40 rounded-full px-4 py-1.5 font-mono text-sm inset-ring">
+                yours goes here
+              </li>
+            </ul>
+          </div>
+          <div class="border border-dashed border-white/20 p-5">
+            <p class="m-0 mb-3 flex items-center gap-2 font-mono text-sm text-white/70">
+              <span class="text-accent">$</span> bun create bridgething
+            </p>
+            <p class="m-0 font-mono text-sm text-pretty text-white/45">
+              a typescript sdk and tooling to build your own webapps and share them
+            </p>
+          </div>
+        </div>
+      </SchematicSection>
+
+      <SchematicSection refdes="sw1 - channel select">
+        <svg viewBox="0 0 220 120" xmlns="http://www.w3.org/2000/svg" class="mb-2 h-auto w-44" aria-hidden="true">
+          <line x1="10" y1="60" x2="80" y2="60" stroke="rgba(239,239,239,0.5)" stroke-width="2"></line>
+          <circle cx="86" cy="60" r="5" stroke="rgba(239,239,239,0.6)" stroke-width="2" fill="none"></circle>
+          <line x1="90" y1="58" x2="150" y2="30" stroke="var(--color-accent)" stroke-width="3" stroke-linecap="round"
+          ></line>
+          <circle cx="156" cy="28" r="5" stroke="var(--color-accent)" stroke-width="2" fill="none"></circle>
+          <circle cx="156" cy="92" r="5" stroke="rgba(239,239,239,0.35)" stroke-width="2" fill="none"></circle>
+          <line x1="161" y1="28" x2="210" y2="28" stroke="var(--color-accent)" stroke-width="2"></line>
+          <line x1="161" y1="92" x2="210" y2="92" stroke="rgba(239,239,239,0.3)" stroke-width="2"></line>
+          <text
+            x="10"
+            y="48"
+            font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+            font-size="12"
+            fill="rgba(239,239,239,0.45)">
+            thing
+          </text>
+        </svg>
+        <div>
+          <div class="flex flex-wrap items-center gap-x-10 gap-y-3 border-t border-white/10 py-5">
+            <div class="flex min-w-0 flex-1 basis-64 items-baseline gap-4">
+              <h3 class="font-display m-0 text-lg font-medium">stable</h3>
+              <p class="m-0 font-mono text-sm text-white/50">(somewhat) tested. recommended.</p>
+            </div>
+            <InstallCTA channel="stable" variant="secondary" />
+          </div>
+          <div class="flex flex-wrap items-center gap-x-10 gap-y-3 border-y border-white/10 py-5">
+            <div class="flex min-w-0 flex-1 basis-64 items-baseline gap-4">
+              <h3 class="font-display m-0 text-lg font-medium">dev</h3>
+              <p class="m-0 font-mono text-sm text-white/50">extra tools for system development. slower.</p>
+            </div>
+            <InstallCTA channel="dev" variant="secondary" />
+          </div>
+        </div>
+      </SchematicSection>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>
+
+<script>
+  const screens = Array.from(document.querySelectorAll<HTMLElement>('[data-hero-screen]'));
+
+  if (screens.length > 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let shown = 0;
+    setInterval(() => {
+      screens[shown]?.classList.replace('opacity-100', 'opacity-0');
+      shown = (shown + 1) % screens.length;
+      screens[shown]?.classList.replace('opacity-0', 'opacity-100');
+    }, 4200);
+  }
+</script>

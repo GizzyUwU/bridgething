@@ -12,7 +12,7 @@ use libbridgething::{
 };
 
 use super::is_synthetic_uri;
-use crate::authority::AuthorityRegistry;
+use crate::{authority::AuthorityRegistry, bluetooth::Address};
 
 const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
@@ -43,6 +43,7 @@ pub struct PlayerState {
   companion_metadata: MediaItemUpdate,
   companion_playback: PlaybackUpdate,
   companion_playback_at: Option<Instant>,
+  companion_source: Option<Address>,
 
   companion_queue: Vec<QueueItem>,
   recently_played: Vec<QueueItem>,
@@ -117,6 +118,7 @@ impl PlayerState {
       companion_metadata: MediaItemUpdate::default(),
       companion_playback: PlaybackUpdate::default(),
       companion_playback_at: None,
+      companion_source: None,
 
       companion_queue: Vec::new(),
       recently_played: Vec::new(),
@@ -158,6 +160,10 @@ impl PlayerState {
 
   pub(crate) fn note_asset_cleared(&mut self, id: &str) {
     self.present_ids.remove(id);
+  }
+
+  fn accepts_companion_data(&self, addr: Address) -> bool {
+    self.authority.primary().is_none_or(|primary| primary == addr)
   }
 
   fn companion_now_playing_authoritative(&self, scope: CompanionAuthorityScope) -> bool {
@@ -288,7 +294,11 @@ impl PlayerState {
     self.seek_intent.is_some_and(|i| Instant::now() < i.expires)
   }
 
-  pub(crate) fn apply_companion_queue(&mut self, snapshot: QueueSnapshot) {
+  pub(crate) fn apply_companion_queue(&mut self, addr: Address, snapshot: QueueSnapshot) {
+    if !self.accepts_companion_data(addr) {
+      return;
+    }
+    self.companion_source = Some(addr);
     let QueueSnapshot { order, items } = snapshot;
     let by_uri: HashMap<&str, &QueueItem> = items.iter().map(|q| (q.uri.as_str(), q)).collect();
     let mut rebuilt = Vec::with_capacity(order.len());
@@ -333,7 +343,11 @@ impl PlayerState {
     self.apply_merged(merged_meta, merged_play, edge);
   }
 
-  pub(crate) fn reset_companion(&mut self) {
+  pub(crate) fn reset_companion(&mut self, addr: Address) {
+    if self.companion_source != Some(addr) {
+      return;
+    }
+    self.companion_source = None;
     self.recently_played.clear();
     self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
     self.companion_metadata = MediaItemUpdate::default();
@@ -347,7 +361,11 @@ impl PlayerState {
     self.apply_merged(merged_meta, merged_play, true);
   }
 
-  pub(crate) fn apply_companion_snapshot(&mut self, snapshot: WirePlayerState) {
+  pub(crate) fn apply_companion_snapshot(&mut self, addr: Address, snapshot: WirePlayerState) {
+    if !self.accepts_companion_data(addr) {
+      return;
+    }
+    self.companion_source = Some(addr);
     let WirePlayerState {
       track,
       playback,
@@ -1172,6 +1190,8 @@ mod tests {
     }
   }
 
+  const COMPANION: Address = Address([0xC0, 0, 0, 0, 0, 1]);
+
   fn artwork_id_of(state: &PlayerState) -> Option<String> {
     state.replies().0.state.track.and_then(|t| t.artwork_id)
   }
@@ -1235,8 +1255,8 @@ mod tests {
     state.apply_artwork_id("iap2/art/a/5".to_string());
     assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
 
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    state.apply_companion_snapshot(companion_snapshot("track:a", "A", None, true));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_companion_snapshot(COMPANION, companion_snapshot("track:a", "A", None, true));
     assert_eq!(
       artwork_id_of(&state),
       None,
@@ -1251,11 +1271,14 @@ mod tests {
     state.apply_now_playing(iap2_track("track:a", "A"));
     state.apply_artwork_id("iap2/art/a/5".to_string());
 
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    state.apply_companion_snapshot(companion_snapshot("track:a", "A", Some("spotify/track/a/image"), true));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot("track:a", "A", Some("spotify/track/a/image"), true),
+    );
     assert_eq!(artwork_id_of(&state), Some("spotify/track/a/image".to_string()));
 
-    auth.release(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.release(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
     state.apply_now_playing(iap2_track("track:a", "A"));
     assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
   }
@@ -1264,8 +1287,8 @@ mod tests {
   fn transport_gate_follows_the_audible_app() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.set_companion_app_bundle(Some("com.spotify.client".to_string()));
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".to_string()));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
     assert!(
       state.companion_playback_authoritative(),
       "companion owns playback with no other foreground"
@@ -1415,8 +1438,8 @@ mod tests {
   fn non_synthetic_companion_identity_is_actionable() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    state.apply_companion_snapshot(companion_snapshot("spotify:track:x", "Song", None, true));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_companion_snapshot(COMPANION, companion_snapshot("spotify:track:x", "Song", None, true));
     let m = media(&state);
     assert_eq!(
       m.uri.as_deref(),
@@ -1435,15 +1458,13 @@ mod tests {
   fn companion_snapshot_drives_now_playing_when_authoritative() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot(
-      "spotify:track:x",
-      "Spotify Song",
-      Some("spotify/img/x"),
-      true,
-    ));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot("spotify:track:x", "Spotify Song", Some("spotify/img/x"), true),
+    );
 
     let m = media(&state);
     assert_eq!(m.uri.as_deref(), Some("spotify:track:x"));
@@ -1456,15 +1477,13 @@ mod tests {
   fn iap2_other_foreground_app_overrides_companion_authority() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot(
-      "spotify:track:x",
-      "Spotify Song",
-      Some("spotify/img/x"),
-      true,
-    ));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot("spotify:track:x", "Spotify Song", Some("spotify/img/x"), true),
+    );
 
     state.apply_now_playing(iap2_app("iap2:track:s", "Spotify Song", "com.spotify.client", true));
     assert_eq!(
@@ -1500,15 +1519,13 @@ mod tests {
   fn active_app_surfaces_only_for_non_spotify_now_playing() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot(
-      "spotify:track:x",
-      "Spotify Song",
-      Some("spotify/img/x"),
-      true,
-    ));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot("spotify:track:x", "Spotify Song", Some("spotify/img/x"), true),
+    );
     assert!(state.active_app().is_none(), "spotify now-playing is not other-media");
 
     state.apply_now_playing(iap2_app(
@@ -1599,11 +1616,11 @@ mod tests {
   fn aged_companion_position_extrapolates_instead_of_rewinding() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "X", true, 40_000));
+    state.apply_companion_snapshot(COMPANION, companion_snapshot_pos("spotify:track:x", "X", true, 40_000));
     state.take_position_resync();
     state.age_clocks(Duration::from_secs(40));
     let live = state.replies().0.state.playback.position_ms;
@@ -1611,7 +1628,7 @@ mod tests {
 
     let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 40_000);
     stale.playback.position_age_ms = Some(40_000);
-    state.apply_companion_snapshot(stale);
+    state.apply_companion_snapshot(COMPANION, stale);
     assert!(
       !state.take_position_resync(),
       "an age-anchored resend lands on live time and is not a seek"
@@ -1627,13 +1644,13 @@ mod tests {
   fn aged_position_clamps_to_duration() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
 
     let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 190_000);
     stale.playback.position_age_ms = Some(600_000);
-    state.apply_companion_snapshot(stale);
+    state.apply_companion_snapshot(COMPANION, stale);
     let position = state.replies().0.state.playback.position_ms;
     assert!(position <= 200_000, "aged position clamps to duration: {position}");
   }
@@ -1681,11 +1698,11 @@ mod tests {
     let b = qitem("spotify:track:b", "B", "X", Some("img/b"), Some(2000));
     let c = qitem("spotify:track:c", "C", "X", Some("img/c"), Some(3000));
 
-    state.apply_companion_queue(qsnap(vec![a.clone(), b.clone(), c.clone()]));
+    state.apply_companion_queue(COMPANION, qsnap(vec![a.clone(), b.clone(), c.clone()]));
     assert_eq!(state.companion_queue, vec![a, b.clone(), c.clone()]);
 
     let d = qitem("spotify:track:d", "D", "X", Some("img/d"), Some(4000));
-    state.apply_companion_queue(qsnap(vec![b.clone(), c.clone(), d.clone()]));
+    state.apply_companion_queue(COMPANION, qsnap(vec![b.clone(), c.clone(), d.clone()]));
     assert_eq!(state.companion_queue, vec![b, c, d]);
   }
 
@@ -1725,11 +1742,11 @@ mod tests {
   #[test]
   fn reset_companion_clears_recents_and_bumps_home_gen_but_retains_queue() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
-    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
+    state.apply_companion_queue(COMPANION, qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
     state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None));
     let before = state.root_browse_gen();
 
-    state.reset_companion();
+    state.reset_companion(COMPANION);
     assert!(
       !state.companion_queue.is_empty(),
       "the held queue survives a companion blip"
@@ -1742,27 +1759,30 @@ mod tests {
   fn queue_survives_companion_blip_and_serves_suffix_on_reconnect() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot("spotify:track:x", "X", None, true));
-    state.apply_companion_queue(qsnap(vec![
-      qitem("spotify:track:y", "Y", "A", None, None),
-      qitem("spotify:track:z", "Z", "A", None, None),
-    ]));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(COMPANION, companion_snapshot("spotify:track:x", "X", None, true));
+    state.apply_companion_queue(
+      COMPANION,
+      qsnap(vec![
+        qitem("spotify:track:y", "Y", "A", None, None),
+        qitem("spotify:track:z", "Z", "A", None, None),
+      ]),
+    );
     assert_eq!(state.replies().1.items.len(), 2);
 
-    auth.drop_all();
-    state.reset_companion();
+    auth.drop_for(COMPANION);
+    state.reset_companion(COMPANION);
     assert!(
       state.replies().1.items.is_empty(),
       "no companion authority means no companion queue view"
     );
 
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot("spotify:track:y", "Y", None, true));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(COMPANION, companion_snapshot("spotify:track:y", "Y", None, true));
     let items = state.replies().1.items;
     assert_eq!(items.len(), 1, "the retained queue serves the derived suffix");
     assert_eq!(items[0].uri, "spotify:track:z");
@@ -1784,7 +1804,7 @@ mod tests {
   #[test]
   fn note_library_changed_bumps_home_gen_without_clearing_queue() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
-    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
+    state.apply_companion_queue(COMPANION, qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
     state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None));
     let before = state.root_browse_gen();
 
@@ -1812,20 +1832,18 @@ mod tests {
 
     state.apply_now_playing(iap2_track("iap2:track:fallback", "iAP2 Song"));
 
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot(
-      "spotify:track:x",
-      "Spotify Song",
-      Some("img/x"),
-      true,
-    ));
-    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:y", "Y", "Z", None, None)]));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot("spotify:track:x", "Spotify Song", Some("img/x"), true),
+    );
+    state.apply_companion_queue(COMPANION, qsnap(vec![qitem("spotify:track:y", "Y", "Z", None, None)]));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:x"));
 
-    auth.drop_all();
-    state.reset_companion();
+    auth.drop_for(COMPANION);
+    state.reset_companion(COMPANION);
 
     let m = media(&state);
     assert_eq!(
@@ -1863,10 +1881,13 @@ mod tests {
 
   fn spotify_owned_state(auth: &AuthorityRegistry) -> PlayerState {
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Spotify Song", true, 10_000));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:x", "Spotify Song", true, 10_000),
+    );
     state.take_position_resync();
     state
   }
@@ -1974,7 +1995,10 @@ mod tests {
       "staged iap2 play-state burned the optimistic transport intent"
     );
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Spotify Song", false, 12_000));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:x", "Spotify Song", false, 12_000),
+    );
     assert!(!state.playing);
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
     assert!(!state.playing, "post-confirm iap2 chatter flipped the play state");
@@ -2053,7 +2077,10 @@ mod tests {
     let before = view_position(&state);
     assert!(before >= 7_500, "aged iap2 playhead extrapolates: {before}");
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:z", "Next Song", true, 0),
+    );
     assert!(
       !state.take_position_resync(),
       "staged companion snapshot must not force a resync broadcast"
@@ -2075,7 +2102,7 @@ mod tests {
   fn companion_claim_without_data_falls_through_to_iap2_time_fields() {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
 
     state.apply_now_playing(NowPlayingUpdate {
       media_item: None,
@@ -2105,15 +2132,18 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = PlayerState::new(auth.clone());
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Song", true, 3_000));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:x", "Song", true, 3_000),
+    );
     assert!(
       state.replies().0.state.track.is_none(),
       "an unclaimed companion snapshot must not surface"
     );
 
-    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
-    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
-    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(COMPANION, CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(COMPANION, Some("com.spotify.client".into()));
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
 
     assert!(state.take_position_resync(), "the lazy claim edge is a hard cut");
@@ -2140,7 +2170,10 @@ mod tests {
       }),
     });
     state.take_position_resync();
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:z", "Next Song", true, 0),
+    );
     state.take_position_resync();
 
     state.age_clocks(Duration::from_secs(5));
@@ -2199,29 +2232,32 @@ mod tests {
 
   fn queued_state(auth: &AuthorityRegistry) -> PlayerState {
     let mut state = spotify_owned_state(auth);
-    state.apply_companion_queue(qsnap(vec![
-      qitem(
-        "spotify:track:b",
-        "Track B",
-        "Artist B",
-        Some("spotify/img/248/b"),
-        Some(201_000),
-      ),
-      qitem(
-        "spotify:track:c",
-        "Track C",
-        "Artist C",
-        Some("spotify/img/248/c"),
-        Some(202_000),
-      ),
-      qitem(
-        "spotify:track:d",
-        "Track D",
-        "Artist D",
-        Some("spotify/img/248/d"),
-        Some(203_000),
-      ),
-    ]));
+    state.apply_companion_queue(
+      COMPANION,
+      qsnap(vec![
+        qitem(
+          "spotify:track:b",
+          "Track B",
+          "Artist B",
+          Some("spotify/img/248/b"),
+          Some(201_000),
+        ),
+        qitem(
+          "spotify:track:c",
+          "Track C",
+          "Artist C",
+          Some("spotify/img/248/c"),
+          Some(202_000),
+        ),
+        qitem(
+          "spotify:track:d",
+          "Track D",
+          "Artist D",
+          Some("spotify/img/248/d"),
+          Some(203_000),
+        ),
+      ]),
+    );
     state
   }
 
@@ -2297,7 +2333,10 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let mut state = queued_state(&auth);
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:b", "Track B", true, 4_000));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:b", "Track B", true, 4_000),
+    );
     state.take_position_resync();
 
     state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
@@ -2418,11 +2457,14 @@ mod tests {
   fn optimistic_advance_does_not_double_promote_duplicate_queue_titles() {
     let auth = AuthorityRegistry::new();
     let mut state = spotify_owned_state(&auth);
-    state.apply_companion_queue(qsnap(vec![
-      qitem("spotify:track:b", "Track B", "Artist B", None, None),
-      qitem("spotify:track:b2", "Track B", "Artist B", None, None),
-      qitem("spotify:track:c", "Track C", "Artist C", None, None),
-    ]));
+    state.apply_companion_queue(
+      COMPANION,
+      qsnap(vec![
+        qitem("spotify:track:b", "Track B", "Artist B", None, None),
+        qitem("spotify:track:b2", "Track B", "Artist B", None, None),
+        qitem("spotify:track:c", "Track C", "Artist C", None, None),
+      ]),
+    );
 
     state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
     assert_eq!(
@@ -2444,13 +2486,14 @@ mod tests {
     state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
 
-    state.apply_companion_snapshot(companion_snapshot_pos(
-      "spotify:track:elsewhere",
-      "Elsewhere",
-      true,
-      30_000,
-    ));
-    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:w", "W", "Artist W", None, None)]));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:elsewhere", "Elsewhere", true, 30_000),
+    );
+    state.apply_companion_queue(
+      COMPANION,
+      qsnap(vec![qitem("spotify:track:w", "W", "Artist W", None, None)]),
+    );
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:elsewhere"));
     let pos = view_position(&state);
     assert!(pos >= 30_000, "the corrected playhead is the dealer's: {pos}");
@@ -2461,14 +2504,20 @@ mod tests {
   fn stale_iap2_echo_after_a_context_switch_never_reverts_the_card() {
     let auth = AuthorityRegistry::new();
     let mut state = spotify_owned_state(&auth);
-    state.apply_companion_queue(qsnap(vec![
-      qitem("spotify:track:x", "Spotify Song", "Artist", None, Some(200_000)),
-      qitem("spotify:track:y", "Track Y", "Artist Y", None, None),
-    ]));
+    state.apply_companion_queue(
+      COMPANION,
+      qsnap(vec![
+        qitem("spotify:track:x", "Spotify Song", "Artist", None, Some(200_000)),
+        qitem("spotify:track:y", "Track Y", "Artist Y", None, None),
+      ]),
+    );
     state.apply_now_playing(iap2_app("iap2:track:x", "Spotify Song", "com.spotify.client", true));
     assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:x"));
 
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:t", "Fresh Pick", true, 0));
+    state.apply_companion_snapshot(
+      COMPANION,
+      companion_snapshot_pos("spotify:track:t", "Fresh Pick", true, 0),
+    );
     assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:t"));
 
     state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));

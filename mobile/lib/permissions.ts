@@ -8,12 +8,19 @@ const LOCATION =
     ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
     : PERMISSIONS.IOS.LOCATION_WHEN_IN_USE;
 
-// CDM does the scanning for us, so we never need BLUETOOTH_SCAN or location to
-// find the Car Thing. But opening the RFCOMM socket - and starting the
-// connectedDevice foreground service that hosts it - still requires
-// BLUETOOTH_CONNECT to be granted at runtime on Android 12+.
 const BLUETOOTH_CONNECT =
   Platform.OS === 'android' ? PERMISSIONS.ANDROID.BLUETOOTH_CONNECT : null;
+
+const BACKGROUND_LOCATION =
+  Platform.OS === 'android'
+    ? PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION
+    : null;
+
+export const LOCATION_PERMISSIONS = [
+  PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION,
+  PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+  PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
+];
 
 function toState(result: string): PermissionState {
   if (result === RESULTS.GRANTED || result === RESULTS.LIMITED)
@@ -29,6 +36,16 @@ export async function locationStatus(): Promise<PermissionState> {
 
 export async function requestLocation(): Promise<PermissionState> {
   return toState(await request(LOCATION));
+}
+
+export async function backgroundLocationStatus(): Promise<PermissionState> {
+  if (!BACKGROUND_LOCATION) return 'unavailable';
+  return toState(await check(BACKGROUND_LOCATION));
+}
+
+export async function requestBackgroundLocation(): Promise<PermissionState> {
+  if (!BACKGROUND_LOCATION) return 'unavailable';
+  return toState(await request(BACKGROUND_LOCATION));
 }
 
 export async function bluetoothConnectStatus(): Promise<PermissionState> {

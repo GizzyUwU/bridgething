@@ -8,7 +8,6 @@ import { dirname, join, resolve } from 'node:path';
 interface Args {
   dist: string;
   output: string;
-  builtin: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -23,9 +22,6 @@ function parseArgs(argv: string[]): Args {
       case '--output':
         args.output = next;
         i++;
-        break;
-      case '--builtin':
-        args.builtin = true;
         break;
       case '--help':
       case '-h':
@@ -52,7 +48,6 @@ function printHelpAndExit(code: number): never {
       '',
       '  --dist <path>     built webapp dist dir (index.html + manifest.json + icon at root)',
       '  --output <path>   output .zip path',
-      '  --builtin         allow a webapp declaring a role (daemon release only)',
     ].join('\n'),
   );
   process.exit(code);
@@ -90,13 +85,11 @@ async function main() {
     version?: string;
     icon?: string;
     role?: string;
+    overlay?: string;
     permissions?: string[];
   };
   for (const field of ['id', 'name', 'description', 'version'] as const) {
     if (!manifest[field]) throw new Error(`${dist}/manifest.json missing required field "${field}"`);
-  }
-  if (manifest.role && !args.builtin) {
-    throw new Error(`${dist} declares role "${manifest.role}"; builtin webapps are not published to the catalog`);
   }
   if (!(await readdir(dist)).includes('index.html')) {
     throw new Error(`${dist} has no index.html at its root`);
@@ -116,6 +109,8 @@ async function main() {
     description: manifest.description,
     version: manifest.version,
     permissions: manifest.permissions ?? [],
+    role: manifest.role ?? null,
+    provides_overlay: Boolean(manifest.overlay),
     icon: manifest.icon ?? null,
     iconPath: manifest.icon ? join(dist, manifest.icon) : null,
     size,

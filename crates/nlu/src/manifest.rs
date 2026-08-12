@@ -30,7 +30,7 @@ pub struct ClosedHead {
   pub values: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, uniffi::Record)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Rejection {
   pub in_domain_threshold: f64,

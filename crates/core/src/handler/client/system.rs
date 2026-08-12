@@ -124,7 +124,7 @@ impl ClientToBridgeSystemMsgDispatch for SystemHandler {
   }
 
   async fn factory_reset(&self) -> HandlerResult {
-    if let Err(err) = self.handle.bluetooth.profile_man.get().await.reset().await {
+    if let Err(err) = self.handle.bluetooth.profile_man.reset().await {
       tracing::error!("error resetting bluetooth devices: {:?}", err);
     }
 
@@ -210,8 +210,7 @@ fn read_soc_temp_c() -> Option<f32> {
 
 fn read_disk_usage() -> Option<(u32, u32)> {
   let path = std::ffi::CString::new("/var").ok()?;
-  // SAFETY: statvfs takes a NUL-terminated path and writes a stable
-  // POSIX struct; both pointers are local stack allocations.
+  // SAFETY: statvfs takes a NUL-terminated path and writes a stable POSIX struct; both pointers are local stack allocations
   let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
   let rc = unsafe { libc::statvfs(path.as_ptr(), &mut stat) };
   if rc != 0 {

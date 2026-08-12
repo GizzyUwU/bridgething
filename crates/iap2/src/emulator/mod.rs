@@ -1,4 +1,5 @@
 mod ea;
+pub mod harness;
 
 use bytes::{Bytes, BytesMut};
 use ea::DeviceEaFlow;

@@ -3,9 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -19,7 +17,6 @@ pub enum PhoneCallStatus {
   Disconnecting,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -31,7 +28,6 @@ pub enum PhoneCallDirection {
 /// Call bearer / service kind. iAP2's `CallStateUpdateService` enum
 /// values, projected to our wire surface. Companion gateways that don't
 /// distinguish bearers project all calls to `Telephony`.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -46,7 +42,6 @@ pub enum PhoneCallService {
 /// lifetime; webapps pass it back to `answer`/`decline`/`end`/`hold`.
 /// `remote_id` is the raw E.164 (or platform raw); `display_name` is the
 /// gateway's resolved contact name when available.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +63,6 @@ pub struct PhoneCall {
 /// Snapshot of every active call known to the gateway. Multi-call is
 /// possible (call-waiting, conference) - webapps rendering only one
 /// active call typically pick the first non-Held entry.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -79,7 +73,6 @@ pub struct PhoneState {
 
 /// Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
 /// platform-defined reason (network, busy, etc.).
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -93,7 +86,6 @@ pub enum CallEndReason {
 
 /// Cellular registration state - populated from iAP2 `CommunicationsUpdate`
 /// or the companion's equivalent.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -111,7 +103,6 @@ pub enum RegistrationStatus {
 /// these flags; sending an unavailable verb is a protocol violation, not
 /// a no-op. All `None` = no signal received yet, treat as conservatively
 /// unavailable.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +127,6 @@ pub struct CommunicationsState {
   pub hold_available: Option<bool>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -155,7 +145,6 @@ pub enum PhoneError {
 }
 
 /// DTMF tones the accessory can play during an active call.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -176,7 +165,6 @@ pub enum DtmfTone {
 
 /// Direction the accessory wants iOS to take when answering an incoming
 /// call while another call is active.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -190,7 +178,6 @@ pub enum AcceptCallAction {
 }
 
 /// Direction the accessory wants iOS to take when ending a call.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -203,7 +190,6 @@ pub enum EndCallAction {
 }
 
 /// What kind of outbound call the accessory wants placed.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

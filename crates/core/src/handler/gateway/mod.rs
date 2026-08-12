@@ -80,7 +80,6 @@ impl GatewayHandler {
       address,
       protocol,
       msg: GatewayToBridgeMsg { id, meta, data },
-      ..
     } = data;
 
     if let MsgMeta::Response(meta_resp) = &meta
@@ -92,7 +91,7 @@ impl GatewayHandler {
       return Ok(());
     }
 
-    let handle = MsgHandle::new(self, id, meta, address, protocol);
+    let handle = MsgHandle::new(self, id, address, protocol);
 
     match data {
       GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg {
@@ -204,10 +203,7 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Transfer(transfer_msg) => match transfer_msg {
         GatewayToBridgeTransferMsg::Fragment(f) => {
           let transfer_id = f.transfer_id;
-          let ack_received = self
-            .state
-            .transfer_sinks
-            .fragment(f.transfer_id, f.offset, f.bytes.into());
+          let ack_received = self.state.transfer_sinks.fragment(f.transfer_id, f.offset, f.bytes);
           if let Some(received) = ack_received
             && let Some(address) = handle.address
           {

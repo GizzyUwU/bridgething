@@ -89,6 +89,9 @@
 		<string>Outfit-Medium.ttf</string>
 		<string>Outfit-Light.ttf</string>
 		<string>Inter-SemiBold.ttf</string>
+		<string>JetBrainsMono-Bold.ttf</string>
+		<string>JetBrainsMono-Regular.ttf</string>
+		<string>JetBrainsMono-Medium.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

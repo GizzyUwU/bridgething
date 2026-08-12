@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -e
+
+ZERO=$(git hash-object --stdin </dev/null 2>/dev/null || echo "0000000000000000000000000000000000000000")
+
+fail() {
+  echo
+  echo "  pre-push hook: $1" >&2
+  echo "  if you really mean to push, run with --no-verify (don't.)" >&2
+  echo
+  exit 1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/*) ;;
+    *) continue ;;
+  esac
+
+  tag="${remote_ref#refs/tags/}"
+
+  case "$tag" in
+    daemon-*) version="${tag#daemon-}" ;;
+    image-*)  version="${tag#image-}"  ;;
+    *) continue ;;
+  esac
+
+  if [ "$local_sha" = "$ZERO" ]; then
+    continue
+  fi
+
+  file="releases/${version}.md"
+
+  if ! git cat-file -e "${local_sha}:${file}" 2>/dev/null; then
+    fail "tag ${tag} requires ${file} at the tagged commit (file missing)"
+  fi
+
+  content="$(git show "${local_sha}:${file}")"
+  fm_version="$(printf '%s\n' "$content" \
+    | awk '/^---[[:space:]]*$/{c++; next} c==1 && /^version:/{
+        sub(/^version:[[:space:]]*/, "")
+        gsub(/^["'\'']|["'\'']$/, "")
+        print
+        exit
+      }')"
+
+  if [ -z "$fm_version" ]; then
+    fail "tag ${tag}: ${file} has no \`version:\` field in frontmatter"
+  fi
+
+  if [ "$fm_version" != "$version" ]; then
+    fail "tag ${tag}: ${file} declares version=${fm_version}, expected ${version}"
+  fi
+
+  echo "pre-push: ${tag} -> ${file} ok"
+done
+
+exit 0

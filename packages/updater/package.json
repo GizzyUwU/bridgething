@@ -1,7 +1,7 @@
 {
   "name": "@bridgething/updater",
   "version": "0.4.0",
-  "description": "Transport-agnostic OTA updater for bridgething: library + bunx/npx CLI.",
+  "description": "Update a Spotify Car Thing from the command line, over its network gateway.",
   "license": "MIT",
   "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
   "homepage": "https://bridgething.com",
@@ -19,31 +19,8 @@
     "registry": "https://registry.npmjs.org/"
   },
   "type": "module",
-  "types": "./dist/index.d.ts",
   "bin": {
     "bridgething-updater": "./dist/cli.js"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./manifest": {
-      "types": "./dist/manifest.d.ts",
-      "default": "./dist/manifest.js"
-    },
-    "./node": {
-      "types": "./dist/node.d.ts",
-      "default": "./dist/node.js"
-    },
-    "./websocket": {
-      "types": "./dist/websocket.d.ts",
-      "default": "./dist/websocket.js"
-    },
-    "./web-serial": {
-      "types": "./dist/web-serial.d.ts",
-      "default": "./dist/web-serial.js"
-    }
   },
   "files": ["dist"],
   "scripts": {
@@ -51,12 +28,10 @@
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "bun test"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@bridgething/adapter-network": "workspace:*",
-    "@bridgething/gateway": "workspace:*",
+    "@bridgething/core-node": "workspace:*",
     "@bridgething/lib": "workspace:*"
   },
   "peerDependencies": {

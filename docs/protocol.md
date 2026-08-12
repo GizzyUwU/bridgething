@@ -8,8 +8,8 @@ It covers the framing layer, the message envelope every packet shares,
 correlation semantics for requests, the priority lane byte, error
 shapes, transports, and size / timeout limits. It does **not**
 enumerate the per-surface types. Those live in the auto-generated
-`crates/lib/ts/bindings/`, `crates/lib/swift/`, and
-`crates/lib/kotlin/` outputs, plus the canonical Rust source under
+`crates/lib/ts/bindings/` output, plus the
+canonical Rust source under
 `crates/lib/src/{client,gateway,shared}/`.
 
 ## the two wire surfaces
@@ -43,7 +43,7 @@ frame is one or more concatenated **frames** in this shape:
 offset  size  field         notes
 ------  ----  ------------  -----
 0       2     magic         0xdead, big-endian; resync marker
-2       1     version       currently 2; mismatch drops the connection
+2       1     version       currently 2; mismatch resyncs to the next frame
 3       1     compression   0=none (default), 1=gzip
 4       1     encoding      0=msgpack (default), 1=json
 5       1     priority      0=normal, 1=bulk (lane hint)
@@ -58,11 +58,20 @@ frame carries exactly one typed envelope (see [envelope](#envelope)).
 
 A single transport message can hold multiple concatenated frames, and
 a single frame can be split across multiple transport messages. The
-canonical Rust decoder is `BridgeEndec` in
-`crates/lib/src/protocol/bridge.rs`, implemented as a streaming
-`tokio_util::codec::Decoder` for byte streams (RFCOMM, iAP2 EA), plus
-`parse_bridge_frame` for the message-bounded case (a complete WS
-binary frame).
+canonical Rust decoder is `WireEndec` in
+`crates/lib/src/protocol/endec.rs`, aliased `BridgeEndec` on the daemon
+side and `GatewayEndec` on the companion side. It implements
+`tokio_util::codec::Decoder` for byte streams (RFCOMM, iAP2 EA) and
+exposes `decode_bytes` for the message-bounded case (a complete WS
+binary frame), both over the same state machine.
+
+Decode never wedges the stream. A bad magic, an unsupported version and
+a length over the 16 MiB cap all scan forward to the next magic and keep
+decoding, silently: an `Err` out of a `Decoder` ends a `Framed` stream
+for good, so a resync cannot be reported as one. The scan holds back the
+last byte so a magic straddling two reads survives. A failed inflate or a
+failed typed decode is reported, but only after the body is already off
+the front of the buffer, so the frame behind it still decodes.
 
 ### compression
 
@@ -314,6 +323,7 @@ webapp from a gateway.
 | ----------------------------------- | ------- | ------------------------------------------------------------------------- |
 | **request timeout**                 | 10 s    | `crates/core/src/bluetooth/mod.rs::REQUEST_TIMEOUT`                       |
 | **WS message cap (NetworkGateway)** | 1 MiB   | `crates/core/src/bluetooth/network/mod.rs::WS_MAX_FRAME_BYTES`            |
+| **frame payload cap**               | 16 MiB  | `crates/lib/src/protocol/mod.rs::MAX_FRAME_LEN`                          |
 | **chunked transfer chunk size**     | 16 KiB  | application-layer convention; see `crates/core/src/transfer/`             |
 
 Large payloads ship through the generic transfer surface: the typed
@@ -348,7 +358,5 @@ and held for future framing extensions.
 - `crates/lib/src/shared/priority.rs` - priority lane.
 - `crates/lib/ts/bindings/` - generated TS surface (regenerate with
   `just codegen`).
-- `crates/lib/swift/Sources/` and `crates/lib/kotlin/schema/` -
-  generated Swift and Kotlin surfaces.
 - `docs/stock-webapp-gateway-contract.md` - populating the stock
   Spotify webapp from a gateway.

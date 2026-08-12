@@ -1,0 +1,26 @@
+project:
+  id: bridgething
+  name: bridgething
+  description: the bridge layer that lets the car thing remain itself while opening up to anything you build for it
+  publisher: JoeyEamigh
+  publisher_url: https://github.com/JoeyEamigh
+  license: MIT
+  website: https://bridgething.com
+  source_url: https://github.com/JoeyEamigh/bridgething
+  issue_url: https://github.com/JoeyEamigh/bridgething/issues
+  support_url: https://tl.mt/d
+  icon_url: https://bridgething.com/brand/icon-dark.svg
+  banner_url: null
+  screenshots: []
+
+channels:
+  - slug: stable
+    name: Stable
+    description: daily-use image with the best performance.
+    stability: stable
+    default: true
+  - slug: dev
+    name: Dev
+    description: dev image with more logging and debugging features. slower and hard on your emmc - not recommended.
+    stability: experimental
+    default: false

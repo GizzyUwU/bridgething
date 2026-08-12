@@ -1,9 +1,6 @@
 import { BridgethingClient, type ConnectionState, type PlayerState } from '@bridgething/client';
 import { useEffect, useMemo, useState } from 'react';
 
-// Production: the webapp is served by the daemon on the device, so a
-// relative `ws://<location.host>/` reaches it. In dev (vite on your
-// laptop) point at the device explicitly with VITE_BRIDGETHING_URL.
 const wsUrl =
   import.meta.env.VITE_BRIDGETHING_URL ??
   (typeof window !== 'undefined' ? `ws://${window.location.host}/` : 'ws://127.0.0.1:8891/');
@@ -56,41 +53,43 @@ export default function App() {
   const playing = state?.playback.state === 'playing';
 
   return (
-    <div className="flex h-full w-full items-center justify-center gap-12 bg-bt-charcoal p-12 text-bt-off-white">
+    <div className="flex h-full w-full items-center justify-center gap-12 bg-bg p-12 text-off-white">
       {artUrl ? (
-        <img src={artUrl} alt="" className="h-full max-h-96 w-auto rounded-2xl shadow-2xl" />
+        <img src={artUrl} alt="" className="h-full max-h-96 w-auto border border-rule" />
       ) : (
-        <div className="grid h-96 w-96 place-items-center rounded-2xl bg-black/40 text-sm text-bt-soft-gray">
+        <div className="grid h-96 w-96 place-items-center border border-rule bg-screen font-mono text-body text-dim">
           {conn === 'open' ? 'no track' : conn}
         </div>
       )}
       <div className="flex flex-col gap-3">
-        <div className="text-xs uppercase tracking-widest text-bt-soft-gray">{conn}</div>
+        <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">{conn}</div>
         {track ? (
           <>
-            <div className="text-3xl font-semibold leading-tight">{track.title ?? 'unknown'}</div>
-            <div className="text-xl text-bt-soft-gray">{track.artist ?? ''}</div>
-            <div className="text-sm text-bt-soft-gray/70">{track.album ?? ''}</div>
+            <div className="font-display text-3xl font-medium leading-tight tracking-display">
+              {track.title ?? 'unknown'}
+            </div>
+            <div className="text-xl text-soft">{track.artist ?? ''}</div>
+            <div className="font-mono text-hint text-dim">{track.album ?? ''}</div>
             <div className="mt-6 flex gap-4">
               <button
-                className="rounded-full bg-white/10 px-6 py-3 text-sm font-medium transition active:bg-white/20"
+                className="border border-edge px-6 py-3 font-mono text-row text-near transition active:bg-neutral-soft"
                 onClick={() => client.player.skipPrev()}>
                 ◀◀
               </button>
               <button
-                className="rounded-full bg-bt-blue px-6 py-3 text-sm font-medium text-bt-charcoal transition active:scale-95"
+                className="border border-accent bg-accent px-6 py-3 font-mono text-row text-screen transition active:opacity-80"
                 onClick={() => (playing ? client.player.pause() : client.player.resume())}>
                 {playing ? '❚❚' : '▶'}
               </button>
               <button
-                className="rounded-full bg-white/10 px-6 py-3 text-sm font-medium transition active:bg-white/20"
+                className="border border-edge px-6 py-3 font-mono text-row text-near transition active:bg-neutral-soft"
                 onClick={() => client.player.skipNext()}>
                 ▶▶
               </button>
             </div>
           </>
         ) : (
-          <div className="text-2xl text-bt-soft-gray">connect a phone to see now playing</div>
+          <div className="text-title text-soft">connect a phone to see now playing</div>
         )}
       </div>
     </div>

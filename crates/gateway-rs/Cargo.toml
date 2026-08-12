@@ -11,14 +11,40 @@ homepage.workspace = true
 bridgething-sdk-runtime = { path = "../sdk-runtime" }
 libbridgething = { path = "../lib" }
 
-tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "io-util"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
+tracing.workspace = true
 uuid = { workspace = true, features = ["v7"] }
-tokio-tungstenite = "0.29.0"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
+serde_json.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-util"] }
+tokio = { workspace = true, features = [
+  "rt-multi-thread",
+  "macros",
+  "time",
+  "io-util",
+  "test-util",
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bridgething-io = { path = "../io", default-features = false }
+tokio-tungstenite = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.103"
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+web-sys = { version = "0.3.103", features = [
+  "WebSocket",
+  "MessageEvent",
+  "CloseEvent",
+  "Event",
+  "BinaryType",
+] }
+
+[features]
+default = []
+native-ws = ["dep:tokio-tungstenite"]

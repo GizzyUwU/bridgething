@@ -41,8 +41,6 @@ jobs:
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone
-          # no_check_bucket: rclone otherwise issues CreateBucket before an upload,
-          # which an R2 object-read-write token denies with a 403.
           cat > ~/.config/rclone/rclone.conf <<EOF
           [r2]
           type = s3
@@ -64,8 +62,6 @@ jobs:
           set -euo pipefail
           published='[]'
 
-          # lsf exits 0 for a key that does not exist and simply prints nothing, so the output is the
-          # only usable signal; testing its exit status silently skips every upload.
           exists() { [ -n "$(rclone lsf "r2:${R2_BUCKET}/$1" 2>/dev/null)" ]; }
 
           for dir in ${CATALOG_DIR}/*/; do
@@ -108,7 +104,7 @@ jobs:
               --arg slug "$slug" \
               --arg url "${PUBLIC_BASE}/${key}" \
               --argjson icon "$iconUrl" \
-              '{slug: $slug, id, name, description, version, permissions,
+              '{slug: $slug, id, name, description, version, permissions, role, provides_overlay,
                 icon: $icon,
                 download: {url: $url, size, sha256}}' <<<"$meta")
             published=$(jq -c ". + [$entry]" <<<"$published")
@@ -127,11 +123,11 @@ jobs:
           CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
         run: scripts/cf-purge
 
-      - name: tell bridgething.com to regenerate the catalog
+      - name: tell the publish-apps workflow to regenerate the catalog
         if: steps.publish.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           jq -c '{event_type: "webapps-published", client_payload: {apps: .}}' /tmp/published.json \
-            | gh api repos/JoeyEamigh/bridgething.com/dispatches --input -
+            | gh api repos/JoeyEamigh/bridgething/dispatches --input -

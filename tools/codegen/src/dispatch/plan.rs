@@ -1,37 +1,20 @@
-//! Aggregates the inventory into per-surface buckets that the
-//! per-language emitters consume directly. A "surface" maps to one
-//! top-level wire variant (e.g. `Asset`) and bundles every method that
-//! belongs in the `<entry>.<surface>` namespace: inbound listeners,
-//! outbound sends, typed queries, and typed inbound request handles.
-//!
-//! The plan is built per `Protocol`; per-language emitters take a single
-//! `Plan` and emit one dispatch file per protocol invocation.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, anyhow};
 
-use super::inventory::{Direction, EnumDef, Inventory, MarkerKind, PayloadType, Protocol, TypedRequest, WireVariant};
+use super::inventory::{
+  Direction, EnumDef, Inventory, MarkerKind, PayloadType, Protocol, TypedRequest, VariantTag, WireVariant,
+};
 
 #[derive(Debug, Clone)]
 pub struct DispatchEntry {
-  /// Wire `data.type` discriminator (e.g. `"asset"`, `"transport"`).
   pub outer_disc: String,
-  /// Outer variant name in PascalCase (e.g. `"Asset"`).
   pub outer_variant: String,
-  /// Outer payload type - `None` for unit variants.
   pub outer_payload: Option<PayloadType>,
-  /// Inner enum variants (when `outer_payload` is a `Named` type that
-  /// resolves to an adjacent-tagged enum). Empty otherwise.
   pub inner_variants: Vec<InnerVariantPlan>,
-  /// Inner enum's adjacent-tagged discriminator field name.
   pub inner_tag_field: Option<String>,
-  /// Direction of the wire (which side receives this).
   pub direction: Direction,
-  /// Event-vs-Command tag. Determines wire `meta` for outbound emit.
   pub category: EntryCategory,
-  /// True when the variant is marked `WireUnicast`.
-  pub unicast: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,82 +39,52 @@ pub struct InnerVariantPlan {
   pub disc: String,
   pub variant: String,
   pub payload: Option<PayloadType>,
-  /// Outbound codegen skips struct variants - payload would need full
-  /// per-field args.
   pub is_struct: bool,
-  /// Per-variant outbound bucket. Inferred from the variant's
-  /// `#[bridge_event]` / `#[bridge_command]` tag. Unset for
-  /// request/response variants and for outer wire enums.
+  pub boxed: bool,
   pub category: Option<EntryCategory>,
 }
 
 pub struct Plan {
   pub protocol: Protocol,
   pub entries: Vec<DispatchEntry>,
-  /// Outbound typed requests for this protocol's outbound direction.
   pub outbound_requests: Vec<TypedRequestEntry>,
-  /// Inbound typed requests for this protocol's outbound direction
-  /// (i.e. the OPPOSITE direction sends a request, this side handles it).
   pub inbound_requests: Vec<TypedRequestEntry>,
 }
 
-/// Per-language emitters consume `Surface`s - aggregations of
-/// inbound + outbound entries for a single top-level wire variant
-/// (e.g. all `Asset`-related methods for the `<entry>.asset` namespace).
 #[derive(Debug, Clone)]
 pub struct Surface {
-  /// PascalCase outer variant (e.g. `"Asset"`).
   pub name: String,
-  /// camelCase property name on the entry class (e.g. `"asset"`).
   pub prop: String,
-  /// Inbound dispatch entry - bridge → counterparty direction.
   pub inbound: Option<DispatchEntry>,
-  /// Outbound dispatch entry - counterparty → bridge direction.
   pub outbound: Option<DispatchEntry>,
-  /// Counterparty → bridge typed requests scoped to this surface.
   pub outbound_queries: Vec<TypedRequestEntry>,
-  /// Bridge → counterparty typed requests scoped to this surface.
   pub inbound_requests: Vec<TypedRequestEntry>,
 }
 
 impl Surface {
-  /// Inner variants of the inbound-side payload that should be exposed
-  /// as event-shape callbacks. Excludes inner variants that map to a
-  /// typed inbound request - those are handled via the request-handle
-  /// pattern. Filters by both payload type (the struct case) and
-  /// variant name (the no-payload-marker case, e.g.
-  /// `pub enum X { #[bridge_request] StateGet }` with marker struct
-  /// `XStateGet`).
   pub fn inbound_event_variants(&self) -> Vec<&InnerVariantPlan> {
-    let bridge_request_payloads: BTreeSet<&str> = self.inbound_requests.iter().map(|r| r.request.as_str()).collect();
-    let bridge_request_variants: BTreeSet<String> = self
-      .inbound_requests
-      .iter()
-      .map(|r| r.request_variant_pascal())
-      .collect();
     self
       .inbound
       .as_ref()
       .map(|e| {
         e.inner_variants
           .iter()
-          .filter(|iv| {
-            if bridge_request_variants.contains(&iv.variant) {
-              return false;
-            }
-            match &iv.payload {
-              Some(PayloadType::Named(n)) => !bridge_request_payloads.contains(n.as_str()),
-              _ => true,
-            }
-          })
+          .filter(|iv| !self.is_inbound_request_variant(&iv.variant, iv.payload.as_ref()))
           .collect()
       })
       .unwrap_or_default()
   }
 
-  /// Inner variants of the outbound-side payload that should be exposed
-  /// as outbound methods. Skips struct-shaped variants and any variant
-  /// whose name matches a typed-request response/error.
+  pub fn is_inbound_request_variant(&self, variant: &str, payload: Option<&PayloadType>) -> bool {
+    let by_variant = self
+      .inbound_requests
+      .iter()
+      .any(|r| r.request_variant_pascal() == variant);
+    let by_payload = matches!(payload, Some(PayloadType::Named(n))
+      if self.inbound_requests.iter().any(|r| r.request == *n));
+    by_variant || by_payload
+  }
+
   pub fn outbound_send_variants(&self) -> Vec<&InnerVariantPlan> {
     let mut response_variants: BTreeSet<String> = BTreeSet::new();
     for r in &self.inbound_requests {
@@ -167,24 +120,31 @@ pub struct TypedRequestEntry {
   pub request_takes_payload: bool,
   pub response: String,
   pub error: Option<String>,
-  /// Outer variant in `<Direction>MsgData`, in PascalCase (e.g. `"Webapp"`).
   pub surface: String,
-  /// Camel-case wire discriminator for the outer (e.g. `"webapp"`).
   pub surface_disc: String,
-  /// Inner-enum adjacent-tagged tag field (e.g. `"event"`).
   pub inner_tag: String,
-  /// Camel-case wire discriminator for the request inner variant.
   pub request_disc: String,
   pub response_disc: String,
   pub error_disc: Option<String>,
 }
 
 impl TypedRequestEntry {
-  /// Byte-stream surfaces carry large, already-compressed binary (asset images). Their responses
-  /// go on the bulk lane so they yield to latency-sensitive traffic and skip the codecs' size-based
-  /// auto-gzip (gzipping a JPEG just burns the phone's CPU for no size win).
   pub fn is_bulk_byte_stream(&self) -> bool {
     self.surface_disc == "asset"
+  }
+
+  pub fn is_concurrent(&self) -> bool {
+    matches!(
+      (self.surface_disc.as_str(), self.request_disc.as_str()),
+      ("asset", "request") | ("system", "otaAssetRange")
+    )
+  }
+
+  pub fn carries_request_id(&self) -> bool {
+    matches!(
+      (self.surface_disc.as_str(), self.request_disc.as_str()),
+      ("system", "otaAssetRange")
+    )
   }
 
   pub fn response_variant_pascal(&self) -> String {
@@ -208,7 +168,6 @@ pub fn upper_first(s: &str) -> String {
   out
 }
 
-/// PascalCase -> camelCase, lower-casing the leading single capital.
 pub fn rename_camel(s: &str) -> String {
   let mut out = String::with_capacity(s.len());
   let mut chars = s.chars();
@@ -264,20 +223,13 @@ pub fn surfaces(plan: &Plan) -> Vec<Surface> {
 }
 
 impl Protocol {
-  /// Direction of messages flowing INTO the SDK consumer (i.e. that the
-  /// SDK consumer receives and listens to).
   pub fn inbound_direction(self) -> Direction {
     match self {
-      // Gateway SDK consumer = companion (mobile/desktop app);
-      // it receives BridgeToGateway.
       Self::Gateway => Direction::BridgeToGateway,
-      // Client SDK consumer = webapp;
-      // it receives BridgeToClient.
       Self::Client => Direction::BridgeToClient,
     }
   }
 
-  /// Direction of messages flowing OUT of the SDK consumer.
   pub fn outbound_direction(self) -> Direction {
     match self {
       Self::Gateway => Direction::GatewayToBridge,
@@ -286,7 +238,6 @@ impl Protocol {
   }
 }
 
-/// Build one `Plan` per `Protocol` from the inventory.
 pub fn build_plans(inv: &Inventory) -> Result<Vec<Plan>> {
   let protocols = [Protocol::Gateway, Protocol::Client];
   let mut plans = Vec::new();
@@ -313,7 +264,6 @@ pub fn build_plan_for(inv: &Inventory, protocol: Protocol) -> Result<Plan> {
       if matches!(category, EntryCategory::Skip) {
         continue;
       }
-      let unicast = is_unicast(variant, direction, inv);
       let inner_enum = variant.payload.as_ref().and_then(|p| match p {
         PayloadType::Named(n) => inv.enums.get(n),
         _ => None,
@@ -328,7 +278,6 @@ pub fn build_plan_for(inv: &Inventory, protocol: Protocol) -> Result<Plan> {
         inner_tag_field,
         direction,
         category,
-        unicast,
       });
     }
   }
@@ -355,7 +304,6 @@ pub fn build_plan_for(inv: &Inventory, protocol: Protocol) -> Result<Plan> {
 }
 
 fn inner_variant_plans(en: &EnumDef) -> Vec<InnerVariantPlan> {
-  use crate::dispatch::inventory::VariantTag;
   en.variants
     .iter()
     .map(|v| InnerVariantPlan {
@@ -363,6 +311,7 @@ fn inner_variant_plans(en: &EnumDef) -> Vec<InnerVariantPlan> {
       variant: v.name.clone(),
       payload: v.payload.clone(),
       is_struct: v.is_struct,
+      boxed: v.boxed,
       category: match v.tag {
         Some(VariantTag::Event) => Some(EntryCategory::Event),
         Some(VariantTag::Command) => Some(EntryCategory::Command),
@@ -373,7 +322,6 @@ fn inner_variant_plans(en: &EnumDef) -> Vec<InnerVariantPlan> {
 }
 
 fn build_typed_request(r: &TypedRequest, inv: &Inventory) -> Option<TypedRequestEntry> {
-  // Inner enum holding the request variant.
   let request_inner_name = format!(
     "{}{}Msg",
     match r.direction {
@@ -428,14 +376,4 @@ fn classify_outer_variant(variant: &WireVariant, direction: Direction, inv: &Inv
   } else {
     EntryCategory::Skip
   }
-}
-
-fn is_unicast(variant: &WireVariant, direction: Direction, inv: &Inventory) -> bool {
-  let Some(PayloadType::Named(payload)) = variant.payload.as_ref() else {
-    return false;
-  };
-  let Some(set) = inv.markers.get(payload) else {
-    return false;
-  };
-  set.has(MarkerKind::Unicast, direction)
 }

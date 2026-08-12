@@ -2,12 +2,10 @@ use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::{HttpHeader, NetFetchRequest, WsFrame};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +23,6 @@ pub struct NetFetchRequestMsg {
   pub request: NetFetchRequest,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -41,59 +38,49 @@ pub struct NetFetchRequestMsg {
 )]
 pub struct NetWsOpen {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub url: String,
   pub protocols: Option<Vec<String>>,
   pub headers: Option<Vec<HttpHeader>>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsClose {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub code: Option<u16>,
   pub reason: Option<String>,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsSend {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub frame: WsFrame,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetStreamOpen {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub request: NetFetchRequest,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetStreamCancel {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

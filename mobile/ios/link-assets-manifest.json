@@ -18,6 +18,18 @@
       "sha1": "f3e44abd6661d5b861e66db22f4f79a6c466cd00"
     },
     {
+      "path": "assets/fonts/JetBrainsMono-Bold.ttf",
+      "sha1": "47f3fff92fa1ee6ab5d5af8af10aad5194d4d3e9"
+    },
+    {
+      "path": "assets/fonts/JetBrainsMono-Medium.ttf",
+      "sha1": "47efe4c08ce765af0843b68eb390fdda14e2f351"
+    },
+    {
+      "path": "assets/fonts/JetBrainsMono-Regular.ttf",
+      "sha1": "2ec2264f0a75984fb83ba3853d26da9971b25a55"
+    },
+    {
       "path": "assets/fonts/Outfit-Bold.ttf",
       "sha1": "148c9a4f145442e85509a202472f3dfc002f2359"
     },

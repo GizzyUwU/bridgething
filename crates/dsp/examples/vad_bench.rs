@@ -1,9 +1,3 @@
-//! Scores the voice endpointer on rendered scenes, through the front end the daemon actually runs.
-//!
-//! ```text
-//! cargo run --release --example vad_bench -- turns=<dir> pause=<dir> silent=<dir> [...]
-//! ```
-
 use std::{
   collections::BTreeMap,
   env,
@@ -12,43 +6,20 @@ use std::{
 };
 
 use bridgething_dsp::{
+  bench::{Scene, read_scene},
   geometry::CHANNELS,
   pipeline::{Beamformer, Config, to_pcm16},
   scene,
   vad::{Config as VadConfig, FRAME_SAMPLES, TurnEnd, VoiceEndpointer},
 };
-use serde::Deserialize;
 
 const RATE: f64 = 16_000.0;
 const LEAD: usize = 8_000;
 const PATIENCE: usize = 48_000;
 
-const HANGOVERS_MS: [u64; 3] = [500, 800, 1200];
-const THRESHOLDS: [f32; 5] = [0.30, 0.40, 0.50, 0.60, 0.70];
-
-#[derive(Deserialize)]
-struct Scene {
-  audio: String,
-  archetype: String,
-  speech_start: usize,
-  speech_len: usize,
-  #[serde(default)]
-  speech_spans: Vec<[usize; 2]>,
-}
-
-impl Scene {
-  fn spans(&self) -> Vec<(usize, usize)> {
-    if self.speech_spans.is_empty() {
-      if self.speech_len == 0 {
-        Vec::new()
-      } else {
-        vec![(self.speech_start, self.speech_len)]
-      }
-    } else {
-      self.speech_spans.iter().map(|span| (span[0], span[1])).collect()
-    }
-  }
-}
+const HANGOVERS_MS: [u64; 2] = [800, 1200];
+const THRESHOLDS: [f32; 2] = [0.50, 0.60];
+const FLOORS: [f32; 6] = [0.0, 0.05, 0.10, 0.20, 0.30, 0.45];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Kind {
@@ -104,55 +75,58 @@ impl Outcome {
   }
 }
 
-fn read_scene(path: &Path) -> Option<Vec<i32>> {
-  let mut reader = hound::WavReader::open(path).ok()?;
-  let spec = reader.spec();
-  assert_eq!(spec.channels as usize, CHANNELS, "scene {path:?} is not 4-channel");
-  let samples: Vec<i32> = match spec.sample_format {
-    hound::SampleFormat::Float => reader
-      .samples::<f32>()
-      .filter_map(Result::ok)
-      .map(|s| (s.clamp(-1.0, 1.0) as f64 * i32::MAX as f64) as i32)
-      .collect(),
-    hound::SampleFormat::Int => reader
-      .samples::<i32>()
-      .filter_map(Result::ok)
-      .map(|s| s << (32 - spec.bits_per_sample))
-      .collect(),
-  };
-  Some(samples)
+struct FrontEnd {
+  mono: Vec<f32>,
+  evidence: Vec<Option<f32>>,
 }
 
-fn front_end(interleaved: &[i32], spans: &[(usize, usize)]) -> Vec<f32> {
+impl FrontEnd {
+  fn at(&self, frame: usize) -> Option<f32> {
+    self.evidence.get(frame).copied().flatten()
+  }
+}
+
+fn front_end(interleaved: &[i32], marks: &[usize]) -> FrontEnd {
   let mut beamformer = Beamformer::new(Config {
     adaptation: Some(scene::Config::default()),
     ..Config::default()
   });
 
   let mut cursor = 0usize;
-  for (start, len) in spans {
-    let end = ((start + len) * CHANNELS).min(interleaved.len());
+  for mark in marks {
+    let end = (mark * CHANNELS).min(interleaved.len());
     if end <= cursor {
       continue;
     }
     let mut discard = Vec::with_capacity((end - cursor) / CHANNELS);
     beamformer.process(&interleaved[cursor..end], &mut discard);
     beamformer.mark_target();
+    beamformer.hold_noise(true);
     cursor = end;
   }
-  if !spans.is_empty() {
+  if !marks.is_empty() {
     beamformer.reset_frames();
   }
 
   let mut out = Vec::with_capacity(interleaved.len() / CHANNELS);
-  beamformer.process(interleaved, &mut out);
+  let mut evidence = Vec::with_capacity(out.capacity() / FRAME_SAMPLES);
+  for chunk in interleaved.chunks(FRAME_SAMPLES * CHANNELS) {
+    beamformer.process(chunk, &mut out);
+    let agreement = beamformer.target_agreement();
+    while evidence.len() < out.len() / FRAME_SAMPLES {
+      evidence.push(agreement);
+    }
+  }
 
   let mut encoded = Vec::with_capacity(out.len() * 2);
   to_pcm16(&out, &mut encoded);
-  encoded
-    .chunks_exact(2)
-    .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
-    .collect()
+  FrontEnd {
+    mono: encoded
+      .chunks_exact(2)
+      .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
+      .collect(),
+    evidence,
+  }
 }
 
 fn turns_of(meta: &Scene, kind: Kind, total: usize) -> Vec<Turn> {
@@ -202,19 +176,21 @@ struct Cost {
   frames: usize,
 }
 
-fn run_turn(mono: &[f32], turn: &Turn, config: VadConfig, cost: &mut Cost) -> Outcome {
+fn run_turn(front: &FrontEnd, turn: &Turn, config: VadConfig, cost: &mut Cost) -> Outcome {
   let mut endpointer = VoiceEndpointer::new(config);
   let mut outcome = Outcome {
     turns: 1,
     ..Outcome::default()
   };
 
-  let window = &mono[turn.arm_at.min(mono.len())..turn.limit.min(mono.len())];
+  let mono = &front.mono;
+  let from = turn.arm_at.min(mono.len());
+  let window = &mono[from..turn.limit.min(mono.len())];
   let started = Instant::now();
   let mut closed = None;
   for (index, frame) in window.chunks_exact(FRAME_SAMPLES).enumerate() {
     cost.frames += 1;
-    if let Some(end) = endpointer.observe(frame) {
+    if let Some(end) = endpointer.observe(frame, front.at((from + index * FRAME_SAMPLES) / FRAME_SAMPLES)) {
       closed = Some((turn.arm_at + (index + 1) * FRAME_SAMPLES, end));
       break;
     }
@@ -260,19 +236,26 @@ fn main() {
   }
   assert!(!sets.is_empty(), "give at least one kind=dir");
 
-  let grid: Vec<(u64, f32)> = HANGOVERS_MS
+  let grid: Vec<(u64, f32, f32)> = HANGOVERS_MS
     .iter()
-    .flat_map(|hangover| THRESHOLDS.iter().map(move |threshold| (*hangover, *threshold)))
+    .flat_map(|hangover| {
+      THRESHOLDS
+        .iter()
+        .flat_map(move |threshold| FLOORS.iter().map(move |floor| (*hangover, *threshold, *floor)))
+    })
     .collect();
 
-  let mut by_setting: BTreeMap<(Kind, u64, u32), Outcome> = BTreeMap::new();
-  let mut by_archetype: BTreeMap<(Kind, u64, u32, String), Outcome> = BTreeMap::new();
-  let mut by_pause: BTreeMap<(u64, u32, &'static str), Outcome> = BTreeMap::new();
+  let mut by_setting: BTreeMap<(Kind, u64, u32, u32), Outcome> = BTreeMap::new();
+  let mut by_archetype: BTreeMap<(Kind, u64, u32, u32, String), Outcome> = BTreeMap::new();
+  let mut by_pause: BTreeMap<(u64, u32, u32, &'static str), Outcome> = BTreeMap::new();
+  let mut unmarked_silent: BTreeMap<(u64, u32, u32), Outcome> = BTreeMap::new();
   let mut cost = Cost {
     elapsed: Duration::ZERO,
     frames: 0,
   };
   let mut scenes_read = 0usize;
+  let mut spread: BTreeMap<&'static str, Vec<f32>> = BTreeMap::new();
+  let mut resolved = (0usize, 0usize);
 
   for (kind, dir) in &sets {
     let dir = Path::new(dir);
@@ -286,26 +269,55 @@ fn main() {
         continue;
       };
       scenes_read += 1;
-      let mono = front_end(&interleaved, &meta.spans());
-      let turns = turns_of(meta, *kind, mono.len());
+      let spans = meta.spans();
+      let marks: Vec<usize> = if spans.is_empty() {
+        vec![meta.speech_start.saturating_sub(LEAD)]
+      } else {
+        spans.iter().map(|(start, len)| start + len).collect()
+      };
+      let front = front_end(&interleaved, &marks);
+      let unmarked = (*kind == Kind::Silent).then(|| front_end(&interleaved, &[]));
+      let turns = turns_of(meta, *kind, front.mono.len());
+
+      resolved.1 += 1;
+      resolved.0 += usize::from(front.evidence.iter().any(Option::is_some));
+      for (index, evidence) in front.evidence.iter().enumerate() {
+        let Some(evidence) = evidence else { continue };
+        let at = index * FRAME_SAMPLES;
+        let talking = spans.iter().any(|(start, len)| at >= *start && at < start + len);
+        let bucket = match (*kind, talking) {
+          (Kind::Silent, _) => "interferers only",
+          (_, true) => "talker speaking",
+          (_, false) => "between utterances",
+        };
+        spread.entry(bucket).or_default().push(*evidence);
+      }
 
       for turn in &turns {
-        for (hangover, threshold) in &grid {
+        for (hangover, threshold, floor) in &grid {
           let config = VadConfig {
             threshold: *threshold,
             hangover: Duration::from_millis(*hangover),
+            spatial_floor: *floor,
             ..VadConfig::default()
           };
-          let outcome = run_turn(&mono, turn, config, &mut cost);
-          let key = (*kind, *hangover, threshold.to_bits());
+          let outcome = run_turn(&front, turn, config, &mut cost);
+          let key = (*kind, *hangover, threshold.to_bits(), floor.to_bits());
           by_setting.entry(key).or_default().absorb(&outcome);
           by_archetype
-            .entry((key.0, key.1, key.2, turn.archetype.clone()))
+            .entry((key.0, key.1, key.2, key.3, turn.archetype.clone()))
             .or_default()
             .absorb(&outcome);
           if let Some(pause) = turn.pause {
             by_pause
-              .entry((*hangover, threshold.to_bits(), pause_bucket(pause)))
+              .entry((*hangover, threshold.to_bits(), floor.to_bits(), pause_bucket(pause)))
+              .or_default()
+              .absorb(&outcome);
+          }
+          if let Some(unmarked) = unmarked.as_ref() {
+            let outcome = run_turn(unmarked, turn, config, &mut cost);
+            unmarked_silent
+              .entry((*hangover, threshold.to_bits(), floor.to_bits()))
               .or_default()
               .absorb(&outcome);
           }
@@ -326,19 +338,42 @@ fn main() {
     cost.elapsed.as_secs_f64() * 1e6 / cost.frames.max(1) as f64 / 16_000.0
   );
 
+  println!(
+    "\nspatial evidence: {} of {} scenes resolved a bearing to gate on",
+    resolved.0, resolved.1
+  );
+  println!(
+    "{:>20} {:>9} {:>8} {:>8} {:>8} {:>8} {:>10}",
+    "frames", "p10", "p25", "p50", "p75", "p90", "count"
+  );
+  for (bucket, values) in &mut spread {
+    values.sort_by(f32::total_cmp);
+    let quantile = |f: f64| values[(((values.len() - 1) as f64 * f).round() as usize).min(values.len() - 1)];
+    println!(
+      "{bucket:>20} {:>9.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>10}",
+      quantile(0.10),
+      quantile(0.25),
+      quantile(0.50),
+      quantile(0.75),
+      quantile(0.90),
+      values.len()
+    );
+  }
+
   if by_setting.keys().any(|k| k.0 == Kind::Turns) {
     println!("\nindependent turns: close latency past the end of the utterance");
     println!(
-      "{:>9} {:>10} {:>9} {:>9} {:>10} {:>11} {:>12} {:>7}",
-      "hangover", "threshold", "p50 ms", "p90 ms", "false cut", "onset miss", "never closed", "turns"
+      "{:>9} {:>10} {:>6} {:>9} {:>9} {:>10} {:>11} {:>12} {:>7}",
+      "hangover", "threshold", "floor", "p50 ms", "p90 ms", "false cut", "onset miss", "never closed", "turns"
     );
-    for ((kind, hangover, threshold), outcome) in &by_setting {
+    for ((kind, hangover, threshold, floor), outcome) in &by_setting {
       if *kind != Kind::Turns {
         continue;
       }
       println!(
-        "{hangover:>9} {:>10.2} {:>9.0} {:>9.0} {:>10.4} {:>11.4} {:>12.4} {:>7}",
+        "{hangover:>9} {:>10.2} {:>6.2} {:>9.0} {:>9.0} {:>10.4} {:>11.4} {:>12.4} {:>7}",
         f32::from_bits(*threshold),
+        f32::from_bits(*floor),
         outcome.percentile(0.5),
         outcome.percentile(0.9),
         outcome.rate(outcome.cuts),
@@ -352,16 +387,16 @@ fn main() {
   if !by_pause.is_empty() {
     println!("\nutterance with a pause in it: rate of closing before the talker is done");
     let buckets = ["<0.4s", "0.4-0.7s", "0.7-1.0s", "1.0-1.4s", ">1.4s"];
-    print!("{:>9} {:>10}", "hangover", "threshold");
+    print!("{:>9} {:>10} {:>6}", "hangover", "threshold", "floor");
     for bucket in buckets {
       print!(" {bucket:>10}");
     }
     println!("{:>8}", "p50 ms");
-    for (hangover, threshold) in &grid {
-      print!("{hangover:>9} {:>10.2}", threshold);
+    for (hangover, threshold, floor) in &grid {
+      print!("{hangover:>9} {:>10.2} {:>6.2}", threshold, floor);
       let mut whole = Outcome::default();
       for bucket in buckets {
-        match by_pause.get(&(*hangover, threshold.to_bits(), bucket)) {
+        match by_pause.get(&(*hangover, threshold.to_bits(), floor.to_bits(), bucket)) {
           Some(outcome) => {
             print!(" {:>10.3}", outcome.rate(outcome.cuts));
             whole.absorb(outcome);
@@ -371,10 +406,10 @@ fn main() {
       }
       println!("{:>8.0}", whole.percentile(0.5));
     }
-    print!("{:>20}", "turns per bucket");
+    print!("{:>27}", "turns per bucket");
     for bucket in buckets {
       let turns = by_pause
-        .get(&(grid[0].0, grid[0].1.to_bits(), bucket))
+        .get(&(grid[0].0, grid[0].1.to_bits(), grid[0].2.to_bits(), bucket))
         .map_or(0, |o| o.turns);
       print!(" {turns:>10}");
     }
@@ -384,39 +419,53 @@ fn main() {
   if by_setting.keys().any(|k| k.0 == Kind::Silent) {
     println!("\ntalker muted: the interferers alone must not read as a talker");
     println!(
-      "{:>10} {:>12} {:>13} {:>7}",
-      "threshold", "onset fired", "closed silent", "turns"
+      "{:>10} {:>6} {:>10} {:>12} {:>13} {:>12} {:>7}",
+      "threshold", "floor", "front end", "onset fired", "closed silent", "never closed", "turns"
     );
+    let hangover = HANGOVERS_MS[HANGOVERS_MS.len() - 1];
     for threshold in THRESHOLDS {
-      let Some(outcome) = by_setting.get(&(Kind::Silent, HANGOVERS_MS[0], threshold.to_bits())) else {
-        continue;
-      };
-      println!(
-        "{threshold:>10.2} {:>12.4} {:>13.4} {:>7}",
-        outcome.rate(outcome.onset_fired),
-        outcome.rate(outcome.onset_missed),
-        outcome.turns
-      );
+      for floor in FLOORS {
+        let key = (hangover, threshold.to_bits(), floor.to_bits());
+        for (label, outcome) in [
+          ("unmarked", unmarked_silent.get(&key)),
+          ("false fire", by_setting.get(&(Kind::Silent, key.0, key.1, key.2))),
+        ] {
+          let Some(outcome) = outcome else { continue };
+          println!(
+            "{threshold:>10.2} {floor:>6.2} {label:>10} {:>12.4} {:>13.4} {:>12.4} {:>7}",
+            outcome.rate(outcome.onset_fired),
+            outcome.rate(outcome.onset_missed),
+            outcome.rate(outcome.never_closed),
+            outcome.turns
+          );
+        }
+      }
     }
   }
 
   let archetypes: Vec<String> = {
-    let mut seen: Vec<String> = by_archetype.keys().map(|(_, _, _, a)| a.clone()).collect();
+    let mut seen: Vec<String> = by_archetype.keys().map(|(_, _, _, _, a)| a.clone()).collect();
     seen.sort();
     seen.dedup();
     seen
   };
   if !archetypes.is_empty() && by_archetype.keys().any(|k| k.0 == Kind::Turns) {
     println!("\nindependent turns by archetype: p50 / p90 close latency in ms");
-    print!("{:>9} {:>10}", "hangover", "threshold");
+    print!("{:>9} {:>10} {:>6}", "hangover", "threshold", "floor");
     for archetype in &archetypes {
       print!(" {archetype:>16}");
     }
     println!();
-    for (hangover, threshold) in &grid {
-      print!("{hangover:>9} {:>10.2}", threshold);
+    for (hangover, threshold, floor) in &grid {
+      print!("{hangover:>9} {:>10.2} {:>6.2}", threshold, floor);
       for archetype in &archetypes {
-        match by_archetype.get(&(Kind::Turns, *hangover, threshold.to_bits(), archetype.clone())) {
+        match by_archetype.get(&(
+          Kind::Turns,
+          *hangover,
+          threshold.to_bits(),
+          floor.to_bits(),
+          archetype.clone(),
+        )) {
           Some(outcome) => print!(" {:>7.0} /{:>7.0}", outcome.percentile(0.5), outcome.percentile(0.9)),
           None => print!(" {:>16}", "-"),
         }

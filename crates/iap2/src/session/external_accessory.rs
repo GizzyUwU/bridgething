@@ -269,7 +269,6 @@ impl EaFlow {
       tracing::info!(stream_id, "iap2 ea: stream torn down");
       emit(session_events_tx, SessionEvent::EaStreamClosed { stream_id }).await;
     }
-    self.app_launch = AppLaunchState::Armed;
   }
 
   pub(super) async fn dispatch_link_data(&mut self, payload: Bytes, session_events_tx: &mpsc::Sender<SessionEvent>) {
@@ -345,7 +344,7 @@ mod tests {
     );
 
     opened_outbound
-      .send(crate::session::EaPriority::Normal, Bytes::from_static(&[0xCA, 0xFE]))
+      .send(libbridgething::Priority::Normal, Bytes::from_static(&[0xCA, 0xFE]))
       .await
       .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -523,7 +522,7 @@ mod tests {
     assert!(matches!(
       link_rx.recv().await.unwrap(),
       Iap2Command::Send { session_id: 1, .. }
-    )); // Status Ok
+    ));
 
     drop(inbound_rx);
     let mut wire = BytesMut::new();

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+src="${1:?usage: r2-put <local-path> <key> <content-type> [cache-control]}"
+key="${2:?missing key}"
+ctype="${3:?missing content-type}"
+cc="${4:-}"
+
+[ -f "$src" ] || { echo "r2-put: missing local file: $src" >&2; exit 1; }
+: "${R2_BUCKET:?r2-put: R2_BUCKET is required}"
+: "${PUBLIC_BASE:?r2-put: PUBLIC_BASE is required}"
+
+args=(copyto "$src" "r2:${R2_BUCKET}/${key}" --header-upload "Content-Type: ${ctype}")
+[ -n "$cc" ] && args+=(--header-upload "Cache-Control: ${cc}")
+
+echo "r2-put: $(du -h "$src" | cut -f1 | tr -d ' ')  ->  ${key}" >&2
+rclone "${args[@]}"
+
+[ -n "${PURGE_URLS:-}" ] && echo "${PUBLIC_BASE}/${key}" >>"$PURGE_URLS"
+exit 0

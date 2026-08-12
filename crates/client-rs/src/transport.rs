@@ -10,7 +10,7 @@ use libbridgething::{
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
   MaybeTlsStream, WebSocketStream,
-  tungstenite::{Error as WsError, Message},
+  tungstenite::{Bytes, Error as WsError, Message, Utf8Bytes},
 };
 
 fn map_ws(err: WsError) -> TransportError {
@@ -45,9 +45,24 @@ impl Connector<crate::ClientProtocol> for WsConnector {
 }
 
 impl OutboundHalf<crate::ClientProtocol> for WsOut {
-  async fn send(&mut self, frame: PrioritizedFrame<ClientToBridgeMsg>) -> Result<(), TransportError> {
-    let text = serde_json::to_string(&frame.msg).map_err(|e| TransportError::Encode(e.to_string()))?;
-    self.sink.send(Message::Text(text.into())).await.map_err(map_ws)
+  fn max_batch_bytes(&self) -> usize {
+    1
+  }
+
+  fn encode(frame: PrioritizedFrame<ClientToBridgeMsg>) -> Result<Bytes, TransportError> {
+    let text = serde_json::to_vec(&frame.msg).map_err(|e| TransportError::Encode(e.to_string()))?;
+    Ok(Bytes::from(text))
+  }
+
+  async fn ready(&mut self) -> Result<(), TransportError> {
+    futures::future::poll_fn(|cx| self.sink.poll_ready_unpin(cx))
+      .await
+      .map_err(map_ws)
+  }
+
+  async fn send_batch(&mut self, batch: Bytes) -> Result<(), TransportError> {
+    let text = Utf8Bytes::try_from(batch).map_err(|e| TransportError::Encode(e.to_string()))?;
+    self.sink.send(Message::Text(text)).await.map_err(map_ws)
   }
 }
 

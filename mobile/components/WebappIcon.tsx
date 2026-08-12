@@ -1,10 +1,11 @@
-import { AppWindow } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
+import { Icon } from './Icon';
 import { boundedCache } from '../lib/bounded-cache';
 import { getSession } from '../lib/session';
+import { TEXT } from '../lib/theme';
 
 type IconData = { svg?: string; fileUri?: string };
 
@@ -17,16 +18,12 @@ export function WebappIcon({
   iconHash,
   name,
   size,
-  radiusClass = 'rounded-xl',
-  fallbackTextClass = 'text-[18px] font-extrabold text-foreground',
 }: {
   deviceId: string;
   id: string;
   iconHash?: string;
   name: string;
   size: number;
-  radiusClass?: string;
-  fallbackTextClass?: string;
 }) {
   const session = getSession();
   const [icon, setIcon] = useState<IconData | null>(null);
@@ -63,7 +60,7 @@ export function WebappIcon({
 
   return (
     <View
-      className={`items-center justify-center overflow-hidden bg-secondary ${radiusClass}`}
+      className="items-center justify-center overflow-hidden border border-rule bg-neutral-soft"
       style={dims}
     >
       {icon?.svg ? (
@@ -71,15 +68,11 @@ export function WebappIcon({
       ) : icon?.fileUri ? (
         <Image source={{ uri: icon.fileUri }} style={dims} resizeMode="cover" />
       ) : name ? (
-        <Text className={fallbackTextClass}>
-          {name.slice(0, 1).toUpperCase()}
+        <Text className="font-mono uppercase text-soft" style={TEXT.rowLg}>
+          {name.slice(0, 1)}
         </Text>
       ) : (
-        <AppWindow
-          size={Math.round(size * 0.42)}
-          color="hsl(215 14% 38%)"
-          strokeWidth={2.2}
-        />
+        <Icon name="AppWindow" size={Math.round(size * 0.42)} />
       )}
     </View>
   );

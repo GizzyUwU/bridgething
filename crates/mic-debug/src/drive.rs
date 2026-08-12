@@ -24,7 +24,6 @@ pub enum DriveError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
   pub node: PathBuf,
-  pub disk: String,
   pub size_bytes: u64,
 }
 
@@ -60,14 +59,12 @@ fn partitions(sys_block: &Path, disk: &str) -> Result<Vec<Candidate>, DriveError
     }
     parts.push(Candidate {
       node: PathBuf::from("/dev").join(&name),
-      disk: disk.to_string(),
       size_bytes: read_sectors(&entry.path()),
     });
   }
   if parts.is_empty() {
     parts.push(Candidate {
       node: PathBuf::from("/dev").join(disk),
-      disk: disk.to_string(),
       size_bytes: read_sectors(sys_block),
     });
   }
@@ -138,7 +135,7 @@ fn mount(node: &Path, target: &str) -> Result<(), DriveError> {
 
 pub fn unmount() {
   let target = CString::new(MOUNT_POINT).expect("static string");
-  // MNT_DETACH so a still-open descriptor cannot leave the drive mounted forever.
+  // SAFETY: MNT_DETACH so a still-open descriptor cannot leave the drive mounted forever.
   if unsafe { libc::umount2(target.as_ptr(), libc::MNT_DETACH) } == 0 {
     tracing::info!("drive unmounted");
   }
@@ -176,12 +173,10 @@ mod tests {
     let mut found = vec![
       Candidate {
         node: "/dev/sda1".into(),
-        disk: "sda".into(),
         size_bytes: 100,
       },
       Candidate {
         node: "/dev/sdb1".into(),
-        disk: "sdb".into(),
         size_bytes: 900,
       },
     ];

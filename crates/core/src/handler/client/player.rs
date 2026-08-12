@@ -9,6 +9,7 @@ use libbridgething::{
 };
 
 use super::{HandlerResult, MsgHandle};
+use crate::capabilities::is_valid_scheme;
 
 pub struct PlayerHandler {
   handle: MsgHandle,
@@ -25,17 +26,8 @@ impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
 
   async fn play(&self, params: PlayUri) -> HandlerResult {
     let PlayUri { uri, context } = params;
-    let snapshot = self.handle.state.capabilities.snapshot();
-    let Some(scheme) = scheme_of(&uri) else {
-      return self
-        .respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri })
-        .await;
-    };
-    if snapshot.gateway.is_none() {
-      return self.respond_player_error(PlayerError::NoGateway).await;
-    }
-    if !snapshot.uri_schemes.iter().any(|s| s == &scheme) {
-      return self.respond_player_error(PlayerError::SchemeUnclaimed { scheme }).await;
+    if let Some(rejected) = self.reject_unclaimed_uri(&uri).await {
+      return rejected;
     }
     self
       .forward_command(BridgeToGatewayPlayerMsgCommand::Play(gateway::PlayUri { uri, context }))
@@ -44,17 +36,8 @@ impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
 
   async fn queue(&self, params: QueueUri) -> HandlerResult {
     let QueueUri { uri, position } = params;
-    let snapshot = self.handle.state.capabilities.snapshot();
-    let Some(scheme) = scheme_of(&uri) else {
-      return self
-        .respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri })
-        .await;
-    };
-    if snapshot.gateway.is_none() {
-      return self.respond_player_error(PlayerError::NoGateway).await;
-    }
-    if !snapshot.uri_schemes.iter().any(|s| s == &scheme) {
-      return self.respond_player_error(PlayerError::SchemeUnclaimed { scheme }).await;
+    if let Some(rejected) = self.reject_unclaimed_uri(&uri).await {
+      return rejected;
     }
     self
       .forward_command(BridgeToGatewayPlayerMsgCommand::Queue(gateway::QueueUri {
@@ -166,6 +149,26 @@ impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
 }
 
 impl PlayerHandler {
+  async fn reject_unclaimed_uri(&self, uri: &str) -> Option<HandlerResult> {
+    let snapshot = self.handle.state.capabilities.snapshot();
+    let Some(scheme) = scheme_of(uri) else {
+      return Some(
+        self
+          .respond_player_error(PlayerError::SchemeUnclaimed {
+            scheme: uri.to_string(),
+          })
+          .await,
+      );
+    };
+    if snapshot.gateway.is_none() {
+      return Some(self.respond_player_error(PlayerError::NoGateway).await);
+    }
+    if !snapshot.uri_schemes.iter().any(|s| s == &scheme) {
+      return Some(self.respond_player_error(PlayerError::SchemeUnclaimed { scheme }).await);
+    }
+    None
+  }
+
   async fn forward_command<C>(&self, cmd: C) -> HandlerResult
   where
     C: libbridgething::wire::WireCommand<libbridgething::gateway::BridgeToGatewayMsgData>,
@@ -185,23 +188,33 @@ impl PlayerHandler {
 
 fn scheme_of(uri: &str) -> Option<String> {
   let (head, _) = uri.split_once(':')?;
-  if head.is_empty() {
-    return None;
-  }
-  let mut chars = head.chars();
-  let first = chars.next()?;
-  if !first.is_ascii_alphabetic() {
-    return None;
-  }
-  if !chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) {
-    return None;
-  }
-  Some(head.to_ascii_lowercase())
+  let scheme = head.to_ascii_lowercase();
+  is_valid_scheme(&scheme).then_some(scheme)
 }
 
 #[cfg(test)]
 mod tests {
-  use super::scheme_of;
+  use super::{is_valid_scheme, scheme_of};
+
+  #[test]
+  fn announce_and_play_share_one_grammar() {
+    for raw in [
+      "spotify",
+      "Spotify",
+      "apple-music",
+      "ok+v.2",
+      "1bad",
+      "",
+      "bad space",
+      "x",
+    ] {
+      assert_eq!(
+        is_valid_scheme(raw),
+        scheme_of(&format!("{raw}:track:abc")).is_some(),
+        "announce-time and play-time scheme grammars disagree on {raw:?}"
+      );
+    }
+  }
 
   #[test]
   fn parses_simple_scheme() {

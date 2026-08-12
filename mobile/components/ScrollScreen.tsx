@@ -1,28 +1,39 @@
-import type { ReactNode } from 'react';
-import { ScrollView, type ScrollViewProps, View } from 'react-native';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
+import { useContext, type ReactNode } from 'react';
+import {
+  ScrollView,
+  type ScrollViewProps,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { SPACE } from '../lib/theme';
+
+export function useScreenPadding(): ViewStyle {
+  const insets = useSafeAreaInsets();
+  const inTabs = useContext(BottomTabBarHeightContext) != null;
+  return {
+    paddingHorizontal: SPACE.gutter,
+    paddingTop: SPACE.headingGap,
+    paddingBottom: (inTabs ? 0 : insets.bottom) + SPACE.section,
+  };
+}
 
 export function ScrollScreen({
   children,
   contentContainerStyle,
   ...scrollProps
 }: { children: ReactNode } & ScrollViewProps) {
-  const insets = useSafeAreaInsets();
+  const padding = useScreenPadding();
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-bg">
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         {...scrollProps}
-        contentContainerStyle={[
-          {
-            paddingHorizontal: 20,
-            paddingTop: 8,
-            paddingBottom: insets.bottom + 32,
-          },
-          contentContainerStyle,
-        ]}
+        contentContainerStyle={[padding, contentContainerStyle]}
       >
         {children}
       </ScrollView>

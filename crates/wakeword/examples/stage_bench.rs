@@ -1,9 +1,3 @@
-//! Times the three stages separately so the detector's cost is attributable.
-//!
-//! ```text
-//! cargo run --release --example stage_bench -- <models-dir> <phrase-model> [chunks]
-//! ```
-
 use std::{env, path::PathBuf, time::Instant};
 
 use bridgething_wakeword::{

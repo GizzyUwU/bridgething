@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 
 use crate::{auth::TokenStore, http::random_hex};
 
+const REFRESH_TOKEN_FILE: &str = ".refresh_token.txt";
+const USERNAME_FILE: &str = ".username";
+const DEVICE_ID_FILE: &str = ".device_id";
+
 pub struct FileTokenStore {
   dir: PathBuf,
 }
@@ -20,17 +24,16 @@ impl FileTokenStore {
       .filter(|s| !s.is_empty())
   }
 
-  fn write(&self, name: &str, value: &str) {
+  fn write(&self, name: &str, value: &str) -> std::io::Result<()> {
     let target = self.dir.join(name);
     let tmp = self.dir.join(format!("{name}.tmp"));
-    if std::fs::write(&tmp, value).is_ok() {
-      let _ = std::fs::rename(&tmp, &target);
-    }
+    std::fs::write(&tmp, value)?;
+    std::fs::rename(&tmp, &target)
   }
 }
 
 pub fn load_or_make_device_id(dir: &Path) -> String {
-  let p = dir.join(".device_id");
+  let p = dir.join(DEVICE_ID_FILE);
   if let Ok(s) = std::fs::read_to_string(&p) {
     let s = s.trim().to_string();
     if !s.is_empty() {
@@ -38,28 +41,47 @@ pub fn load_or_make_device_id(dir: &Path) -> String {
     }
   }
   let id = random_hex(20);
-  let _ = std::fs::write(&p, &id);
+  if let Err(err) = std::fs::write(&p, &id) {
+    tracing::warn!(path = %p.display(), %err, "spotify: device id not persisted; the next start will look like a new device");
+  }
   id
 }
 
 impl TokenStore for FileTokenStore {
   fn load_refresh_token(&self) -> Option<String> {
-    self.read(".refresh_token.txt")
+    self.read(REFRESH_TOKEN_FILE)
   }
   fn save_refresh_token(&self, token: String) {
-    self.write(".refresh_token.txt", &token);
+    if let Err(err) = self.write(REFRESH_TOKEN_FILE, &token) {
+      tracing::error!(dir = %self.dir.display(), %err, "spotify: rotated refresh token not persisted");
+    }
   }
   fn load_username(&self) -> Option<String> {
-    self.read(".username")
+    self.read(USERNAME_FILE)
   }
   fn save_username(&self, username: String) {
-    self.write(".username", &username);
+    if let Err(err) = self.write(USERNAME_FILE, &username) {
+      tracing::warn!(dir = %self.dir.display(), %err, "spotify: username not persisted");
+    }
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_persist_that_cannot_land_reports_instead_of_swallowing() {
+    let dir = std::env::temp_dir().join("sfp-store-test-unwritable");
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = FileTokenStore::new(&dir).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let err = store
+      .write(REFRESH_TOKEN_FILE, "rt-123")
+      .expect_err("a write into a vanished directory cannot succeed");
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+  }
 
   #[test]
   fn roundtrips_and_rename_leaves_no_temp() {

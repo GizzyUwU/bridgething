@@ -8,9 +8,11 @@ to keep that split intact.
 
 The repo splits into two top-level workspace roots:
 
-- `crates/` — Rust workspace members (`crates/lib`, `crates/core`, `crates/client-rs`, `crates/mfi`, `crates/mfi-proxy`, ...). The cargo workspace also pulls in `tools/codegen/`.
-- `packages/` — Bun/turbo workspace members (`packages/gateway/typescript`, `packages/client-ts`, `packages/adapter-network`, `packages/adapter-rn`, `packages/webapps/{builtin,catalog}/*`). `builtin` rides the daemon release and is never published to the catalog; `catalog` is what the store distributes.
+- `crates/` — Rust workspace members. Two families: the daemon side (`crates/lib`, `crates/core`, `crates/iap2`, `crates/mfi`, `crates/mfi-proxy`, `crates/dsp`, `crates/wakeword`, ...) and the shared companion core (`crates/sdk-runtime`, `crates/io`, `crates/gateway-rs`, `crates/delivery/{core,napi,wasm}`, `crates/companion`, plus `crates/spotify` and `crates/nlu` linked into it). `crates/client-rs` and `crates/host-gateway` are the Rust-side consumers. The cargo workspace also pulls in `tools/codegen/` and `desktop/src-tauri/`.
+- `packages/` — Bun/turbo workspace members (`packages/browser`, `packages/client-ts`, `packages/ui`, `packages/updater`, `packages/session-rn`, `packages/webapp-shared`, `packages/webapps/{builtin,catalog}/*`). `builtin` rides the daemon release and is never published to the catalog; `catalog` is what the store distributes. `packages/ui` is preact + tailwind shared by the desktop app and the site. `packages/companion/{swift,kotlin}` and `packages/asr` are the mobile platform shells over the shared core, not bun members.
 - `mobile/` — RN app, consumer of the packages.
+- `desktop/` — tray-resident Tauri app, laid out the way `create-tauri-app` scaffolds one: the app root is `desktop/` itself (`package.json`, `index.html`, `vite.config.ts`, preact sources under `src/`) with `src-tauri/` beside them. The two deviations from the scaffold are deliberate: `src-tauri/` is a member of the root cargo workspace, and the frontend is a bun workspace member (`@bridgething/desktop-frontend`) so it shares `packages/ui`. `src-tauri/` links `crates/companion` natively and is the only place state lives; the frontend holds none of it.
+- `site/` — bridgething.com. Astro + preact islands, deployed to cloudflare.
 
 The lib/core split below is the load-bearing one. Naming convention: Rust crates use kebab-case package names (`bridgething-mfi`); TS packages use scoped names (`@bridgething/lib`).
 
@@ -25,7 +27,7 @@ Allowed in lib:
   or to JSON on the local websocket).
 - The codec / framing in `crates/lib/src/protocol/`.
 - Compile-time constants used by the protocol (UUIDs, ports, class IDs).
-- `serde`, `ts-rs`, `typeshare`, `uuid`, `serde_with`, `derive_more`,
+- `serde`, `ts-rs`, `uuid`, `serde_with`, `derive_more`,
   and the `protocol` feature deps (tokio-util, flate2, rmp-serde).
 
 Forbidden in lib:
@@ -48,17 +50,19 @@ systemd integration. The binary lives here.
 
 Core depends on lib for wire types and re-exports nothing.
 
-### crates/client-rs/, packages/adapter-network/
+### crates/client-rs/, packages/browser/
 
 Both consume `libbridgething`. They MUST NOT redefine wire types — they
 re-export from lib or build on top of lib's types. If a wire type needs
 a field added, the field goes in lib and propagates outward, never the
 other way.
 
-`adapter-network` is the canonical host-side transport: pure TypeScript,
-WebSocket to the daemon's network gateway on port 8892. The retired
-`adapter-node` was NAPI + bluer/btleplug; it's gone — the network
-gateway covers Linux / macOS / Windows / browser uniformly.
+`packages/browser` is the host-side transport: the delivery core compiled
+to wasm, plus the Web Serial and WebSocket plumbing that has to be written
+in TypeScript because no other language can reach those APIs. The protocol
+logic underneath it is Rust and is not duplicated there. A host reaches the
+daemon's network gateway on port 8892 the same way on Linux, macOS, Windows
+and in the browser.
 
 ## Wrap, don't duplicate
 
@@ -107,8 +111,8 @@ Why: the SDKs that consume `libbridgething` (gateway, mobile apps,
 on-device clients) don't speak stock. Stock is a translation layer at
 the daemon edge — modern shapes go over BT, stock JSON only ever lands
 on a local websocket from the stock webapp. Putting stock in lib would
-pollute every generated TS / Swift / Kotlin binding with types those
-consumers will never use.
+pollute every generated TS binding with types those consumers
+will never use.
 
 There IS a `crates/lib/src/stock/` module with a small handful of types
 (`StockSetPreset`, `StockPreset`). Those are not the same thing — they
@@ -116,7 +120,7 @@ are SDK-facing types that a _modern_ webapp uses to invoke legacy
 operations through `ClientCommandType::LegacyStock`. The rule:
 
 - `crates/lib/src/stock/` = SDK-facing types for legacy operations a modern
-  webapp may want to invoke. Generated TS / Swift / Kotlin gets these.
+  webapp may want to invoke. Generated TS gets these.
 - `crates/core/src/stock/` = wire shapes for the stock Spotify webapp. Never
   leaves the daemon.
 
@@ -136,10 +140,27 @@ goes in that direction's module. Don't promote to `shared/` for tidiness.
 
 ## Codegen — run `just codegen`, never hand-edit generated files
 
-`crates/lib/ts/bindings/`, `crates/lib/swift/Sources/BridgethingSchema/Generated.swift`,
-and `crates/lib/kotlin/.../Generated.kt` are emitted by `just codegen`,
-which runs the `bridgething-codegen` tool and then prettier. Generated
-files have no human edits. If a generated file is wrong, the fix goes in:
+`just codegen` runs the `bridgething-codegen` tool over `crates/lib/src/`
+and emits three arms:
+
+- **ts**: `crates/lib/ts/bindings/` (wire DTOs for the webapp client) plus
+  `crates/companion/ts/companion.ts` via ts-rs, then prettier. There is no
+  generated TS gateway dispatch: the browser speaks the wire through the Rust
+  core in `packages/browser`, so a second implementation of it would be the
+  thing this tool exists to prevent.
+- **rust**: the `bridgething-client` / `bridgething-gateway` surface files
+  (`crates/*-rs/src/surface.generated.rs`) — naming sugar over the generic
+  runtime, no DTOs materialized.
+- **docs**: `crates/lib/docs/surfaces.json`, the client-SDK reference IR
+  the site renders.
+
+There is no swift or kotlin schema arm: both mobile apps consume the shared
+Rust core over uniffi, and those bindings are regenerated with
+`just companion-bindings` after any change to the core's FFI surface
+(`crates/companion`).
+
+Generated files have no human edits. If a generated file is wrong, the
+fix goes in:
 
 1. The Rust source in `crates/lib/src/` (annotations, types).
 2. The codegen tool in `tools/codegen/` (post-processing transforms).
@@ -147,15 +168,6 @@ files have no human edits. If a generated file is wrong, the fix goes in:
 Never add another perl/sed one-liner to the Justfile to patch generated
 output. Every transform belongs in the codegen tool, where it is
 discoverable, testable, and reviewed alongside the type that needs it.
-
-The kotlin side has a recurring pattern: any adjacent-tagged enum
-(`#[serde(tag = "type", content = "data")]`) emits as a sealed class
-that needs an `AdjacentTaggedSerializer` proxy in `Serializers.kt`.
-The codegen tool discovers these automatically by parsing lib sources;
-if you add a new adjacent-tagged enum, you do not need to register it
-anywhere — but you DO need to add the matching `XSerializer` object to
-`crates/lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Serializers.kt`.
-The build will tell you what's missing.
 
 ## Concurrency + ownership
 
@@ -221,15 +233,21 @@ cheap.
 
 - `cargo run -p bridgething` runs the daemon against dev paths under
   `~/.local/share/bridgething/` and `~/.config/bridgething/`. See
-  `crates/core/src/paths.rs` for env var overrides.
+  `crates/core/src/paths.rs` for env var overrides. It opens a bluez
+  session and reconfigures the host adapter, so for host iteration use
+  `just dev-daemon` (or `just dev-daemon-start`), which leaves the radio
+  alone and keeps its state under `.dev/`.
 - `cargo build -p bridgething --features superbird --no-default-features`
-  is the on-device build (drops dev-host features). Cross builds use
-  `cross` with the same flags.
+  is the on-device build (drops dev-host features). `just cross-build`
+  runs those flags inside the aarch64 build image.
 - `cargo test -p libbridgething` runs unit + golden tests. The golden
   fixtures live in `crates/lib/tests/`; regenerate with
   `UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden`.
-- `just codegen` after any change to a lib type that crosses to TS /
-  Swift / Kotlin.
+- `just test-all` runs every language suite; `just test-{rust,kotlin,swift,ts}`
+  runs one. `FORCE=1` reaches the cache-backed gradle and turbo suites.
+- `just codegen` after any change to a lib type that crosses to TS;
+  `just companion-bindings` after any change to the shared core's
+  FFI surface.
 - No emdashes or endashes.
 - NEVER #[allow(dead_code)]. Period. It's a useful metric.
 - Comments in core/ should be MINIMAL and only for gotchas (of which

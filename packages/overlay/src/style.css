@@ -4,8 +4,23 @@
   inset: 0;
   z-index: 2147483647;
   pointer-events: none;
+
+  --bt-bg: #0a0c0e;
+  --bt-screen: #060809;
+  --bt-off-white: #efefef;
+  --bt-accent: #00a8e8;
+  --bt-ok: #3ddc84;
+  --bt-err: #dc3d3d;
+  --bt-experimental: #ffb066;
+  --bt-rule: rgba(239, 239, 239, 0.1);
+  --bt-edge: rgba(239, 239, 239, 0.25);
+  --bt-dim: rgba(239, 239, 239, 0.35);
+  --bt-soft: rgba(239, 239, 239, 0.55);
+  --bt-near: rgba(239, 239, 239, 0.8);
+  --bt-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
   font-family: system-ui, -apple-system, sans-serif;
-  color: #fff;
+  color: var(--bt-off-white);
 }
 .top {
   position: absolute;
@@ -24,9 +39,8 @@
   gap: 10px;
   max-width: 92%;
   padding: 8px 18px;
-  border-radius: 999px;
-  background: rgba(18, 18, 22, 0.92);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  background: var(--bt-bg);
+  border: 1px solid var(--bt-rule);
   font-size: 15px;
   line-height: 1.2;
   animation: bt-drop 160ms ease-out;
@@ -34,14 +48,13 @@
 .banner .dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   flex: none;
 }
-.banner.connection .dot { background: #f06050; }
-.banner.call .dot { background: #35d06a; }
+.banner.connection .dot { background: var(--bt-err); }
+.banner.call .dot { background: var(--bt-ok); }
 .banner.call.ringing .dot { animation: bt-pulse 1s infinite; }
 .banner .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner .sub { opacity: 0.65; white-space: nowrap; }
+.banner .sub { color: var(--bt-dim); white-space: nowrap; }
 .toasts {
   position: absolute;
   top: 8px;
@@ -54,16 +67,21 @@
 }
 .toast {
   padding: 9px 12px;
-  border-radius: 12px;
-  background: rgba(18, 18, 22, 0.92);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  background: var(--bt-bg);
+  border: 1px solid var(--bt-rule);
   animation: bt-drop 160ms ease-out;
 }
-.toast .app { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; }
-.toast .title { font-size: 14px; font-weight: 600; margin-top: 1px; }
+.toast .app {
+  font-family: var(--bt-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--bt-dim);
+}
+.toast .title { font-size: 14px; font-weight: 600; margin-top: 3px; }
 .toast .msg {
   font-size: 13px;
-  opacity: 0.8;
+  color: var(--bt-soft);
   margin-top: 1px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -73,41 +91,61 @@
 .scrim {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(6, 8, 9, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
   animation: bt-fade 160ms ease-out;
 }
 .modal {
-  background: rgba(24, 24, 28, 0.98);
-  border-radius: 20px;
+  background: var(--bt-screen);
+  border: 1px solid var(--bt-rule);
   padding: 26px 34px;
   text-align: center;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
   max-width: 80%;
 }
-.modal .head { font-size: 15px; opacity: 0.7; }
-.modal .pin { font-size: 44px; font-weight: 700; letter-spacing: 0.35em; margin: 10px 0 6px; padding-left: 0.35em; }
-.modal .name { font-size: 14px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal .head {
+  font-family: var(--bt-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: var(--bt-dim);
+}
+.modal .pin {
+  font-family: var(--bt-mono);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  margin: 14px 0 8px;
+  padding-left: 0.35em;
+  font-variant-numeric: tabular-nums;
+}
+.modal .name { font-size: 14px; color: var(--bt-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .volume {
   position: absolute;
   left: 10%;
   right: 10%;
   bottom: 18px;
   padding: 10px 16px;
-  border-radius: 14px;
-  background: rgba(18, 18, 22, 0.92);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  background: var(--bt-bg);
+  border: 1px solid var(--bt-rule);
   display: flex;
   align-items: center;
   gap: 12px;
   animation: bt-fade 120ms ease-out;
 }
-.volume .label { font-size: 13px; opacity: 0.7; flex: none; width: 44px; }
-.volume .track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
-.volume .fill { height: 100%; border-radius: 3px; background: #fff; transition: width 90ms linear; }
-.volume.muted .fill { background: #f06050; }
+.volume .label {
+  font-family: var(--bt-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--bt-dim);
+  flex: none;
+  width: 52px;
+}
+.volume .track { flex: 1; height: 6px; background: var(--bt-screen); border: 1px solid var(--bt-rule); overflow: hidden; }
+.volume .fill { height: 100%; background: var(--bt-accent); transition: width 90ms linear; }
+.volume.muted .fill { background: var(--bt-err); }
 .voice {
   position: absolute;
   left: 50%;
@@ -118,26 +156,26 @@
   align-items: center;
   gap: 10px;
   padding: 9px 18px;
-  border-radius: 999px;
-  background: rgba(18, 18, 22, 0.92);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  background: var(--bt-bg);
+  border: 1px solid var(--bt-rule);
   font-size: 15px;
+  transition: bottom 120ms ease-out;
   animation: bt-rise 160ms ease-out;
 }
+.volume:not(.hidden) ~ .voice { bottom: 62px; }
 .voice .orb {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   flex: none;
-  background: #4a9dff;
+  background: var(--bt-accent);
 }
 .voice .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voice.listening .orb { animation: bt-pulse 1s infinite; }
-.voice.thinking .orb { background: #d8a13a; animation: bt-pulse 700ms infinite; }
-.voice.thinking .label { opacity: 0.7; }
-.voice.done .orb { background: #35d06a; }
-.voice.failed .orb { background: #f06050; }
-.voice.failed .label { opacity: 0.8; }
+.voice.thinking .orb { background: var(--bt-experimental); animation: bt-pulse 700ms infinite; }
+.voice.thinking .label { color: var(--bt-near); }
+.voice.done .orb { background: var(--bt-ok); }
+.voice.failed .orb { background: var(--bt-err); }
+.voice.failed .label { color: var(--bt-near); }
 .hidden { display: none; }
 @keyframes bt-rise { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
 @keyframes bt-drop { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }

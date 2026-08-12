@@ -1,7 +1,6 @@
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 /// Upper bound on `WebappInfo::provenance`
@@ -9,7 +8,6 @@ pub const WEBAPP_PROVENANCE_MAX_LEN: usize = 2048;
 
 /// Domain errors emitted by any webapp surface (gateway- or client-side).
 /// Single catalog: both protocols speak the same variant set.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -50,7 +48,6 @@ pub enum WebappError {
   Internal { reason: String },
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -65,7 +62,6 @@ pub enum WebappSource {
 /// out of `client.webapp.list`; the gateway list keeps everything.
 /// Declaring `Launcher` is also what makes a bundle eligible for the
 /// device's launcher slot.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -80,7 +76,6 @@ pub enum WebappRole {
 /// notification / connection / volume UI for free; a full-service webapp
 /// declares off the surfaces it draws itself. The wire events the webapp
 /// receives are unchanged either way; this only gates the injected UI.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -132,7 +127,6 @@ impl OverlayProfile {
 /// Art render sizes a webapp declares so the companion warms exactly the
 /// pixels it renders: hero (now-playing / detail views) and thumb (queue /
 /// grid). Omitted in a manifest falls back to the canonical `{248, 96}`
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -150,14 +144,12 @@ impl Default for ArtProfile {
   }
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct WebappInfo {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub name: String,
   pub source: WebappSource,
@@ -178,14 +170,12 @@ pub struct WebappInfo {
 /// On-disk `manifest.json` shape. Read from the bundle at install time
 /// and validated; the resulting metadata projects to `WebappInfo` for
 /// the wire.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct WebappManifest {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub name: String,
   pub version: String,
@@ -207,9 +197,8 @@ pub struct WebappManifest {
   pub overlays: OverlayProfile,
 }
 
-/// One declared user-tunable setting. Adjacent-tagged on the wire to
-/// stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
-#[typeshare]
+/// One declared user-tunable setting. Adjacent-tagged on the wire:
+/// `{"type":"string","data":{"key":"zip",...}}`.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -222,7 +211,6 @@ pub enum ConfigField {
   Secret(StringField),
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -236,7 +224,6 @@ pub struct StringField {
   pub default: Option<String>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -250,7 +237,6 @@ pub struct NumberField {
   pub default: Option<f64>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -261,7 +247,6 @@ pub struct BoolField {
   pub default: Option<bool>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -296,7 +281,6 @@ impl ConfigField {
 /// One key/value pair as exposed by config read APIs. `value` is always a
 /// string; consumers parse per the field's declared kind (number -> parseFloat,
 /// boolean -> "true"/"false", string/enum/secret -> as-is).
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -310,7 +294,6 @@ pub struct ConfigEntry {
 /// state writable from both the companion (gateway) and the webapp
 /// itself, last write wins. Values are strings; apps encode JSON as
 /// needed.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -318,4 +301,23 @@ pub struct ConfigEntry {
 pub struct DocEntry {
   pub key: String,
   pub value: String,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_manifest_overlays_object_defaults_omitted_surfaces_on() {
+    let manifest: WebappManifest = serde_json::from_str(
+      r#"{"id":"00000000-0000-0000-0000-000000000001","name":"partial","version":"0.1.0",
+          "overlays":{"notifications":false,"call":false,"pairing":false,"connection":false,"volume":false}}"#,
+    )
+    .expect("manifest parses");
+    assert!(manifest.overlays.voice, "an undeclared surface stays on");
+    assert!(
+      manifest.overlays.any_enabled(),
+      "one surface on means the overlay still injects"
+    );
+  }
 }

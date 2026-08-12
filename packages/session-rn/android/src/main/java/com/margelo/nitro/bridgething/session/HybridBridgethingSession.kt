@@ -20,20 +20,16 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingPeerLinkFailed: ((BridgethingSessionPeer) -> Unit)? = null
         private var pendingNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
         private var pendingAncsAuthStatusChanged: ((String, BridgethingAncsAuthStatus) -> Unit)? = null
-        private var pendingLog: ((String, String) -> Unit)? = null
+        private var pendingLog: ((String, String, String) -> Unit)? = null
         private var pendingWebappsChanged: ((BridgethingDeviceWebappsEntry) -> Unit)? = null
         private var pendingWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingVoiceModelStateChanged: ((BridgethingVoiceModelState) -> Unit)? = null
+        private var pendingVoiceTurnChanged: ((BridgethingVoiceTurn) -> Unit)? = null
         private var pendingOtaRunChanged: ((BridgethingOtaRun) -> Unit)? = null
         private var pendingOtaAvailableChanged: ((BridgethingOtaAvailable) -> Unit)? = null
         private var pendingOtaPollChanged: ((BridgethingOtaPollStatus) -> Unit)? = null
         private var pendingResumed: ((BridgethingSessionSnapshot) -> Unit)? = null
-
-        @JvmStatic
-        public fun initializeNitro() {
-            BridgethingSessionOnLoad.initializeNative()
-        }
 
         @JvmStatic
         public fun installBackend(b: BridgethingSessionBackend) {
@@ -51,6 +47,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     webappDoc = pendingWebappDocChanged,
                     deviceMeta = pendingDeviceMetaChanged,
                     voiceModel = pendingVoiceModelStateChanged,
+                    voiceTurn = pendingVoiceTurnChanged,
                     otaRun = pendingOtaRunChanged,
                     otaAvailable = pendingOtaAvailableChanged,
                     otaPoll = pendingOtaPollChanged,
@@ -67,6 +64,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingWebappDocChanged = null
                 pendingDeviceMetaChanged = null
                 pendingVoiceModelStateChanged = null
+                pendingVoiceTurnChanged = null
                 pendingOtaRunChanged = null
                 pendingOtaAvailableChanged = null
                 pendingOtaPollChanged = null
@@ -84,6 +82,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.webappDoc?.let(b::setOnWebappDocChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.voiceModel?.let(b::setOnVoiceModelStateChanged)
+            replay.voiceTurn?.let(b::setOnVoiceTurnChanged)
             replay.otaRun?.let(b::setOnOtaRunChanged)
             replay.otaAvailable?.let(b::setOnOtaAvailableChanged)
             replay.otaPoll?.let(b::setOnOtaPollChanged)
@@ -104,11 +103,12 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val peerLinkFailed: ((BridgethingSessionPeer) -> Unit)?,
         val nowPlaying: ((BridgethingNowPlaying?) -> Unit)?,
         val ancs: ((String, BridgethingAncsAuthStatus) -> Unit)?,
-        val log: ((String, String) -> Unit)?,
+        val log: ((String, String, String) -> Unit)?,
         val webapps: ((BridgethingDeviceWebappsEntry) -> Unit)?,
         val webappDoc: ((String, String, String, String?) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val voiceModel: ((BridgethingVoiceModelState) -> Unit)?,
+        val voiceTurn: ((BridgethingVoiceTurn) -> Unit)?,
         val otaRun: ((BridgethingOtaRun) -> Unit)?,
         val otaAvailable: ((BridgethingOtaAvailable) -> Unit)?,
         val otaPoll: ((BridgethingOtaPollStatus) -> Unit)?,
@@ -146,6 +146,9 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     override fun logArchives(): Promise<Array<BridgethingLogArchive>> = Promise.async {
         backend?.logArchives() ?: emptyArray()
     }
+
+    override fun logArchiveLines(archiveId: String, limit: Double): Promise<Array<BridgethingDeviceLogLine>> =
+        Promise.async { backend?.logArchiveLines(archiveId, limit) ?: emptyArray() }
 
     override fun exportLogs(archiveId: Variant_NullType_String?): Promise<String> = Promise.async {
         require().exportLogs(unwrapString(archiveId))
@@ -251,6 +254,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().voiceModelState()
     }
 
+    override fun downloadVoiceModel(): Promise<Unit> = Promise.async {
+        backend?.downloadVoiceModel()
+    }
+
     override fun setDeviceAutoResume(deviceId: String, enabled: Boolean): Promise<Unit> = Promise.async {
         backend?.setDeviceAutoResume(deviceId, enabled)
     }
@@ -269,20 +276,26 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setOtaPollConfig(unwrapped)
     }
 
-    override fun checkForOtaUpdate(rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
-        backend?.checkForOtaUpdate(unwrapString(rootUrl))
+    override fun checkForOtaUpdate(rootUrl: String): Promise<Unit> = Promise.async {
+        backend?.checkForOtaUpdate(rootUrl)
     }
 
-    override fun fetchOtaManifest(rootUrl: Variant_NullType_String?): Promise<BridgethingOtaManifest> = Promise.async {
-        require().fetchOtaManifest(unwrapString(rootUrl))
+    override fun fetchOtaManifest(rootUrl: String): Promise<BridgethingOtaManifest> = Promise.async {
+        require().fetchOtaManifest(rootUrl)
     }
 
     override fun dismissOtaRun(deviceId: String): Promise<Unit> = Promise.async {
         require().dismissOtaRun(deviceId)
     }
 
-    override fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
-        backend?.applyOtaUpdate(deviceId, channel, version, unwrapString(rootUrl))
+    override fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String): Promise<Unit> = Promise.async {
+        backend?.applyOtaUpdate(deviceId, channel, version, rootUrl)
+    }
+
+    override fun otaRunProgress(deviceId: String, nowMs: Double): Variant_NullType_BridgethingOtaProgress {
+        val progress = backend?.otaRunProgress(deviceId, nowMs)
+        return if (progress != null) Variant_NullType_BridgethingOtaProgress.Second(progress)
+        else Variant_NullType_BridgethingOtaProgress.First(NullType.NULL)
     }
 
     override fun installWebappFromUrl(
@@ -379,7 +392,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnAncsAuthStatusChanged) { pendingAncsAuthStatusChanged = it }
     }
 
-    override fun setOnLog(callback: (level: String, message: String) -> Unit) {
+    override fun setOnLog(callback: (origin: String, level: String, message: String) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnLog) { pendingLog = it }
     }
 
@@ -415,6 +428,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnVoiceModelStateChanged) {
             pendingVoiceModelStateChanged = it
         }
+    }
+
+    override fun setOnVoiceTurnChanged(callback: (turn: BridgethingVoiceTurn) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnVoiceTurnChanged) { pendingVoiceTurnChanged = it }
     }
 
     override fun setOnOtaRunChanged(callback: (run: BridgethingOtaRun) -> Unit) {

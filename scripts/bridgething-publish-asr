@@ -56,8 +56,9 @@ MANIFEST=$(jq -n \
   --arg url "${PUBLIC_BASE:-}/${KEY}" \
   --argjson size "$SIZE" \
   --arg sha256 "$SHA" \
-  '{version: $version, model: $model, updated_at: $updated_at,
-    android: {url: $url, size: $size, sha256: $sha256}}')
+  '{url: $url, size: $size, sha256: $sha256} as $artifact
+   | {version: $version, model: $model, updated_at: $updated_at,
+      android: $artifact, macos: $artifact, linux: $artifact, windows: $artifact}')
 
 if [ "$DRY" = 0 ]; then
   command -v rclone >/dev/null 2>&1 || die "rclone is not installed"

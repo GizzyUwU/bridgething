@@ -47,6 +47,7 @@ impl ClientToBridgeLyricsMsgDispatch for LyricsHandler {
     };
 
     let gateway_man = &self.handle.bluetooth.gateway_man;
+    let primary = self.handle.state.capabilities.primary_addr();
     let outbound = LyricsRequest {
       track: identity.clone(),
     };
@@ -55,7 +56,7 @@ impl ClientToBridgeLyricsMsgDispatch for LyricsHandler {
       .state
       .lyrics
       .get_or_fetch(&identity, || async move {
-        gateway_man.request(None, outbound).await.map(|reply| reply.lyrics)
+        gateway_man.request(primary, outbound).await.map(|reply| reply.lyrics)
       })
       .await;
 

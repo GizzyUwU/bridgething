@@ -1,24 +1,53 @@
-mod transport;
+mod codec;
+pub mod routing;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod transport;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
 
 #[path = "surface.generated.rs"]
 mod surface;
 use std::time::Duration;
 
-use bridgething_sdk_runtime::{Connection, Protocol};
-pub use bridgething_sdk_runtime::{MsgHandle, RequestFailure, SdkError, TransportError};
+use bridgething_sdk_runtime::{Connection, Connector, LaneLimits, Protocol};
+pub use bridgething_sdk_runtime::{MsgHandle, Reply, RequestFailure, SdkError, TransportError};
 use libbridgething::{
   Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
-  wire::{MsgMeta, WireCommand, WireEvent, WireRequest},
+  wire::{MsgMeta, WireCommand, WireError, WireEvent, WireRequest},
 };
 pub use surface::*;
-use tokio::{
-  io::{AsyncRead, AsyncWrite},
-  sync::broadcast,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::broadcast;
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-ws"))]
 use tokio_tungstenite::connect_async;
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-ws"))]
 pub use transport::Ws;
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::connect_seam_ws;
 use uuid::Uuid;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-ws"))]
+pub async fn connect_ws(url: &str) -> Result<transport::Ws, TransportError> {
+  let dial = tokio::time::timeout(transport::WS_CONNECT_TIMEOUT, connect_async(url))
+    .await
+    .map_err(|_| transport::connect_timed_out())?;
+  let (ws, _) = dial.map_err(|e| TransportError::Decode(format!("ws connect: {e}")))?;
+  Ok(ws)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandlerError<E> {
+  Domain(E),
+  Wire(WireError),
+}
+
+impl<E> From<WireError> for HandlerError<E> {
+  fn from(error: WireError) -> Self {
+    Self::Wire(error)
+  }
+}
 
 pub struct GatewayProtocol;
 
@@ -48,22 +77,44 @@ pub struct Gateway {
 }
 
 impl Gateway {
+  pub fn spawn<C: Connector<GatewayProtocol>>(connector: C) -> Self {
+    Self::spawn_subscribed(connector).0
+  }
+
+  pub fn spawn_subscribed<C: Connector<GatewayProtocol>>(
+    connector: C,
+  ) -> (Self, broadcast::Receiver<BridgeToGatewayMsg>) {
+    let (conn, events) = Connection::spawn_subscribed(connector, LaneLimits::default());
+    (Self { conn }, events)
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
   pub fn from_io<S>(io: S) -> Self
   where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
   {
-    Self {
-      conn: Connection::spawn(transport::FramedConnector { io }),
-    }
+    Self::spawn(transport::FramedConnector::new(io))
   }
 
+  #[cfg(any(target_arch = "wasm32", feature = "native-ws"))]
   pub async fn connect(url: &str) -> Result<Self, TransportError> {
-    let (ws, _) = connect_async(url)
-      .await
-      .map_err(|e| TransportError::Decode(format!("ws connect: {e}")))?;
-    Ok(Self {
-      conn: Connection::spawn(transport::WsConnector { ws }),
-    })
+    Ok(Self::connect_subscribed(url).await?.0)
+  }
+
+  #[cfg(all(not(target_arch = "wasm32"), feature = "native-ws"))]
+  pub async fn connect_subscribed(
+    url: &str,
+  ) -> Result<(Self, broadcast::Receiver<BridgeToGatewayMsg>), TransportError> {
+    Ok(Self::spawn_subscribed(transport::WsConnector::new(
+      connect_ws(url).await?,
+    )))
+  }
+
+  #[cfg(target_arch = "wasm32")]
+  pub async fn connect_subscribed(
+    url: &str,
+  ) -> Result<(Self, broadcast::Receiver<BridgeToGatewayMsg>), TransportError> {
+    Ok(Self::spawn_subscribed(wasm::connect_websocket(url).await?))
   }
 
   pub fn with_timeout(self, timeout: Duration) -> Self {
@@ -115,6 +166,38 @@ impl Gateway {
   }
 }
 
+#[async_trait::async_trait]
+pub trait OutboundLink: Send + Sync {
+  async fn send_data(&self, meta: MsgMeta, data: GatewayToBridgeMsgData, priority: Priority) -> Result<(), SdkError>;
+}
+
+#[async_trait::async_trait]
+impl OutboundLink for Gateway {
+  async fn send_data(&self, meta: MsgMeta, data: GatewayToBridgeMsgData, priority: Priority) -> Result<(), SdkError> {
+    self.conn.send_data(meta, data, priority).await
+  }
+}
+
+#[async_trait::async_trait]
+pub trait OutboundLinkExt: OutboundLink {
+  async fn event<E>(&self, event: E) -> Result<(), SdkError>
+  where
+    E: WireEvent<GatewayToBridgeMsgData> + Send,
+  {
+    self.send_data(MsgMeta::Event, event.into(), Priority::Normal).await
+  }
+
+  async fn command<C>(&self, command: C) -> Result<(), SdkError>
+  where
+    C: WireCommand<GatewayToBridgeMsgData> + Send,
+  {
+    self.send_data(MsgMeta::Command, command.into(), Priority::Normal).await
+  }
+}
+
+#[async_trait::async_trait]
+impl<T: OutboundLink + ?Sized> OutboundLinkExt for T {}
+
 #[cfg(test)]
 mod tests {
   use std::time::Duration;
@@ -125,7 +208,7 @@ mod tests {
     gateway::{
       BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeCapabilitiesMsgEvent, GatewayToBridgeMsgData,
     },
-    protocol::BridgeEndec,
+    protocol::{BridgeEndec, DecodedFrame},
     wire::{MsgMeta, ResponseMeta, WireError},
   };
   use tokio_util::codec::Framed;
@@ -156,7 +239,7 @@ mod tests {
     tokio::spawn(async move {
       let mut framed = Framed::new(daemon_io, BridgeEndec::default());
       while let Some(item) = framed.next().await {
-        if let Ok(frame) = item {
+        if let Ok(DecodedFrame::Frame(frame)) = item {
           let _ = tx.send(frame.msg);
         }
       }
@@ -234,7 +317,7 @@ mod tests {
         })),
       };
       framed.send(request).await.expect("send request");
-      while let Some(Ok(frame)) = framed.next().await {
+      while let Some(Ok(DecodedFrame::Frame(frame))) = framed.next().await {
         let _ = resp_tx.send(frame.msg);
       }
     });

@@ -1,0 +1,26 @@
+[package]
+name = "bridgething-delivery-napi"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bridgething-delivery = { path = "../core", features = ["native-ws"] }
+bridgething-gateway = { path = "../../gateway-rs" }
+bridgething-io = { path = "../../io", features = ["native-io"] }
+libbridgething = { path = "../../lib" }
+napi = { version = "3.12.0", default-features = false, features = ["napi4", "async", "tokio_rt", "serde-json"] }
+napi-derive = { version = "3.6.2", features = ["type-def"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["v7"] }
+
+[build-dependencies]
+napi-build = "2.4.0"

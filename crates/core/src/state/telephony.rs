@@ -19,13 +19,36 @@ use libbridgething::{
 };
 use tokio::sync::RwLock;
 
-use crate::{bluetooth::iap2::Iap2TelephonyHandle, net::WireEventBus};
+use crate::{
+  bluetooth::{
+    Address,
+    iap2::{Iap2LinkDown, Iap2TelephonyHandle},
+  },
+  net::WireEventBus,
+};
 
 #[derive(Debug, Default)]
 struct Inner {
   calls: HashMap<String, PhoneCall>,
   announced: HashSet<String>,
   communications: CommunicationsState,
+  companion: Option<Address>,
+  companion_calls: HashSet<String>,
+}
+
+impl Inner {
+  fn note_companion(&mut self, addr: Address) -> Vec<String> {
+    if self.companion == Some(addr) {
+      return Vec::new();
+    }
+    self.companion = Some(addr);
+    let orphaned: Vec<String> = std::mem::take(&mut self.companion_calls).into_iter().collect();
+    for call_id in &orphaned {
+      self.calls.remove(call_id);
+      self.announced.remove(call_id);
+    }
+    orphaned
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +62,8 @@ pub struct TelephonyManager {
 pub enum TelephonyError {
   #[error("broadcast failed for {0} client(s)")]
   Broadcast(usize),
+  #[error(transparent)]
+  LinkDown(#[from] Iap2LinkDown),
 }
 
 impl TelephonyManager {
@@ -72,30 +97,51 @@ impl TelephonyManager {
     Ok(())
   }
 
-  pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
-    let mut inner = self.inner.write().await;
-    inner.calls = state.active_calls.into_iter().map(|c| (c.call_id.clone(), c)).collect();
-    inner.announced = inner.calls.keys().cloned().collect();
-    Ok(())
+  pub async fn apply_companion_snapshot(&self, addr: Address, state: PhoneState) -> Result<(), TelephonyError> {
+    let ended = {
+      let mut inner = self.inner.write().await;
+      let mut dropped = inner.note_companion(addr);
+      dropped.extend(std::mem::take(&mut inner.companion_calls));
+      for call_id in &dropped {
+        inner.calls.remove(call_id);
+        inner.announced.remove(call_id);
+      }
+      for call in state.active_calls {
+        inner.companion_calls.insert(call.call_id.clone());
+        inner.announced.insert(call.call_id.clone());
+        inner.calls.insert(call.call_id.clone(), call);
+      }
+      dropped.retain(|call_id| !inner.calls.contains_key(call_id));
+      dropped
+    };
+    self.end_calls(ended).await
   }
 
-  pub async fn apply_companion_call_started(&self, call: PhoneCall) -> Result<(), TelephonyError> {
+  pub async fn apply_companion_call_started(&self, addr: Address, call: PhoneCall) -> Result<(), TelephonyError> {
     let snapshot = call.clone();
-    {
+    let ended = {
       let mut inner = self.inner.write().await;
+      let ended = inner.note_companion(addr);
+      inner.companion_calls.insert(call.call_id.clone());
       inner.announced.insert(call.call_id.clone());
       inner.calls.insert(call.call_id.clone(), call);
-    }
+      ended
+    };
+    self.end_calls(ended).await?;
     self.broadcast(BridgeToClientPhoneMsg::CallStarted(snapshot)).await
   }
 
-  pub async fn apply_companion_call_updated(&self, call: PhoneCall) -> Result<(), TelephonyError> {
+  pub async fn apply_companion_call_updated(&self, addr: Address, call: PhoneCall) -> Result<(), TelephonyError> {
     let snapshot = call.clone();
-    {
+    let ended = {
       let mut inner = self.inner.write().await;
+      let ended = inner.note_companion(addr);
+      inner.companion_calls.insert(call.call_id.clone());
       inner.announced.insert(call.call_id.clone());
       inner.calls.insert(call.call_id.clone(), call);
-    }
+      ended
+    };
+    self.end_calls(ended).await?;
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
   }
 
@@ -104,17 +150,42 @@ impl TelephonyManager {
       let mut inner = self.inner.write().await;
       inner.calls.remove(&call_id);
       inner.announced.remove(&call_id);
+      inner.companion_calls.remove(&call_id);
     }
     self
       .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason }))
       .await
   }
 
-  pub async fn apply_companion_communications(&self, state: CommunicationsState) -> Result<(), TelephonyError> {
-    {
+  pub async fn clear_companion(&self, addr: Address) -> Result<(), TelephonyError> {
+    let ended = {
       let mut inner = self.inner.write().await;
+      if inner.companion != Some(addr) {
+        return Ok(());
+      }
+      inner.companion = None;
+      let ended: Vec<String> = std::mem::take(&mut inner.companion_calls).into_iter().collect();
+      for call_id in &ended {
+        inner.calls.remove(call_id);
+        inner.announced.remove(call_id);
+      }
+      ended
+    };
+    self.end_calls(ended).await
+  }
+
+  pub async fn apply_companion_communications(
+    &self,
+    addr: Address,
+    state: CommunicationsState,
+  ) -> Result<(), TelephonyError> {
+    let ended = {
+      let mut inner = self.inner.write().await;
+      let ended = inner.note_companion(addr);
       inner.communications = state;
-    }
+      ended
+    };
+    self.end_calls(ended).await?;
     let snapshot = self.communications().await;
     self
       .broadcast(BridgeToClientPhoneMsg::CommunicationsChanged(
@@ -188,8 +259,7 @@ impl TelephonyManager {
   }
 
   pub async fn dispatch(&self, cmd: TelephonyCommand) -> Result<(), TelephonyError> {
-    self.iap2.send(cmd).await;
-    Ok(())
+    Ok(self.iap2.send(cmd).await?)
   }
 
   pub fn build_initiate(
@@ -236,6 +306,18 @@ impl TelephonyManager {
       tone: encode_dtmf_tone(tone),
       call_uuid,
     })
+  }
+
+  async fn end_calls(&self, call_ids: Vec<String>) -> Result<(), TelephonyError> {
+    for call_id in call_ids {
+      self
+        .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded {
+          call_id,
+          reason: CallEndReason::Remote,
+        }))
+        .await?;
+    }
+    Ok(())
   }
 
   async fn broadcast(&self, event: BridgeToClientPhoneMsg) -> Result<(), TelephonyError> {
@@ -375,10 +457,12 @@ fn survivor_priority(status: &PhoneCallStatus) -> u8 {
 }
 
 fn untagged_is_state_advance(update: &Iap2CallStateUpdate, existing: &PhoneCall) -> bool {
-  if let Some(remote_id) = update.remote_id.as_deref() {
-    if !remote_id.is_empty() && !existing.remote_id.is_empty() && remote_id != existing.remote_id {
-      return false;
-    }
+  if let Some(remote_id) = update.remote_id.as_deref()
+    && !remote_id.is_empty()
+    && !existing.remote_id.is_empty()
+    && remote_id != existing.remote_id
+  {
+    return false;
   }
   if let Some(status) = update.status.map(decode_status) {
     let is_initiation = matches!(status, PhoneCallStatus::Sending | PhoneCallStatus::Ringing);
@@ -451,6 +535,175 @@ fn encode_dtmf_tone(tone: DtmfTone) -> u8 {
 #[cfg(test)]
 mod test {
   use super::*;
+
+  #[tokio::test]
+  async fn dispatch_surfaces_a_dead_iap2_link_instead_of_reporting_success() {
+    let (client_man, _listener) = crate::net::create_client_manager();
+    let (iap2, rx) = Iap2TelephonyHandle::for_test();
+    let telephony = TelephonyManager::new(WireEventBus::new(client_man), iap2);
+
+    telephony
+      .dispatch(TelephonyManager::build_mute(true))
+      .await
+      .expect("a live link takes the command");
+
+    drop(rx);
+    let failure = telephony
+      .dispatch(TelephonyManager::build_mute(false))
+      .await
+      .expect_err("a command that reached nothing cannot report success");
+    assert!(matches!(failure, TelephonyError::LinkDown(_)));
+  }
+
+  fn manager() -> (TelephonyManager, impl Sized) {
+    let (client_man, _listener) = crate::net::create_client_manager();
+    let (iap2, rx) = Iap2TelephonyHandle::for_test();
+    (TelephonyManager::new(WireEventBus::new(client_man), iap2), rx)
+  }
+
+  fn companion_call(call_id: &str) -> PhoneCall {
+    PhoneCall {
+      call_id: call_id.into(),
+      remote_id: "+16024186908".into(),
+      display_name: "Caller".into(),
+      status: PhoneCallStatus::Active,
+      direction: PhoneCallDirection::Incoming,
+      started_at_unix_s: None,
+      label: None,
+      address_book_id: None,
+      service: None,
+      is_conferenced: None,
+      conference_group: None,
+    }
+  }
+
+  fn addr(last: u8) -> Address {
+    Address([0xAA, 0, 0, 0, 0, last])
+  }
+
+  #[tokio::test]
+  async fn a_peer_companion_leaving_does_not_end_another_companions_calls() {
+    let (telephony, _link) = manager();
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony.clear_companion(addr(2)).await;
+    assert_eq!(
+      telephony.snapshot().await.active_calls.len(),
+      1,
+      "a peer companion ended someone else's call"
+    );
+  }
+
+  #[tokio::test]
+  async fn the_owning_companion_leaving_ends_its_calls() {
+    let (telephony, _link) = manager();
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony.clear_companion(addr(1)).await;
+    assert!(
+      telephony.snapshot().await.active_calls.is_empty(),
+      "the departing companion's call outlived it"
+    );
+  }
+
+  #[tokio::test]
+  async fn a_second_companion_taking_over_ends_the_first_ones_calls() {
+    let (telephony, _link) = manager();
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony
+      .apply_companion_communications(addr(2), CommunicationsState::default())
+      .await;
+
+    assert!(
+      telephony.snapshot().await.active_calls.is_empty(),
+      "the displaced companion's call is stranded on the device forever"
+    );
+    assert!(
+      telephony.inner.read().await.announced.is_empty(),
+      "the stranded call kept its announce slot"
+    );
+  }
+
+  #[tokio::test]
+  async fn a_second_companions_snapshot_replaces_the_first_ones_calls() {
+    let (telephony, _link) = manager();
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony
+      .apply_companion_snapshot(
+        addr(2),
+        PhoneState {
+          active_calls: vec![companion_call("c2")],
+        },
+      )
+      .await;
+
+    let calls = telephony.snapshot().await.active_calls;
+    assert_eq!(
+      calls.len(),
+      1,
+      "a stale companion call survived the takeover: {calls:?}"
+    );
+    assert_eq!(calls[0].call_id, "c2");
+  }
+
+  #[tokio::test]
+  async fn a_companion_handover_spares_iap2_calls() {
+    let (telephony, _link) = manager();
+    {
+      let mut inner = telephony.inner.write().await;
+      let _ = plan_iap2_call_state(
+        &mut inner,
+        update(Some("iap2-call"), Some("+16024186908"), STATUS_ACTIVE),
+      );
+    }
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony
+      .apply_companion_call_started(addr(2), companion_call("c2"))
+      .await;
+
+    let mut remaining: Vec<String> = telephony
+      .snapshot()
+      .await
+      .active_calls
+      .into_iter()
+      .map(|c| c.call_id)
+      .collect();
+    remaining.sort();
+    assert_eq!(remaining, vec!["c2".to_string(), "iap2-call".to_string()]);
+  }
+
+  #[tokio::test]
+  async fn a_companion_leaving_spares_iap2_calls() {
+    let (telephony, _link) = manager();
+    {
+      let mut inner = telephony.inner.write().await;
+      let _ = plan_iap2_call_state(
+        &mut inner,
+        update(Some("iap2-call"), Some("+16024186908"), STATUS_ACTIVE),
+      );
+    }
+    let _ = telephony
+      .apply_companion_call_started(addr(1), companion_call("c1"))
+      .await;
+
+    let _ = telephony.clear_companion(addr(1)).await;
+    let remaining = telephony.snapshot().await.active_calls;
+    assert_eq!(remaining.len(), 1, "the iap2 call did not survive");
+    assert_eq!(remaining[0].call_id, "iap2-call");
+  }
 
   const STATUS_SENDING: u8 = 1;
   const STATUS_RINGING: u8 = 2;

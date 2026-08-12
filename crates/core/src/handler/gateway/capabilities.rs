@@ -4,7 +4,7 @@ use libbridgething::{
 };
 
 use super::{HandlerResult, MsgHandle};
-use crate::bluetooth::GatewayType;
+use crate::bluetooth::{BluetoothError, GatewayType};
 
 pub struct CapabilitiesHandler {
   handle: MsgHandle,
@@ -32,10 +32,15 @@ impl GatewayToBridgeCapabilitiesMsgEventDispatch for CapabilitiesHandler {
           self.handle.state.peers.upsert(mac, device).await;
         }
         GatewayType::Rfcomm | GatewayType::Iap2Ea => {
-          if let Some(profile_man) = self.handle.bluetooth.profile_man.try_get()
-            && let Err(err) = profile_man.upsert_paired_device(mac, device.device_type.clone()).await
+          match self
+            .handle
+            .bluetooth
+            .profile_man
+            .upsert_paired_device(mac, device.device_type.clone())
+            .await
           {
-            tracing::warn!(?err, "failed to upsert paired device on capabilities announce");
+            Ok(_) | Err(BluetoothError::NoRadio) => {}
+            Err(err) => tracing::warn!(?err, "failed to upsert paired device on capabilities announce"),
           }
           self.handle.state.peers.ensure_exists(mac, device).await;
         }

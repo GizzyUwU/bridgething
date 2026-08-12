@@ -4,13 +4,12 @@ use std::{
   time::Duration,
 };
 
-use bluer::Address;
 use libbridgething::gateway::{BridgeToGatewayTransferMsgEvent, TransferAbandon, TransferFragment};
 use tokio::sync::watch;
 use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
-use crate::bluetooth::BluetoothMan;
+use crate::bluetooth::{Address, BluetoothMan};
 
 pub const OUTBOUND_FRAGMENT_LEN: usize = 4 * 1024;
 pub const OUTBOUND_WINDOW: u32 = 64 * 1024;
@@ -71,7 +70,7 @@ impl TransferOutbound {
       let fragment = BridgeToGatewayTransferMsgEvent::Fragment(TransferFragment {
         transfer_id: id,
         offset: offset as u32,
-        bytes: bytes.slice(offset..offset + len).to_vec(),
+        bytes: bytes.slice(offset..offset + len),
       });
       bluetooth.gateway_man.send_event_bulk(address, fragment).await;
       offset += len;

@@ -15,18 +15,26 @@ libbridgething = { path = "../lib", features = ["protocol"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
-bluer = { workspace = true, features = ["bluetoothd", "rfcomm"] }
 uuid = { workspace = true, features = ["v7"] }
 anyhow = "1.0"
 tempfile = "3.23.0"
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect"] }
+tokio-tungstenite = { version = "0.29.0", default-features = false, features = [
+  "connect",
+] }
 bridgething-iap2 = { workspace = true, features = ["emulator"] }
-chromiumoxide = "0.9.1"
+chromiumoxide = { version = "0.9.1", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 bridgething-gateway = { workspace = true }
 async-trait.workspace = true
 bridgething-client = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = { workspace = true, features = ["bluetoothd", "rfcomm"] }
+
+[features]
+default = ["chrome"]
+chrome = ["dep:chromiumoxide"]
 
 [dev-dependencies]
 base64 = "0.22.1"

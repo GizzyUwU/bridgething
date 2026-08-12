@@ -2,12 +2,10 @@ use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::{TunnelAck, TunnelClosed, TunnelData};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -23,13 +21,11 @@ use crate::{TunnelAck, TunnelClosed, TunnelData};
 )]
 pub struct TunnelOpen {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub tunnel_id: Uuid,
   pub host: String,
   pub port: u16,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

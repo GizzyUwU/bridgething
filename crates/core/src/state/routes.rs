@@ -6,9 +6,17 @@ use std::{
 
 use uuid::Uuid;
 
+use crate::bluetooth::Address;
+
+#[derive(Debug, Clone, Copy)]
+struct Route {
+  owner: SocketAddr,
+  gateway: Option<Address>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RouteTable {
-  inner: Arc<RwLock<HashMap<Uuid, SocketAddr>>>,
+  inner: Arc<RwLock<HashMap<Uuid, Route>>>,
 }
 
 impl RouteTable {
@@ -16,33 +24,64 @@ impl RouteTable {
     Self::default()
   }
 
-  pub fn register(&self, id: Uuid, owner: SocketAddr) {
-    self.inner.write().expect("route table poisoned").insert(id, owner);
+  pub fn register(&self, id: Uuid, owner: SocketAddr, gateway: Option<Address>) {
+    self
+      .inner
+      .write()
+      .expect("route table poisoned")
+      .insert(id, Route { owner, gateway });
   }
 
   pub fn lookup(&self, id: Uuid) -> Option<SocketAddr> {
-    self.inner.read().expect("route table poisoned").get(&id).copied()
+    self
+      .inner
+      .read()
+      .expect("route table poisoned")
+      .get(&id)
+      .map(|route| route.owner)
+  }
+
+  pub fn gateway_of(&self, id: Uuid) -> Option<Address> {
+    self
+      .inner
+      .read()
+      .expect("route table poisoned")
+      .get(&id)
+      .and_then(|route| route.gateway)
   }
 
   pub fn drop_id(&self, id: Uuid) -> Option<SocketAddr> {
-    self.inner.write().expect("route table poisoned").remove(&id)
+    self
+      .inner
+      .write()
+      .expect("route table poisoned")
+      .remove(&id)
+      .map(|route| route.owner)
   }
 
   pub fn drain_for_owner(&self, owner: SocketAddr) -> Vec<Uuid> {
-    let mut guard = self.inner.write().expect("route table poisoned");
-    let ids: Vec<Uuid> = guard
-      .iter()
-      .filter_map(|(id, addr)| (*addr == owner).then_some(*id))
-      .collect();
-    for id in &ids {
-      guard.remove(id);
-    }
-    ids
+    self
+      .drain_where(|route| route.owner == owner)
+      .into_iter()
+      .map(|(id, _)| id)
+      .collect()
   }
 
-  pub fn drain_all(&self) -> Vec<(Uuid, SocketAddr)> {
+  pub fn drain_for_gateway(&self, gateway: Address) -> Vec<(Uuid, SocketAddr)> {
+    self.drain_where(|route| route.gateway == Some(gateway))
+  }
+
+  fn drain_where(&self, pred: impl Fn(&Route) -> bool) -> Vec<(Uuid, SocketAddr)> {
     let mut guard = self.inner.write().expect("route table poisoned");
-    guard.drain().collect()
+    let hit: Vec<(Uuid, SocketAddr)> = guard
+      .iter()
+      .filter(|(_, route)| pred(route))
+      .map(|(id, route)| (*id, route.owner))
+      .collect();
+    for (id, _) in &hit {
+      guard.remove(id);
+    }
+    hit
   }
 }
 
@@ -54,12 +93,16 @@ mod tests {
     s.parse().unwrap()
   }
 
+  fn gw(last: u8) -> Address {
+    Address([0xAA, 0, 0, 0, 0, last])
+  }
+
   #[test]
   fn register_lookup_drop() {
     let table = RouteTable::new();
     let id = Uuid::now_v7();
     let a = addr("127.0.0.1:1000");
-    table.register(id, a);
+    table.register(id, a, None);
     assert_eq!(table.lookup(id), Some(a));
     assert_eq!(table.drop_id(id), Some(a));
     assert_eq!(table.lookup(id), None);
@@ -73,9 +116,9 @@ mod tests {
     let a1 = Uuid::now_v7();
     let a2 = Uuid::now_v7();
     let b1 = Uuid::now_v7();
-    table.register(a1, alice);
-    table.register(a2, alice);
-    table.register(b1, bob);
+    table.register(a1, alice, None);
+    table.register(a2, alice, None);
+    table.register(b1, bob, None);
 
     let mut drained = table.drain_for_owner(alice);
     drained.sort();
@@ -87,16 +130,20 @@ mod tests {
   }
 
   #[test]
-  fn drain_all_empties_table() {
+  fn drain_for_gateway_spares_other_companions() {
     let table = RouteTable::new();
-    let a = addr("127.0.0.1:1");
-    let id1 = Uuid::now_v7();
-    let id2 = Uuid::now_v7();
-    table.register(id1, a);
-    table.register(id2, a);
-    let drained = table.drain_all();
-    assert_eq!(drained.len(), 2);
-    assert_eq!(table.lookup(id1), None);
-    assert_eq!(table.lookup(id2), None);
+    let client = addr("127.0.0.1:1");
+    let phone_route = Uuid::now_v7();
+    let desktop_route = Uuid::now_v7();
+    table.register(phone_route, client, Some(gw(1)));
+    table.register(desktop_route, client, Some(gw(2)));
+
+    let drained = table.drain_for_gateway(gw(2));
+    assert_eq!(drained, vec![(desktop_route, client)]);
+    assert_eq!(
+      table.lookup(phone_route),
+      Some(client),
+      "one companion leaving tore down another's route"
+    );
   }
 }

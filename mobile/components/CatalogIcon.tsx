@@ -3,6 +3,7 @@ import { Image, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
 import { boundedCache } from '../lib/bounded-cache';
+import { TEXT } from '../lib/theme';
 
 type Resolved =
   | { kind: 'svg'; xml: string }
@@ -44,12 +45,10 @@ export function CatalogIcon({
   url,
   name,
   size,
-  radiusClass = 'rounded-xl',
 }: {
   url: string | null;
   name: string;
   size: number;
-  radiusClass?: string;
 }) {
   const [resolved, setResolved] = useState<Resolved | null>(null);
 
@@ -115,7 +114,7 @@ export function CatalogIcon({
 
   return (
     <View
-      className={`items-center justify-center overflow-hidden bg-secondary ${radiusClass}`}
+      className="items-center justify-center overflow-hidden border border-rule bg-neutral-soft"
       style={dims}
     >
       {resolved?.kind === 'svg' ? (
@@ -131,8 +130,8 @@ export function CatalogIcon({
           }}
         />
       ) : url && resolved === null ? null : (
-        <Text className="text-[16px] font-extrabold text-foreground">
-          {name.charAt(0).toUpperCase()}
+        <Text className="font-mono uppercase text-soft" style={TEXT.rowLg}>
+          {name.charAt(0)}
         </Text>
       )}
     </View>

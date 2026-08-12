@@ -5,56 +5,58 @@ use std::{
   time::Duration,
 };
 
-use bluer::{Address, Session};
-use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Handles, Iap2Manager};
+#[cfg(target_os = "linux")]
+use iap2::Iap2Manager;
+use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Handles};
 use libbridgething::{
   Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
   protocol::EnvelopeProbe,
   wire::{MsgMeta, RequestError, ResponseMeta, WireCommand, WireError, WireEvent, WireRequest},
 };
+#[cfg(target_os = "linux")]
 use profiles::ProfileManager;
-use tokio::{
-  sync::{oneshot, watch},
-  task::JoinHandle,
-};
+use tokio::{sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
 
+mod address;
 pub mod iap2;
 pub mod le;
 mod network;
 pub mod profiles;
 mod rfcomm;
 
+#[cfg(target_os = "linux")]
 mod adapter;
+#[cfg(target_os = "linux")]
 mod auth;
-#[cfg(debug_assertions)]
+#[cfg(all(target_os = "linux", debug_assertions))]
 mod debug;
+#[cfg(target_os = "linux")]
 mod hci;
-mod packer;
 mod peer_owners;
+#[cfg(target_os = "linux")]
 mod scan;
 
-#[cfg(feature = "test-tap")]
+pub use address::Address;
 pub use iap2::{Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
 use le::{LeBootstrap, LeManager};
 use network::NetworkGateway;
-pub(crate) use packer::OutboundPacker;
 use peer_owners::PeerOwners;
-use profiles::ProfileMan;
-#[cfg(feature = "test-tap")]
+use profiles::{ProfileCommand, ProfileCommandRx, ProfileCommandTx};
 pub use rfcomm::InjectConnectionTx;
-#[cfg(feature = "test-tap")]
 pub(crate) use rfcomm::inject_channel;
 use rfcomm::{ConnectionSource, RfcommGateway};
 
 use crate::{
   handler::Iap2EventRouter,
-  net::{WSError, WireEventBus},
+  net::WSError,
   peer::PeerTracker,
   player::PlayerError,
-  state::{DeviceStore, State, StateError, meta::DeviceMeta},
+  state::{State, StateError, meta::DeviceMeta},
 };
+#[cfg(target_os = "linux")]
+use crate::{net::WireEventBus, state::DeviceStore};
 
 pub type BluetoothMan = Arc<BluetoothManager>;
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
@@ -68,15 +70,17 @@ pub enum BluetoothEvent {
 
 #[derive(Debug, Clone)]
 pub struct BluetoothDeps {
+  #[cfg(target_os = "linux")]
   pub bus: WireEventBus,
   pub meta: DeviceMeta,
+  #[cfg(target_os = "linux")]
   pub devices: DeviceStore,
   pub peers: PeerTracker,
 }
 
 pub(crate) enum BluetoothBringup {
+  #[cfg(target_os = "linux")]
   Real,
-  #[cfg(feature = "test-tap")]
   Headless(rfcomm::InjectConnectionRx),
 }
 
@@ -93,10 +97,9 @@ pub(crate) struct BluetoothBootstrap {
   iap2_events_rx: Iap2EventsRx,
   iap2_bootstrap: iap2::Iap2Bootstrap,
   le: LeBootstrap,
-  profile_man_tx: watch::Sender<Option<ProfileMan>>,
+  profile_command_rx: ProfileCommandRx,
 }
 
-#[cfg(feature = "test-tap")]
 impl BluetoothBootstrap {
   pub(crate) fn iap2_inject_tx(&self) -> Iap2InjectTx {
     self.iap2_bootstrap.events_tx()
@@ -112,13 +115,13 @@ impl BluetoothManager {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
     let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
     let (le_handle, le_bootstrap) = LeManager::allocate(serial_suffix);
-    let (profile_man_tx, profile_man_rx) = watch::channel(None);
+    let (profile_command_tx, profile_command_rx) = tokio::sync::mpsc::channel(profiles::PROFILE_COMMAND_CAPACITY);
 
     let manager = Arc::new(Self {
       gateway_man,
       iap2: iap2_handles,
       le: le_handle,
-      profile_man: ProfileManAccess { rx: profile_man_rx },
+      profile_man: ProfileManAccess { tx: profile_command_tx },
     });
 
     let bootstrap = BluetoothBootstrap {
@@ -126,7 +129,7 @@ impl BluetoothManager {
       iap2_events_rx,
       iap2_bootstrap,
       le: le_bootstrap,
-      profile_man_tx,
+      profile_command_rx,
     };
 
     (manager, bootstrap)
@@ -162,15 +165,19 @@ impl BluetoothManager {
     bringup: BluetoothBringup,
   ) -> BluetoothResult<()> {
     match bringup {
-      #[cfg(feature = "test-tap")]
       BluetoothBringup::Headless(inject_rx) => {
         let BluetoothBootstrap {
           gateway,
           mut iap2_events_rx,
           iap2_bootstrap,
+          profile_command_rx,
+          le: le_bootstrap,
           ..
         } = bootstrap;
         tracing::debug!("bringing up gateway transports + iap2 router with no radio (headless)");
+
+        let _profile_actor = profiles::spawn_no_radio_actor(profile_command_rx);
+        let _le_actor = le_bootstrap.spawn_no_radio();
 
         let (mut outbound_rx, outbound_tap_tx) = iap2_bootstrap.into_headless_outbound();
         tokio::spawn(async move {
@@ -208,13 +215,14 @@ impl BluetoothManager {
           }
         }
       }
+      #[cfg(target_os = "linux")]
       BluetoothBringup::Real => {
         let BluetoothBootstrap {
           gateway,
           mut iap2_events_rx,
           iap2_bootstrap,
           le: le_bootstrap,
-          profile_man_tx,
+          profile_command_rx,
         } = bootstrap;
 
         tracing::debug!("initializing bluetooth manager");
@@ -239,14 +247,13 @@ impl BluetoothManager {
           deps.peers.clone(),
           self.iap2.reconnect.clone(),
         ));
-        let _ = profile_man_tx.send(Some(profile_man.clone()));
+        let _profile_actor = profiles::spawn_command_actor(profile_man.clone(), profile_command_rx);
 
         let _agent_handle = retry_bluez("agent registration", || {
           auth::build_agent(&session, profile_man.clone())
         })
         .await;
 
-        // start stream BEFORE device reconnection attempts
         let _adapter_event_handle = adapter::AdapterEventStream {
           stream: Box::new(retry_bluez("adapter event stream", || adapter.events()).await),
           adapter: adapter.clone(),
@@ -297,15 +304,16 @@ impl BluetoothManager {
     }
   }
 
-  pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
+  pub async fn connect(&self, mac: &str) -> BluetoothResult<()> {
     let address: Address = mac.parse()?;
     tracing::debug!(%address, "kicking iAP2 reconnect from connect command");
     self.iap2.reconnect.kick(address).await;
     Ok(())
   }
 
-  async fn bring_up_adapter() -> BluetoothResult<(Session, bluer::Adapter)> {
-    let session = Session::new().await?;
+  #[cfg(target_os = "linux")]
+  async fn bring_up_adapter() -> BluetoothResult<(bluer::Session, bluer::Adapter)> {
+    let session = bluer::Session::new().await?;
     let adapter = adapter::get_adapter(&session).await?;
 
     tracing::debug!("attempting to power on adapter");
@@ -322,27 +330,55 @@ impl BluetoothManager {
 
 #[derive(Debug, Clone)]
 pub struct ProfileManAccess {
-  rx: watch::Receiver<Option<ProfileMan>>,
+  tx: ProfileCommandTx,
 }
 
 impl ProfileManAccess {
-  pub async fn get(&self) -> ProfileMan {
-    let mut rx = self.rx.clone();
-    loop {
-      if let Some(pm) = rx.borrow_and_update().as_ref() {
-        return pm.clone();
-      }
-      if rx.changed().await.is_err() {
-        std::future::pending::<()>().await;
-      }
-    }
+  pub async fn set_alias(&self, alias: String) -> BluetoothResult<()> {
+    self.request(|reply| ProfileCommand::SetAlias { alias, reply }).await
   }
 
-  pub fn try_get(&self) -> Option<ProfileMan> {
-    self.rx.borrow().clone()
+  pub async fn set_discoverable(&self, discoverable: bool) -> BluetoothResult<()> {
+    self
+      .request(|reply| ProfileCommand::SetDiscoverable { discoverable, reply })
+      .await
+  }
+
+  pub async fn forget(&self, mac: &str) -> BluetoothResult<()> {
+    let mac = mac.to_string();
+    self.request(|reply| ProfileCommand::Forget { mac, reply }).await
+  }
+
+  pub async fn reset(&self) -> BluetoothResult<()> {
+    self.request(|reply| ProfileCommand::Reset { reply }).await
+  }
+
+  pub async fn upsert_paired_device(
+    &self,
+    mac: Address,
+    device_type: libbridgething::DeviceType,
+  ) -> BluetoothResult<libbridgething::Device> {
+    self
+      .request(|reply| ProfileCommand::UpsertPairedDevice {
+        mac,
+        device_type,
+        reply,
+      })
+      .await
+  }
+
+  async fn request<T>(&self, command: impl FnOnce(profiles::Reply<T>) -> ProfileCommand) -> BluetoothResult<T> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    self
+      .tx
+      .send(command(reply_tx))
+      .await
+      .map_err(|_| BluetoothError::NoRadio)?;
+    reply_rx.await.map_err(|_| BluetoothError::NoRadio)?
   }
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) async fn retry_bluez<T, E, F, Fut>(what: &str, mut op: F) -> T
 where
   E: std::fmt::Debug,
@@ -373,23 +409,12 @@ pub enum GatewayType {
 pub struct InboundGatewayMessage {
   pub address: Option<Address>,
   pub protocol: GatewayType,
-  pub priority: Priority,
   pub msg: GatewayToBridgeMsg,
 }
 
 impl InboundGatewayMessage {
   pub fn new(address: Option<Address>, protocol: GatewayType, msg: GatewayToBridgeMsg) -> Self {
-    Self {
-      address,
-      protocol,
-      priority: Priority::Normal,
-      msg,
-    }
-  }
-
-  pub fn with_priority(mut self, priority: Priority) -> Self {
-    self.priority = priority;
-    self
+    Self { address, protocol, msg }
   }
 }
 
@@ -621,37 +646,37 @@ impl GatewayMan {
   }
 
   pub async fn broadcast_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
-    self.broadcast_command_with_priority(cmd, Priority::Normal).await;
+    self.command_with_priority(None, cmd, Priority::Normal).await;
   }
 
   pub async fn broadcast_command_bulk<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
-    self.broadcast_command_with_priority(cmd, Priority::Bulk).await;
+    self.command_with_priority(None, cmd, Priority::Bulk).await;
   }
 
-  async fn broadcast_command_with_priority<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C, priority: Priority) {
-    self
-      .send_all(
-        OutboundGatewayMessage::all(BridgeToGatewayMsg {
-          id: uuid::Uuid::now_v7(),
-          meta: MsgMeta::Command,
-          data: cmd.into(),
-        })
-        .with_priority(priority),
-      )
-      .await;
+  pub async fn command_bulk<C: WireCommand<BridgeToGatewayMsgData>>(&self, address: Option<Address>, cmd: C) {
+    self.command_with_priority(address, cmd, Priority::Bulk).await;
   }
 
   pub async fn send_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, address: Address, cmd: C) {
-    self
-      .send_all(OutboundGatewayMessage::to(
-        address,
-        BridgeToGatewayMsg {
-          id: uuid::Uuid::now_v7(),
-          meta: MsgMeta::Command,
-          data: cmd.into(),
-        },
-      ))
-      .await;
+    self.command_with_priority(Some(address), cmd, Priority::Normal).await;
+  }
+
+  async fn command_with_priority<C: WireCommand<BridgeToGatewayMsgData>>(
+    &self,
+    address: Option<Address>,
+    cmd: C,
+    priority: Priority,
+  ) {
+    let msg = BridgeToGatewayMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: MsgMeta::Command,
+      data: cmd.into(),
+    };
+    let outbound = match address {
+      Some(addr) => OutboundGatewayMessage::to(addr, msg),
+      None => OutboundGatewayMessage::all(msg),
+    };
+    self.send_all(outbound.with_priority(priority)).await;
   }
 
   pub async fn request<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
@@ -765,7 +790,7 @@ fn spawn_gateway_listener(gateway_type: GatewayType, mut rx: GatewayRecvRx, tx: 
         tracing::error!("failed to send message to bluetooth manager: {:?}", err);
       }
     }
-    tracing::error!("gateway connection closed?? this is very very bad!!");
+    tracing::debug!("gateway listener: all senders dropped; exiting");
   })
 }
 
@@ -849,8 +874,13 @@ pub fn auto_nack_for_failed_decode(probe: &EnvelopeProbe) -> Option<BridgeToGate
 pub type BluetoothResult<T> = Result<T, BluetoothError>;
 #[derive(Debug, thiserror::Error)]
 pub enum BluetoothError {
+  #[cfg(target_os = "linux")]
   #[error("bluez error: {0}")]
   Bluez(#[from] bluer::Error),
+  #[error("no bluetooth radio is attached to this daemon")]
+  NoRadio,
+  #[error(transparent)]
+  InvalidAddress(#[from] address::InvalidAddress),
   #[error(transparent)]
   WS(#[from] WSError),
   #[error("state error: {0}")]
@@ -870,3 +900,50 @@ pub enum BluetoothError {
 }
 
 crate::impl_broadcast_failure_from!(BluetoothError);
+
+#[cfg(test)]
+mod outbound_router_tests {
+  use super::*;
+
+  fn addr(last: u8) -> Address {
+    Address::new([0xFE, 0xFE, 0x00, 0x00, 0x00, last])
+  }
+
+  #[test]
+  fn a_broadcast_targets_the_network_transport_when_a_network_peer_is_registered() {
+    let owners = PeerOwners::new();
+    owners.register(addr(0x01), GatewayType::Network);
+
+    let targets = resolve_targets(&owners, None);
+
+    assert!(
+      targets.contains(&GatewayType::Network),
+      "a broadcast must reach the network gateway, or a cli pusher never learns its run ended"
+    );
+  }
+
+  #[test]
+  fn a_bluetooth_peer_does_not_displace_the_network_peer_from_a_broadcast() {
+    let owners = PeerOwners::new();
+    owners.register(addr(0x01), GatewayType::Network);
+    owners.register(addr(0x02), GatewayType::Iap2Ea);
+
+    let targets = resolve_targets(&owners, None);
+
+    assert!(targets.contains(&GatewayType::Network), "network still targeted");
+    assert!(targets.contains(&GatewayType::Iap2Ea), "phone still targeted");
+    assert_eq!(targets.len(), 2, "exactly the two live transports");
+  }
+
+  #[test]
+  fn a_broadcast_drops_the_network_transport_once_its_only_peer_goes_away() {
+    let owners = PeerOwners::new();
+    owners.register(addr(0x01), GatewayType::Network);
+    owners.unregister(addr(0x01), GatewayType::Network);
+
+    assert!(
+      !resolve_targets(&owners, None).contains(&GatewayType::Network),
+      "a closed connection must stop being a target"
+    );
+  }
+}

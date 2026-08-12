@@ -1,75 +1,49 @@
-import { cva, type VariantProps } from 'class-variance-authority';
-import type { LucideIcon } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { Text, View } from 'react-native';
 
-import { Button as RNRButton } from './ui/button';
-import { Text } from './ui/text';
+import { Icon, type IconName } from './Icon';
+import { Press } from './Press';
+import { Spinner } from './Spinner';
+import { TYPE, usePalette, type Palette } from '../lib/theme';
 
-/**
- * App-flavoured Button. Composes RNR's `<Button>` with an optional leading
- * icon, a loading spinner, and the soft glow that primary / destructive
- * variants get. `primary`/`tonal` map to RNR's `default`/`secondary`.
- */
-type Variant = 'primary' | 'secondary' | 'destructive' | 'ghost' | 'tonal';
-type Size = 'sm' | 'md' | 'lg';
+export type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'ghost';
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
-const RNR_VARIANT: Record<
-  Variant,
-  'default' | 'secondary' | 'destructive' | 'ghost'
-> = {
-  primary: 'default',
-  secondary: 'secondary',
-  destructive: 'destructive',
-  ghost: 'ghost',
-  tonal: 'secondary',
+const SHAPE: Record<ButtonVariant, string> = {
+  primary: 'border-accent bg-accent',
+  secondary: 'border-edge',
+  destructive: 'border-err bg-err',
+  ghost: 'border-transparent',
 };
 
-const RNR_SIZE: Record<Size, 'default' | 'sm' | 'lg'> = {
-  sm: 'sm',
-  md: 'default',
-  lg: 'lg',
+const LABEL: Record<ButtonVariant, string> = {
+  primary: 'text-screen',
+  secondary: 'text-near',
+  destructive: 'text-screen',
+  ghost: 'text-soft',
 };
 
-// Brand-tinted soft-shadow halo for the high-emphasis variants. The
-// rest fall back to RNR's built-in surface shadow.
-const haloVariants = cva('w-full', {
-  variants: {
-    variant: {
-      primary: 'shadow-primary/30 shadow-md',
-      destructive: 'shadow-destructive/30 shadow-md',
-      tonal: 'bg-primary-soft',
-      secondary: '',
-      ghost: '',
-    },
-  },
-  defaultVariants: { variant: 'primary' },
-});
+const PAD: Record<ButtonSize, string> = {
+  sm: 'px-3.5 py-1.5',
+  md: 'px-5 py-2.5',
+  lg: 'px-6 py-3',
+};
 
-const labelToneVariants = cva('text-[15px] font-semibold', {
-  variants: {
-    variant: {
-      primary: 'text-primary-foreground',
-      secondary: 'text-secondary-foreground',
-      destructive: 'text-white',
-      ghost: 'text-foreground',
-      tonal: 'text-primary',
-    },
-  },
-  defaultVariants: { variant: 'primary' },
-});
+const LABEL_SIZE: Record<ButtonSize, number> = {
+  sm: TYPE.hint,
+  md: TYPE.body,
+  lg: TYPE.rowLg,
+};
 
-type ButtonProps = {
-  onPress?: () => void;
-  disabled?: boolean;
-  loading?: boolean;
-  variant?: Variant;
-  size?: Size;
-  icon?: LucideIcon;
-  children: ReactNode;
-  className?: string;
-  fullWidth?: boolean;
-} & VariantProps<typeof haloVariants>;
+function labelColor(
+  palette: Palette,
+  variant: ButtonVariant,
+  inactive: boolean,
+): string {
+  if (inactive) return palette.dim;
+  if (variant === 'primary' || variant === 'destructive') return palette.screen;
+  return variant === 'ghost' ? palette.soft : palette.near;
+}
 
 export function Button({
   onPress,
@@ -77,43 +51,48 @@ export function Button({
   loading,
   variant = 'primary',
   size = 'md',
-  icon: Icon,
-  children,
+  icon,
+  full = true,
   className,
-  fullWidth,
-}: ButtonProps) {
-  const inactive = disabled || loading;
-  const widthClass = fullWidth === false ? 'self-start' : 'self-stretch';
-  const labelClass = labelToneVariants({ variant });
-  const tonalClass = variant === 'tonal' ? 'bg-primary-soft' : '';
-
-  const iconColor =
-    variant === 'primary' || variant === 'destructive'
-      ? 'white'
-      : variant === 'tonal'
-        ? 'hsl(199 100% 44%)'
-        : 'hsl(210 22% 14%)';
+  children,
+}: {
+  onPress?: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  icon?: IconName;
+  full?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const palette = usePalette();
+  const inactive = Boolean(disabled || loading);
+  const tint = labelColor(palette, variant, inactive);
 
   return (
-    <RNRButton
+    <Press
       onPress={onPress}
       disabled={inactive}
-      variant={RNR_VARIANT[variant]}
-      size={RNR_SIZE[size]}
-      className={`${widthClass} ${tonalClass} ${
-        variant === 'primary' || variant === 'destructive'
-          ? haloVariants({ variant })
-          : ''
-      } ${className ?? ''}`}
+      className={`${full ? 'self-stretch' : 'self-start'} ${className ?? ''}`}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={iconColor} />
-      ) : (
-        <View className="flex-row items-center justify-center gap-2">
-          {Icon ? <Icon size={18} color={iconColor} strokeWidth={2.4} /> : null}
-          <Text className={labelClass}>{children}</Text>
-        </View>
-      )}
-    </RNRButton>
+      <View
+        className={`flex-row items-center justify-center gap-2 border ${PAD[size]} ${
+          inactive ? 'border-dashed border-rule' : SHAPE[variant]
+        }`}
+      >
+        {loading ? (
+          <Spinner color={tint} />
+        ) : icon ? (
+          <Icon name={icon} color={tint} size={LABEL_SIZE[size] + 3} />
+        ) : null}
+        <Text
+          className={`font-mono ${inactive ? 'text-dim' : LABEL[variant]}`}
+          style={{ fontSize: LABEL_SIZE[size] }}
+        >
+          {children}
+        </Text>
+      </View>
+    </Press>
   );
 }

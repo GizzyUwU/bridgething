@@ -19,6 +19,7 @@ pub struct Config {
   pub onset: Duration,
   pub min_speech: Duration,
   pub hangover: Duration,
+  pub spatial_floor: f32,
 }
 
 impl Default for Config {
@@ -28,6 +29,7 @@ impl Default for Config {
       onset: Duration::from_millis(3000),
       min_speech: Duration::from_millis(160),
       hangover: Duration::from_millis(1200),
+      spatial_floor: 0.10,
     }
   }
 }
@@ -76,10 +78,11 @@ impl VoiceEndpointer {
     self.speech_seen
   }
 
-  pub fn observe(&mut self, samples: &[f32]) -> Option<TurnEnd> {
+  pub fn observe(&mut self, samples: &[f32], on_target: Option<f32>) -> Option<TurnEnd> {
     if self.phase == Phase::Closed {
       return None;
     }
+    let spatial = on_target.is_none_or(|evidence| evidence >= self.config.spatial_floor);
     let mut verdict = None;
     self.pending.extend_from_slice(samples);
     let mut consumed = 0;
@@ -88,7 +91,7 @@ impl VoiceEndpointer {
         .scratch
         .copy_from_slice(&self.pending[consumed..consumed + FRAME_SAMPLES]);
       consumed += FRAME_SAMPLES;
-      let voiced = self.score_frame() >= self.config.threshold;
+      let voiced = self.score_frame() >= self.config.threshold && spatial;
       verdict = self.advance(voiced);
     }
     self.pending.drain(..consumed);
@@ -148,6 +151,7 @@ mod tests {
       onset: Duration::from_millis(500),
       min_speech: Duration::from_millis(112),
       hangover: Duration::from_millis(160),
+      spatial_floor: 0.0,
     }
   }
 
@@ -201,11 +205,22 @@ mod tests {
   }
 
   fn feed(endpointer: &mut VoiceEndpointer, samples: &[f32]) -> Option<TurnEnd> {
+    feed_with(endpointer, samples, None)
+  }
+
+  fn feed_with(endpointer: &mut VoiceEndpointer, samples: &[f32], on_target: Option<f32>) -> Option<TurnEnd> {
     let mut end = None;
     for frame in samples.chunks(FRAME_SAMPLES) {
-      end = end.or(endpointer.observe(frame));
+      end = end.or(endpointer.observe(frame, on_target));
     }
     end
+  }
+
+  fn gated() -> Config {
+    Config {
+      spatial_floor: 0.25,
+      ..config()
+    }
   }
 
   #[test]
@@ -283,17 +298,85 @@ mod tests {
     let quiet = quiet_frames(60);
     let mut end = None;
     for chunk in quiet.chunks(100) {
-      end = end.or(endpointer.observe(chunk));
+      end = end.or(endpointer.observe(chunk, None));
     }
     assert_eq!(end, Some(TurnEnd::NoOnset));
   }
 
   #[test]
+  fn spatial_evidence_below_the_floor_keeps_a_loud_interferer_from_opening_a_turn() {
+    let mut endpointer = VoiceEndpointer::new(gated());
+    assert_eq!(
+      feed_with(&mut endpointer, &voiced_frames(60), Some(0.05)),
+      Some(TurnEnd::NoOnset)
+    );
+    assert!(!endpointer.speech_seen(), "off-target energy opened a turn");
+  }
+
+  #[test]
+  fn spatial_evidence_above_the_floor_leaves_the_acoustic_decision_alone() {
+    let mut endpointer = VoiceEndpointer::new(gated());
+    assert_eq!(feed_with(&mut endpointer, &voiced_frames(20), Some(0.8)), None);
+    assert!(endpointer.speech_seen());
+  }
+
+  #[test]
+  fn a_gate_that_shuts_mid_turn_runs_the_hangover_down_and_closes() {
+    let mut endpointer = VoiceEndpointer::new(gated());
+    feed_with(&mut endpointer, &voiced_frames(20), Some(0.8));
+    assert!(endpointer.speech_seen());
+    assert_eq!(
+      feed_with(&mut endpointer, &voiced_frames(40), Some(0.05)),
+      Some(TurnEnd::SilenceAfterSpeech),
+      "voice-scoring energy off the target bearing must not hold the turn open"
+    );
+  }
+
+  #[test]
+  fn the_gate_is_inert_when_the_beamformer_resolved_no_bearing() {
+    let mut endpointer = VoiceEndpointer::new(gated());
+    assert_eq!(feed_with(&mut endpointer, &voiced_frames(20), None), None);
+    assert!(
+      endpointer.speech_seen(),
+      "no spatial evidence must mean no spatial veto"
+    );
+  }
+
+  #[test]
+  fn a_zero_floor_passes_every_frame_the_detector_calls_voice() {
+    let mut endpointer = VoiceEndpointer::new(config());
+    assert_eq!(feed_with(&mut endpointer, &voiced_frames(20), Some(0.0)), None);
+    assert!(endpointer.speech_seen());
+  }
+
+  #[test]
+  fn the_detector_scores_gated_frames_so_its_state_does_not_diverge() {
+    let mut open = VoiceEndpointer::new(gated());
+    let mut vetoed = VoiceEndpointer::new(gated());
+    let speech = voiced_frames(20);
+    for frame in speech.chunks(FRAME_SAMPLES) {
+      open.observe(frame, Some(0.8));
+      vetoed.observe(frame, Some(0.05));
+    }
+    let (mut open_scores, mut vetoed_scores) = (Vec::new(), Vec::new());
+    for frame in voiced_frames(10).chunks_exact(FRAME_SAMPLES) {
+      open.scratch.copy_from_slice(frame);
+      vetoed.scratch.copy_from_slice(frame);
+      open_scores.push(open.score_frame());
+      vetoed_scores.push(vetoed.score_frame());
+    }
+    assert_eq!(
+      open_scores, vetoed_scores,
+      "a vetoed run fed the detector differently from an open one"
+    );
+  }
+
+  #[test]
   fn a_partial_trailing_frame_is_kept_for_the_next_call() {
     let mut endpointer = VoiceEndpointer::new(config());
-    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2]);
+    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2], None);
     assert_eq!(endpointer.armed_frames, 0, "half a frame is not a decision");
-    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2]);
+    endpointer.observe(&quiet_frames(1)[..FRAME_SAMPLES / 2], None);
     assert_eq!(endpointer.armed_frames, 1);
   }
 }

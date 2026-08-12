@@ -8,18 +8,12 @@ authors.workspace = true
 homepage.workspace = true
 
 [lib]
-# lib for host tests; cdylib/staticlib for the uniffi mobile artifacts.
-crate-type = ["lib", "cdylib", "staticlib"]
-
-[[bin]]
-name = "uniffi-bindgen"
-path = "src/bin/uniffi-bindgen.rs"
+crate-type = ["lib"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-# fancy-regex over the default onig (c regex) + esaxx (c++): bpe needs none of the
-# native paths and pure rust keeps the ios/ndk cross-builds free of foreign toolchains.
-tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
-uniffi = { version = "0.32.0", features = ["cli"] }
+tokenizers = { version = "0.23.1", default-features = false, features = [
+  "fancy-regex",
+] }

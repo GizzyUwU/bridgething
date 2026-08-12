@@ -1,33 +1,39 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  ArrowDown,
-  FolderClock,
-  Pause,
-  Play,
-  Share2,
-  Trash2,
-} from 'lucide-react-native';
+import type { BridgethingLogArchive } from '@bridgething/session-react-native';
+import { describeError } from '@bridgething/ui/errors';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Share,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ArmedButton } from '../components/ArmedButton';
+import { ConfirmSheet } from '../components/ConfirmSheet';
+import { Field } from '../components/Field';
+import { Icon, type IconName } from '../components/Icon';
 import { LogArchiveSheet } from '../components/LogArchiveSheet';
+import { Note } from '../components/Note';
 import { Press } from '../components/Press';
 import { Segmented } from '../components/Segmented';
-import { type DeviceLogLine, useDiagnostics } from '../lib/diagnostics';
+import { Spinner } from '../components/Spinner';
+import {
+  type DeviceLogLine,
+  LOG_LIMIT,
+  toLogLines,
+  useDiagnostics,
+  useMergedLogs,
+} from '../lib/diagnostics';
 import { getSession } from '../lib/session';
-import type { RootStackParamList } from '../navigation';
+import { TEXT, type Tone, TYPE } from '../lib/theme';
+import { logLevelTone, TONE_BG, TONE_TEXT } from '../lib/tone';
+import { formatBytes, formatStamp } from '../lib/utils';
+import type { SettingsScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Logs'>;
+type Props = SettingsScreenProps<'Logs'>;
 
 const LEVELS = ['all', 'info', 'warn', 'error'] as const;
 type LevelFilter = (typeof LEVELS)[number];
@@ -41,8 +47,14 @@ const SEVERITY: Record<string, number> = {
 
 const TAIL_SLOP_PX = 24;
 
+const NO_LINES: DeviceLogLine[] = [];
+
+const MESSAGE_TEXT = { fontSize: TYPE.hint, lineHeight: 16 };
+
+type Notice = { tone: Tone; text: string };
+
 export function LogsScreen(_: Props) {
-  const entries = useDiagnostics(s => s.deviceLogs);
+  const entries = useMergedLogs();
   const deviceStreaming = useDiagnostics(s => s.deviceLogStreaming);
   const localStreaming = useDiagnostics(s => s.localLogStreaming);
   const setDeviceStreaming = useDiagnostics(s => s.setDeviceLogStreaming);
@@ -55,20 +67,50 @@ export function LogsScreen(_: Props) {
   const [storedBytes, setStoredBytes] = useState(0);
   const [atTail, setAtTail] = useState(true);
   const [archivesOpen, setArchivesOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [archive, setArchive] = useState<BridgethingLogArchive | null>(null);
+  const [archiveLines, setArchiveLines] = useState<DeviceLogLine[] | null>(
+    null,
+  );
   const listRef = useRef<FlatList<DeviceLogLine>>(null);
+
+  const source = archive ? (archiveLines ?? NO_LINES) : entries;
 
   const visible = useMemo(() => {
     const min = filter === 'all' ? -1 : SEVERITY[filter];
     const needle = query.trim().toLowerCase();
     const out: DeviceLogLine[] = [];
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const e = entries[i];
+    for (let i = source.length - 1; i >= 0; i--) {
+      const e = source[i];
       if (min >= 0 && (SEVERITY[e.level] ?? 0) < min) continue;
       if (needle && !e.message.toLowerCase().includes(needle)) continue;
       out.push(e);
     }
     return out;
-  }, [entries, filter, query]);
+  }, [source, filter, query]);
+
+  const backToLive = useCallback(() => {
+    setArchive(null);
+    setArchiveLines(null);
+  }, []);
+
+  const openArchive = useCallback(
+    (picked: BridgethingLogArchive) => {
+      setArchive(picked);
+      setArchiveLines(null);
+      setArchivesOpen(false);
+      setNotice(null);
+      getSession()
+        .logArchiveLines(picked.id, LOG_LIMIT)
+        .then(lines => setArchiveLines(toLogLines(lines, `a${picked.id}-`)))
+        .catch((err: unknown) => {
+          backToLive();
+          setNotice({ tone: 'err', text: describeError(err) });
+        });
+    },
+    [backToLive],
+  );
 
   const refreshStored = useCallback(() => {
     getSession()
@@ -88,48 +130,37 @@ export function LogsScreen(_: Props) {
   }, []);
 
   const share = useCallback(async () => {
+    setNotice(null);
     try {
-      if (await getSession().shareLogs()) return;
+      if (await getSession().shareLogs(archive?.id ?? null)) return;
     } catch {
       // fall through to the in-memory path
     }
-    if (entries.length === 0) {
-      Alert.alert('Nothing to share', 'Log buffer is empty.');
+    if (source.length === 0) {
+      setNotice({ tone: 'neutral', text: 'no lines to share yet' });
       return;
     }
     try {
-      await Share.share({ message: entries.map(formatEntry).join('\n') });
+      await Share.share({ message: source.map(formatEntry).join('\n') });
     } catch (err) {
-      Alert.alert(
-        'Share failed',
-        err instanceof Error ? err.message : String(err),
-      );
+      setNotice({ tone: 'err', text: describeError(err) });
     }
-  }, [entries]);
+  }, [archive, source]);
 
   const clearStored = useCallback(() => {
-    Alert.alert(
-      'Clear stored logs?',
-      'Deletes the log files kept on disk from previous app launches, including launches pinned because they contained errors.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: () => {
-            getSession()
-              .clearPersistedLogs()
-              .catch(() => {})
-              .finally(refreshStored);
-          },
-        },
-      ],
-    );
+    setClearOpen(false);
+    setNotice(null);
+    getSession()
+      .clearPersistedLogs()
+      .catch((err: unknown) =>
+        setNotice({ tone: 'err', text: describeError(err) }),
+      )
+      .finally(refreshStored);
   }, [refreshStored]);
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <View className="border-b border-border bg-surface px-4 pb-2.5 pt-3">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-bg">
+      <View className="gap-2.5 border-b border-rule bg-screen px-4 pb-2.5 pt-3">
         <Segmented
           options={LEVELS}
           value={filter}
@@ -137,58 +168,113 @@ export function LogsScreen(_: Props) {
           size="sm"
         />
 
-        <View className="mt-2.5 flex-row items-center gap-2">
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="filter messages"
-            placeholderTextColor="hsl(215 16% 55%)"
-            autoCapitalize="none"
-            autoCorrect={false}
-            className="h-8 flex-1 rounded-lg bg-secondary px-2.5 font-mono text-[12px] text-foreground"
-          />
+        <Field
+          icon="Search"
+          value={query}
+          onChangeText={setQuery}
+          placeholder="filter messages"
+          autoCapitalize="none"
+          autoCorrect={false}
+          clearable
+        />
+
+        <View className="flex-row items-center gap-2">
+          {archive ? (
+            <ToolbarBtn icon="Radio" label="live" onPress={backToLive} />
+          ) : (
+            <>
+              <ToolbarBtn
+                icon={deviceStreaming ? 'Pause' : 'Play'}
+                label="device"
+                active={deviceStreaming}
+                onPress={() => setDeviceStreaming(!deviceStreaming)}
+              />
+              <ToolbarBtn
+                icon={localStreaming ? 'Pause' : 'Play'}
+                label="phone"
+                active={localStreaming}
+                onPress={() => setLocalStreaming(!localStreaming)}
+              />
+            </>
+          )}
           <ToolbarBtn
-            icon={deviceStreaming ? Pause : Play}
-            label="device"
-            active={deviceStreaming}
-            onPress={() => setDeviceStreaming(!deviceStreaming)}
-          />
-          <ToolbarBtn
-            icon={localStreaming ? Pause : Play}
-            label="phone"
-            active={localStreaming}
-            onPress={() => setLocalStreaming(!localStreaming)}
-          />
-          <ToolbarBtn
-            icon={FolderClock}
+            icon="FolderClock"
+            label="past launches"
+            active={archive != null}
             onPress={() => setArchivesOpen(true)}
           />
-          <ToolbarBtn icon={Share2} onPress={share} />
-          <ToolbarBtn icon={Trash2} onPress={clearLogs} destructive />
         </View>
 
-        <View className="mt-2 flex-row items-center justify-between">
-          <Text className="text-[11px] text-muted-foreground">
-            {visible.length === entries.length
-              ? `${entries.length} lines`
-              : `${visible.length} of ${entries.length} lines`}
-            {streaming ? ' · streaming' : ' · stopped'}
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-row items-center gap-2">
+            <ToolbarBtn icon="Share2" onPress={() => void share()} />
+            {archive ? null : (
+              <ArmedButton
+                label="clear"
+                confirmLabel="tap again"
+                icon="Trash2"
+                size="sm"
+                full={false}
+                onConfirm={clearLogs}
+              />
+            )}
+          </View>
+          <Text
+            className="min-w-0 flex-shrink font-mono text-muted"
+            style={TEXT.eyebrow}
+            numberOfLines={1}
+          >
+            {visible.length === source.length
+              ? `${source.length} lines`
+              : `${visible.length} of ${source.length} lines`}
+            {archive
+              ? ` · ${formatStamp(archive.startedAt)}`
+              : streaming
+                ? ' · streaming'
+                : ' · stopped'}
           </Text>
-          {storedBytes > 0 ? (
-            <Press onPress={clearStored} scaleTo={0.96} hitSlop={8}>
-              <Text className="text-[11px] text-muted-foreground">
-                {formatBytes(storedBytes)} on disk ·{' '}
-                <Text className="text-destructive">clear</Text>
-              </Text>
-            </Press>
-          ) : null}
         </View>
+
+        {archive ? (
+          source.length === LOG_LIMIT ? (
+            <Text className="font-mono text-dim" style={TEXT.eyebrow}>
+              share for the whole file
+            </Text>
+          ) : null
+        ) : storedBytes > 0 ? (
+          <Press
+            onPress={() => setClearOpen(true)}
+            hitSlop={8}
+            className="self-start"
+          >
+            <Text className="font-mono text-muted" style={TEXT.eyebrow}>
+              {formatBytes(storedBytes)} on disk ·{' '}
+              <Text className="text-err">clear</Text>
+            </Text>
+          </Press>
+        ) : null}
       </View>
 
-      {visible.length === 0 ? (
+      {notice ? (
+        <View className="px-4 pt-2.5">
+          <Note tone={notice.tone}>{notice.text}</Note>
+        </View>
+      ) : null}
+
+      {archive && archiveLines === null ? (
         <View className="flex-1 items-center justify-center p-6">
-          <Text className="text-center text-[13px] text-muted-foreground">
-            {emptyMessage(entries.length, streaming, query, filter)}
+          <Spinner />
+        </View>
+      ) : visible.length === 0 ? (
+        <View className="flex-1 items-center justify-center p-6">
+          <Text className="text-center font-sans text-muted" style={TEXT.body}>
+            {emptyMessage(
+              source.length,
+              archive != null,
+              streaming,
+              query,
+              filter,
+            )}
           </Text>
         </View>
       ) : (
@@ -205,16 +291,18 @@ export function LogsScreen(_: Props) {
             initialNumToRender={24}
             maxToRenderPerBatch={24}
             windowSize={9}
-            contentContainerClassName="px-3 py-2"
+            contentContainerClassName="px-4 py-2"
           />
           {atTail ? null : (
             <Press
               onPress={jumpToTail}
-              scaleTo={0.92}
-              className="absolute bottom-4 self-center flex-row items-center gap-1.5 rounded-full bg-primary px-3 py-1.5"
+              className="absolute bottom-4 self-center flex-row items-center gap-1.5 border border-accent bg-accent-soft px-3 py-1.5"
             >
-              <ArrowDown size={12} color="white" strokeWidth={2.6} />
-              <Text className="text-[11px] font-bold uppercase tracking-[0.14em] text-white">
+              <Icon name="ArrowDown" tone="accent" size={12} />
+              <Text
+                className="font-mono uppercase text-accent"
+                style={TEXT.eyebrow}
+              >
                 latest
               </Text>
             </Press>
@@ -226,6 +314,17 @@ export function LogsScreen(_: Props) {
         visible={archivesOpen}
         onClose={() => setArchivesOpen(false)}
         onChanged={refreshStored}
+        onOpen={openArchive}
+      />
+
+      <ConfirmSheet
+        visible={clearOpen}
+        title="clear stored logs?"
+        body="deletes all logs kept on disk, including error logs."
+        confirmLabel="clear"
+        destructive
+        onConfirm={clearStored}
+        onClose={() => setClearOpen(false)}
       />
     </SafeAreaView>
   );
@@ -241,29 +340,30 @@ function renderRow({ item }: { item: DeviceLogLine }) {
 
 const Row = memo(function Row({ item }: { item: DeviceLogLine }) {
   const { tag, body } = splitTag(item.message);
+  const tone = logLevelTone(item.level);
   return (
-    <View className="border-b border-border/40 py-1.5">
+    <View className="border-b border-rule py-1.5">
       <View className="flex-row items-center gap-2">
-        <View className={`rounded px-1.5 py-0.5 ${levelBg(item.level)}`}>
-          <Text
-            className={`font-mono text-[9px] font-bold uppercase ${levelText(item.level)}`}
-          >
-            {item.level.slice(0, 4)}
-          </Text>
-        </View>
-        <Text className="font-mono text-[10px] text-muted-foreground">
+        <Text
+          className={`px-1.5 font-mono uppercase ${TONE_BG[tone]} ${TONE_TEXT[tone]}`}
+          style={TEXT.eyebrow}
+        >
+          {item.level.slice(0, 4)}
+        </Text>
+        <Text className="font-mono text-dim" style={TEXT.eyebrow}>
           {formatTime(item.ts)}
         </Text>
         {tag ? (
           <Text
             numberOfLines={1}
-            className="flex-1 font-mono text-[10px] text-muted-foreground/80"
+            className="flex-1 font-mono text-dim"
+            style={TEXT.eyebrow}
           >
             {tag}
           </Text>
         ) : null}
       </View>
-      <Text className="mt-0.5 font-mono text-[12px] leading-[16px] text-foreground">
+      <Text className="mt-0.5 font-mono text-fg" style={MESSAGE_TEXT}>
         {body}
       </Text>
     </View>
@@ -271,35 +371,27 @@ const Row = memo(function Row({ item }: { item: DeviceLogLine }) {
 });
 
 function ToolbarBtn({
-  icon: Icon,
+  icon: name,
   label,
   onPress,
-  destructive,
   active,
 }: {
-  icon: import('lucide-react-native').LucideIcon;
+  icon: IconName;
   label?: string;
   onPress: () => void;
-  destructive?: boolean;
   active?: boolean;
 }) {
-  const color = destructive ? 'hsl(0 72% 50%)' : 'hsl(199 100% 44%)';
   return (
     <Press
       onPress={onPress}
-      scaleTo={0.92}
       hitSlop={6}
-      className={`h-8 flex-row items-center gap-1 rounded-full px-2 ${
-        destructive ? 'bg-destructive-soft' : 'bg-primary-soft'
-      } ${active ? 'border border-primary' : ''}`}
+      className={`h-8 flex-row items-center gap-1.5 border px-2 ${
+        active ? 'border-accent bg-accent-soft' : 'border-rule'
+      }`}
     >
-      <Icon size={12} color={color} strokeWidth={2.4} />
+      <Icon name={name} tone="accent" size={12} />
       {label ? (
-        <Text
-          className={`text-[10px] font-bold uppercase tracking-[0.1em] ${
-            destructive ? 'text-destructive' : 'text-primary'
-          }`}
-        >
+        <Text className="font-mono uppercase text-accent" style={TEXT.eyebrow}>
           {label}
         </Text>
       ) : null}
@@ -314,43 +406,19 @@ function splitTag(message: string): { tag: string | null; body: string } {
 
 function emptyMessage(
   total: number,
+  archived: boolean,
   streaming: boolean,
   query: string,
   filter: LevelFilter,
 ): string {
   if (total === 0) {
+    if (archived) return 'nothing was recorded in this launch';
     return streaming
       ? 'streaming; no log lines yet'
-      : 'press device or phone to stream logs';
+      : 'press device or phone to stream logs. fair warning: streaming device logs will tank performance. turn off when done.';
   }
   if (query.trim()) return `no lines match "${query.trim()}"`;
   return `no lines at ${filter} or above`;
-}
-
-function levelBg(level: string): string {
-  switch (level) {
-    case 'error':
-      return 'bg-destructive-soft';
-    case 'warn':
-      return 'bg-warning/15';
-    case 'info':
-      return 'bg-primary-soft';
-    default:
-      return 'bg-secondary';
-  }
-}
-
-function levelText(level: string): string {
-  switch (level) {
-    case 'error':
-      return 'text-destructive';
-    case 'warn':
-      return 'text-warning';
-    case 'info':
-      return 'text-primary';
-    default:
-      return 'text-muted-foreground';
-  }
 }
 
 function formatTime(ts: number): string {
@@ -364,12 +432,6 @@ function formatTime(ts: number): string {
     '.' +
     String(d.getMilliseconds()).padStart(3, '0')
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatEntry(e: DeviceLogLine): string {

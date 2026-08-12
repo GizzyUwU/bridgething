@@ -269,11 +269,12 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
         let previous = self.handle.state.launcher_webapp().await?;
         self.handle.state.set_launcher_slot(id).await?;
         let active = self.handle.state.active_webapp().await?;
-        if active.is_some() && active == previous {
-          if let Some(next) = self.handle.state.launcher_webapp().await? {
-            self.handle.state.set_active_webapp(next).await?;
-            self.broadcast_active_changed().await;
-          }
+        if active.is_some()
+          && active == previous
+          && let Some(next) = self.handle.state.launcher_webapp().await?
+        {
+          self.handle.state.set_active_webapp(next).await?;
+          self.broadcast_active_changed().await;
         }
         self.reload_kiosk().await;
       }

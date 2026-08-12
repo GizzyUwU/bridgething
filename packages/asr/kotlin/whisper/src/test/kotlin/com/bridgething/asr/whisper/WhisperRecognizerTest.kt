@@ -17,14 +17,14 @@ class WhisperRecognizerTest {
   fun `rejects audio that is not 16 khz`() {
     val recognizer = recognizer(FakeWhisperBinding())
 
-    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribe(samples(), 44_100) } }
+    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribeDetailed(samples(), 44_100) } }
   }
 
   @Test
   fun `rejects an empty sample buffer`() {
     val recognizer = recognizer(FakeWhisperBinding())
 
-    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribe(FloatArray(0), WHISPER_SAMPLE_RATE) } }
+    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribeDetailed(FloatArray(0), WHISPER_SAMPLE_RATE) } }
   }
 
   @Test
@@ -32,7 +32,7 @@ class WhisperRecognizerTest {
     val binding = FakeWhisperBinding()
     val recognizer = recognizer(binding)
 
-    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribe(samples(), 8_000) } }
+    assertThrows<IllegalArgumentException> { runBlocking { recognizer.transcribeDetailed(samples(), 8_000) } }
 
     assertEquals(0, binding.initCalls.get())
   }
@@ -41,7 +41,7 @@ class WhisperRecognizerTest {
   fun `surfaces a model that fails to load`() {
     val recognizer = recognizer(FakeWhisperBinding(initResult = 0L))
 
-    val error = assertThrows<WhisperException> { runBlocking { recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE) } }
+    val error = assertThrows<WhisperException> { runBlocking { recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE) } }
 
     assertTrue(error.message!!.contains("/fake/model.bin"))
   }
@@ -50,7 +50,7 @@ class WhisperRecognizerTest {
   fun `surfaces a failed decode`() {
     val recognizer = recognizer(FakeWhisperBinding(fullStatus = 7))
 
-    val error = assertThrows<WhisperException> { runBlocking { recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE) } }
+    val error = assertThrows<WhisperException> { runBlocking { recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE) } }
 
     assertTrue(error.message!!.contains("7"))
   }
@@ -74,8 +74,8 @@ class WhisperRecognizerTest {
     val recognizer = recognizer(binding)
 
     recognizer.prepare()
-    recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE)
-    recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE)
+    recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE)
+    recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE)
 
     assertEquals(1, binding.initCalls.get())
   }
@@ -85,7 +85,7 @@ class WhisperRecognizerTest {
     val binding = FakeWhisperBinding()
     val recognizer = WhisperRecognizer("/fake/model.bin", threads = 3, language = "en", binding = binding)
 
-    recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE)
+    recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE)
 
     assertEquals(3, binding.lastThreads)
     assertEquals("en", binding.lastLanguage)
@@ -96,7 +96,7 @@ class WhisperRecognizerTest {
     val binding = FakeWhisperBinding(decodeMillis = 25)
     val recognizer = recognizer(binding)
 
-    (1..8).map { async { recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE) } }.awaitAll()
+    (1..8).map { async { recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE) } }.awaitAll()
 
     assertEquals(1, binding.maxConcurrentDecodes.get())
   }
@@ -122,7 +122,7 @@ class WhisperRecognizerTest {
       recognizer.close()
     }
 
-    assertThrows<WhisperException> { runBlocking { recognizer.transcribe(samples(), WHISPER_SAMPLE_RATE) } }
+    assertThrows<WhisperException> { runBlocking { recognizer.transcribeDetailed(samples(), WHISPER_SAMPLE_RATE) } }
   }
 
   @Test

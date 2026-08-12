@@ -5,7 +5,6 @@ import frame from './carthing-frame.png';
 
 const PHASE_KEY = 'onboarding_phase';
 
-// mirrors the daemon's evdev gesture detector so the wizard teaches the timing that actually works
 const GESTURE_PRESSES = 5;
 const GESTURE_WINDOW_MS = 1500;
 
@@ -36,11 +35,11 @@ export function Wizard({ client, onDone }: { client: BridgethingClient; onDone: 
   };
 
   if (step === null) {
-    return <div className="h-full w-full bg-bt-charcoal" />;
+    return <div className="h-full w-full bg-bg" />;
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-bt-charcoal">
+    <div className="flex h-full w-full flex-col bg-bg">
       <StepIndicator step={step} />
       <div className="flex-1 overflow-hidden">
         {step === 'pair' && <PairStep client={client} onNext={() => setStep('gesture')} />}
@@ -56,10 +55,7 @@ function StepIndicator({ step }: { step: Step }) {
   return (
     <div className="flex items-center justify-center gap-2 pt-4">
       {order.map((s, i) => (
-        <div
-          key={s}
-          className={`h-1.5 w-8 rounded-full transition ${i <= idx ? 'bg-bt-blue' : 'bg-bt-soft-gray/30'}`}
-        />
+        <div key={s} className={`h-0.5 w-10 transition ${i <= idx ? 'bg-accent' : 'bg-rule-strong'}`} />
       ))}
     </div>
   );
@@ -96,21 +92,21 @@ function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () =>
   return (
     <div className="flex h-full flex-col items-center justify-between px-8 pt-6 pb-8">
       <div className="flex flex-1 flex-col items-center justify-center gap-6">
-        <div className="bt-wordmark text-2xl font-medium text-bt-off-white">pair your phone</div>
-        <div className="max-w-104 text-center text-sm text-bt-soft-gray">
+        <div className="font-display text-hero font-medium tracking-display text-off-white">pair your phone</div>
+        <div className="max-w-104 text-center text-body text-soft">
           {ready ? 'paired. you can move on.' : 'open bluetooth on your phone and look for this device.'}
         </div>
 
         {!ready && alias && (
-          <div className="rounded-2xl border border-bt-soft-gray/30 bg-black/30 px-6 py-4">
-            <div className="bt-wordmark text-xl font-medium text-bt-off-white">{alias}</div>
+          <div className="border border-rule-strong bg-screen px-6 py-4">
+            <div className="font-mono text-row-lg text-off-white">{alias}</div>
           </div>
         )}
 
         {ready && connected && (
           <div className="flex flex-col items-center gap-1">
-            <div className="text-xs uppercase tracking-widest text-bt-soft-gray">connected</div>
-            <div className="text-base text-bt-off-white">{connected.name}</div>
+            <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">connected</div>
+            <div className="text-row-lg text-off-white">{connected.name}</div>
           </div>
         )}
       </div>
@@ -119,14 +115,14 @@ function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () =>
         <button
           type="button"
           onClick={onNext}
-          className="text-sm text-bt-soft-gray underline-offset-2 active:underline">
+          className="px-2 py-2 font-mono text-hint text-dim underline-offset-4 active:underline">
           skip for now
         </button>
         <button
           type="button"
           onClick={onNext}
           disabled={!ready}
-          className="rounded-full bg-bt-blue px-8 py-2.5 text-sm font-medium text-bt-charcoal transition active:scale-95 disabled:bg-bt-soft-gray/30 disabled:text-bt-soft-gray">
+          className="border border-accent bg-accent px-10 py-2.5 font-mono text-row text-screen transition active:opacity-80 disabled:border-rule disabled:bg-transparent disabled:text-dim">
           next
         </button>
       </div>
@@ -172,8 +168,8 @@ function GestureStep({ onNext }: { onNext: () => void }) {
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-8 pt-4 pb-8">
-      <div className="bt-wordmark text-2xl font-medium text-bt-off-white">jump back to apps</div>
-      <div className="max-w-104 text-center text-sm text-bt-soft-gray">
+      <div className="font-display text-hero font-medium tracking-display text-off-white">jump back to apps</div>
+      <div className="max-w-104 text-center text-body text-soft">
         push m five times, quickly, to return here from any app. give it a go.
       </div>
 
@@ -183,7 +179,7 @@ function GestureStep({ onNext }: { onNext: () => void }) {
         {Array.from({ length: GESTURE_PRESSES }, (_, i) => (
           <div
             key={i}
-            className={`h-2.5 w-2.5 rounded-full transition ${i < presses ? 'bg-bt-blue' : 'bg-bt-soft-gray/30'}`}
+            className={`size-2.5 border transition ${i < presses ? 'border-accent bg-accent' : 'border-rule-strong'}`}
           />
         ))}
       </div>
@@ -195,7 +191,6 @@ function GestureHint() {
   return (
     <div className="relative">
       <img src={frame} alt="car thing" className="h-52 w-auto" />
-      {/* m button center sits at 86.4% x, its top edge at 15% y of the frame image */}
       <div className="absolute top-[15%] left-[86.4%] -translate-x-1/2 -translate-y-full">
         <svg
           viewBox="0 0 24 24"
@@ -204,7 +199,7 @@ function GestureHint() {
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="h-7 w-7 animate-bounce text-bt-blue">
+          className="h-7 w-7 animate-bounce text-accent">
           <path d="M12 5v14" />
           <path d="m19 12-7 7-7-7" />
         </svg>

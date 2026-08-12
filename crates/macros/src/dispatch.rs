@@ -1,45 +1,3 @@
-//! `#[derive(BridgeDispatch)]` - emit a dispatch trait + inherent
-//! `dispatch` method on a wire-message inner enum.
-//!
-//! Given an enum like:
-//!
-//! ```ignore
-//! #[derive(BridgeDispatch)]
-//! pub enum ClientToBridgeFooMsg {
-//!   Bar,
-//!   Baz(BazPayload),
-//! }
-//! ```
-//!
-//! the macro emits:
-//!
-//! ```ignore
-//! pub trait ClientToBridgeFooMsgDispatch {
-//!   type Output;
-//!   fn bar(&self) -> impl std::future::Future<Output = Self::Output> + Send;
-//!   fn baz(&self, params: BazPayload) -> impl std::future::Future<Output = Self::Output> + Send;
-//! }
-//!
-//! impl ClientToBridgeFooMsg {
-//!   pub async fn dispatch<H>(self, handler: &H) -> H::Output
-//!   where
-//!     H: ClientToBridgeFooMsgDispatch + Sync,
-//!   {
-//!     match self {
-//!       Self::Bar => handler.bar().await,
-//!       Self::Baz(p) => handler.baz(p).await,
-//!     }
-//!   }
-//! }
-//! ```
-//!
-//! The daemon-side handler implements the trait and the call site
-//! collapses to `msg.dispatch(&handler).await`. Variant-name to
-//! method-name conversion is PascalCase -> snake_case.
-//!
-//! Multi-field tuple variants and struct-shaped (`Foo { a, b }`) variants
-//! are not supported; the macro errors at compile time.
-
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Ident, spanned::Spanned};
@@ -72,12 +30,18 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
         });
       }
       Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => {
-        let payload_ty = &unnamed.unnamed.first().expect("len == 1").ty;
+        let declared = &unnamed.unnamed.first().expect("len == 1").ty;
+        let boxed = crate::bridge_enum::unwrap_box(declared);
+        let payload_ty = boxed.unwrap_or(declared);
+        let bind = match boxed {
+          Some(_) => quote! { *params },
+          None => quote! { params },
+        };
         trait_methods.push(quote! {
           fn #method_ident(&self, params: #payload_ty) -> impl ::core::future::Future<Output = Self::Output> + Send;
         });
         match_arms.push(quote! {
-          Self::#variant_ident(params) => handler.#method_ident(params).await,
+          Self::#variant_ident(params) => handler.#method_ident(#bind).await,
         });
       }
       Fields::Unnamed(_) => {

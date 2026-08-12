@@ -1,34 +1,25 @@
-import type { LucideIcon } from 'lucide-react-native';
 import { View } from 'react-native';
 
-const TINT = {
-  primary: { bg: 'bg-primary-soft', stroke: 'hsl(199 100% 44%)' },
-  neutral: { bg: 'bg-secondary', stroke: 'hsl(215 14% 38%)' },
-  destructive: { bg: 'bg-destructive-soft', stroke: 'hsl(0 72% 50%)' },
-  success: { bg: 'bg-success-soft', stroke: 'hsl(152 60% 38%)' },
-} as const;
+import { Icon, type IconName } from './Icon';
+import { BOX, type BoxSize, type Tone } from '../lib/theme';
+import { TONE_BG } from '../lib/tone';
 
-type Tint = keyof typeof TINT;
-
-/**
- * Decorative icon container for detail screens and onboarding step cards.
- */
 export function IconBadge({
-  icon: Icon,
-  tint = 'primary',
-  size = 56,
+  name,
+  tone = 'accent',
+  size = 'md',
 }: {
-  icon: LucideIcon;
-  tint?: Tint;
-  size?: number;
+  name: IconName;
+  tone?: Tone;
+  size?: BoxSize;
 }) {
-  const t = TINT[tint];
+  const box = BOX[size];
   return (
     <View
-      className={`items-center justify-center rounded-2xl ${t.bg}`}
-      style={{ width: size, height: size }}
+      className={`items-center justify-center ${TONE_BG[tone]}`}
+      style={{ width: box, height: box }}
     >
-      <Icon size={Math.round(size * 0.5)} color={t.stroke} strokeWidth={2.1} />
+      <Icon name={name} tone={tone} size={Math.round(box * 0.5)} />
     </View>
   );
 }

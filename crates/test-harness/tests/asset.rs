@@ -12,6 +12,7 @@ use libbridgething::{
   },
   wire::MsgMeta,
 };
+use tokio_util::bytes::Bytes;
 
 const ASSET_RESOLVE: Duration = Duration::from_secs(5);
 
@@ -244,7 +245,7 @@ fn serve_assets(gateway: Gateway, bytes: Vec<u8>, inline: bool, fragment_size: u
               GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
                 transfer_id: req.request_id,
                 offset: offset as u32,
-                bytes: bytes[offset..end].to_vec(),
+                bytes: Bytes::copy_from_slice(&bytes[offset..end]),
               })),
               Priority::Bulk,
             )
@@ -307,7 +308,7 @@ async fn asset_pull_resolves_under_background_flood() {
   let flooder = {
     let companion = companion.clone();
     tokio::spawn(async move {
-      let chunk = vec![0xAAu8; 8 * 1024];
+      let chunk = Bytes::from(vec![0xAAu8; 8 * 1024]);
       for i in 0u32..512 {
         if companion
           .connection()

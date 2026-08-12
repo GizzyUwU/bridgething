@@ -1,0 +1,16 @@
+---
+export type Props = {
+  class?: string;
+};
+
+const { class: className } = Astro.props;
+---
+
+<div class:list={['relative aspect-7/5 w-full', className]}>
+  <div
+    class="bg-screen absolute top-[21.8%] left-[7%] flex h-[58.5%] w-[71%] flex-col gap-[0.7cqw] overflow-hidden p-[2.6cqw] font-mono text-[1.95cqw] leading-tight whitespace-nowrap">
+    <slot />
+  </div>
+  <img src="/car-thing-frame.png" alt="" class="pointer-events-none absolute inset-0 h-full w-full" />
+  <slot name="callouts" />
+</div>

@@ -57,10 +57,6 @@ export type AssetRetention =
   | { type: 'ttl'; data: TtlRetention }
   | { type: 'persistent' };
 
-/**
- * What the gateway-side audio backend supports. `earcons` are short
- * named sounds the companion can play; `voices` are TTS voices.
- */
 export type AudioCapabilities = { earcons: Array<string>; voices: Array<VoiceDescriptor> };
 
 export type AudioError =
@@ -81,6 +77,10 @@ export type BridgeThingMeta = {
   nickname: string | null;
   appVersion: string;
   daemonSha256: string | null;
+  /**
+   * None when no wake word model resolved, or when the one that did carries no version stamp.
+   */
+  wakewordModelVersion: string | null;
   osName: string;
   osVersion: string;
   osDescription: string;
@@ -154,12 +154,6 @@ export type CallEndReason =
   | { type: 'declined' }
   | { type: 'failed'; data: { reason: string } };
 
-/**
- * What the daemon advertises to webapps. `gateway: None` means no
- * companion is connected; webapps that depend on companion-routed
- * surfaces (Library, Net, Notifications, etc.) should branch on this.
- * `authority` is the live set of scopes the companion currently claims.
- */
 export type Capabilities = {
   gateway: GatewayInfo | null;
   available: SurfaceAvailability;
@@ -196,12 +190,6 @@ export type CommunicationsState = {
   holdAvailable: boolean | null;
 };
 
-/**
- * One axis the companion can declare authority over. Each scope has a
- * fallback source the daemon merges with when no claim is active or
- * the claim has gone stale. Unknown scopes arriving at an older daemon
- * are stored opaquely and ignored.
- */
 export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback' | 'volume';
 
 /**
@@ -212,8 +200,8 @@ export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback
 export type ConfigEntry = { key: string; value: string };
 
 /**
- * One declared user-tunable setting. Adjacent-tagged on the wire to
- * stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
+ * One declared user-tunable setting. Adjacent-tagged on the wire:
+ * `{"type":"string","data":{"key":"zip",...}}`.
  */
 export type ConfigField =
   | { type: 'string'; data: StringField }
@@ -237,11 +225,6 @@ export type Device = { name: string; type: DeviceType; mac: string; default: boo
 
 export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
 
-/**
- * Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.
- * `soc_temp_c` may be `None` on builds where the SoC thermal probe is
- * not exposed by the kernel.
- */
 export type Diagnostics = {
   diskUsedBytes: number;
   diskFreeBytes: number;
@@ -293,12 +276,6 @@ export type ForwardMessage =
   | { encoding: 'json'; data: unknown }
   | { encoding: 'binary'; data: Uint8Array };
 
-/**
- * What a connected companion advertises about itself. Sent on every
- * session-up via `GatewayToBridgeCapabilitiesMsg::Announce`, and re-sent
- * on any change. The daemon caches the latest snapshot per peer and
- * derives the webapp-facing `Capabilities` from it.
- */
 export type GatewayCapabilities = {
   gateway: GatewayInfo;
   uriSchemes: Array<string>;
@@ -308,12 +285,6 @@ export type GatewayCapabilities = {
   musicProvider: MusicProvider;
 };
 
-/**
- * Identity payload describing the companion peer the daemon is talking
- * to. Address is the BT MAC the companion advertises; on transports without
- * a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
- * is the synthetic address as a string.
- */
 export type GatewayInfo = {
   address: string;
   name: string;
@@ -401,21 +372,10 @@ export type LibraryItem =
   | { type: 'artist'; data: Artist }
   | { type: 'station'; data: Station };
 
-/**
- * One log record. `ts_unix_s` is unix-epoch seconds. `target` is the
- * tracing target / unit name; `message` is the rendered single-line
- * body. Pre-filtered at subscription time so wire-bloating trace
- * events don't reach webapps.
- */
 export type LogEntry = { tsUnixS: number; level: LogLevel; target: string; message: string };
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
-/**
- * What stream of log records a subscription pulls from. `Daemon` is the
- * bridgething tracing subscriber; `System` is the `journald` view; `All`
- * merges both in arrival order.
- */
 export type LogSource = 'daemon' | 'system' | 'all';
 
 /**
@@ -494,10 +454,6 @@ export type MediaItemUpdate = {
  */
 export type MediaType = 'music' | 'podcast' | 'audioBook';
 
-/**
- * Which music service the companion is currently logged into and
- * driving on behalf of the user. `None` when no glue is attached.
- */
 export type MusicProvider = 'none' | 'spotify' | 'appleMusic';
 
 export type NetError =
@@ -517,11 +473,6 @@ export type NetFetchRequest = {
 
 export type NetFetchResponse = { status: number; headers: Array<HttpHeader>; body: Uint8Array };
 
-/**
- * What kind of network the companion's host is currently using. `metered`
- * is the OS-reported metered flag; webapps should treat it as a hint
- * (e.g. defer non-essential fetches) rather than a hard ban.
- */
 export type NetworkInfo = { kind: NetworkKind; metered: boolean };
 
 export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
@@ -675,7 +626,18 @@ export type NumberField = {
   default: number | null;
 };
 
-export type OtaError = { code: OtaErrorCode; msg: string };
+export type OtaError = {
+  code: OtaErrorCode;
+  msg: string;
+  /**
+   * which update failed. a resume re-drives the same artifact, so this is NOT unique per attempt.
+   */
+  updateId: string | null;
+  /**
+   * set only when the bridge is re-delivering a failure whose peer had already gone away
+   */
+  replayed?: boolean;
+};
 
 /**
  * Terminal error from the OTA orchestrator
@@ -1177,12 +1139,6 @@ export type StringField = {
   default: string | null;
 };
 
-/**
- * Bool feature flags the daemon exposes to webapps. Each is true when the
- * surface has both a backing implementation and (where applicable) a
- * connected companion claiming to provide it. False = the surface will
- * respond `Unsupported` or `Unimplemented` to verbs.
- */
 export type SurfaceAvailability = {
   geo: boolean;
   notifications: boolean;
@@ -1255,10 +1211,6 @@ export type TunnelError =
 
 export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
 
-/**
- * One TTS voice the companion's audio backend can speak as. `id` is
- * platform-opaque (Apple/Android voice id); `locale` is BCP-47.
- */
 export type VoiceDescriptor = { id: string; name: string; locale: string };
 
 export type VoiceDispatchErrorCode =

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "component": "TransferPacer",
-  "phase": "capture",
-  "description": "Cross-language conformance traces for the adaptive transfer pacer. PHASE 1: every implementation EMITS its own trace to pacer-trace.<impl>.json and nothing is asserted. Diff those files; each difference is a spec question nobody has answered. Once reconciled, freeze the agreed answers and flip every runner to assert.",
+  "phase": "frozen",
+  "description": "Cross-language conformance inputs for the adaptive transfer pacer. Every implementation reads this file, drives its pacer, and emits its own answers to pacer-trace.<impl>.json; the emitters assert nothing. `bun scripts/trace-diff.ts` diffs those answers against each other, and pacer-trace.expected.json carries the reconciled rulings. Rust asserts against the expectation; Swift and Kotlin only emit until their pacers are deleted in favour of the shared core.",
   "contract": {
     "construction": "the pacer is constructed at t_ms = 0 with acked = 0",
     "step": "set the virtual clock to t_ms; if `observe` is present call observe(acked = observe); then record window_bytes and rate",
@@ -74,7 +74,7 @@
     },
     {
       "name": "the-sample-window-evicts-the-oldest",
-      "description": "one fast burst then eight slow samples. the burst must survive exactly eight subsequent samples and drop out on the ninth, taking the window back to the floor. this pins the eviction boundary, not just that eviction happens.",
+      "description": "one fast burst then nine slow samples. the window holds eight, so the burst must survive exactly seven subsequent samples and drop out on the eighth (t=8100), taking the window back to the floor. the ninth slow sample confirms it stays there. this pins the eviction boundary, not just that eviction happens.",
       "steps": [
         { "t_ms": 0 },
         { "t_ms": 100, "observe": 100000 },

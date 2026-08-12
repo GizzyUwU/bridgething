@@ -4,8 +4,6 @@ export type ControlKind = 'toggle' | 'lock' | 'momentary' | 'climate' | 'readonl
 
 const TOGGLE_DOMAINS = new Set(['light', 'switch', 'input_boolean', 'fan', 'humidifier', 'siren']);
 const MOMENTARY_DOMAINS = new Set(['scene', 'script', 'automation', 'button', 'input_button']);
-
-// pre-checked in the picker on first run, capped downstream.
 const DEFAULT_PICK_DOMAINS = new Set(['light', 'climate', 'scene']);
 
 export function domainOf(entityId: string): string {
@@ -39,7 +37,6 @@ export function isActive(s: HaState): boolean {
   return s.state === 'on';
 }
 
-/** Service call that flips the entity, given its current state. */
 export function toggleCall(s: HaState): { domain: string; service: string } {
   const d = domainOf(s.entityId);
   if (d === 'lock') return { domain: 'lock', service: s.state === 'locked' ? 'unlock' : 'lock' };
@@ -47,7 +44,6 @@ export function toggleCall(s: HaState): { domain: string; service: string } {
   return { domain: d, service: 'toggle' };
 }
 
-/** Service call for a momentary tile (scene/script/button). */
 export function momentaryCall(entityId: string): { domain: string; service: string } {
   const d = domainOf(entityId);
   if (d === 'button' || d === 'input_button') return { domain: d, service: 'press' };
@@ -55,7 +51,6 @@ export function momentaryCall(entityId: string): { domain: string; service: stri
   return { domain: d, service: 'turn_on' };
 }
 
-/** Optimistic next state for a toggle/lock tile. */
 export function optimisticToggle(s: HaState): string {
   const d = domainOf(s.entityId);
   if (d === 'cover') return s.state === 'open' ? 'closed' : 'open';

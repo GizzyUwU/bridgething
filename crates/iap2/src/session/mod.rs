@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use device::DeviceFlow;
 #[cfg(feature = "emulator")]
 pub(crate) use ea_transport::{EA_LINK_SESSION_ID, EaChunker, split_stream_frame};
-pub use ea_transport::{EaPriority, EaSendError, EaStreamSender};
+pub use ea_transport::{EaSendError, EaStreamSender};
 use external_accessory::EaFlow;
 #[cfg(feature = "emulator")]
 pub(crate) use file_transfer::DeviceFileTransfer;

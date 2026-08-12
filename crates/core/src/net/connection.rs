@@ -184,7 +184,7 @@ impl Connection {
           reason: error.to_owned(),
         }),
       };
-      self.send(PossibleSendMsg::Modern(nack)).await;
+      self.send(nack.into()).await;
     }
   }
 

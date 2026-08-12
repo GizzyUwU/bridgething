@@ -12,11 +12,6 @@ const config = getDefaultConfig(projectRoot);
 
 config.watchFolders = [workspaceRoot];
 
-// @rn-primitives/portal keeps its portal registry in a module-level zustand store.
-// its package exports split import->esm and require->cjs, so App.tsx (import) and the
-// compiled primitives (require) would each load a different build with its own store:
-// dialogs register into one, <PortalHost/> reads the other, and nothing ever mounts.
-// pin every importer to the single cjs build so they share one registry.
 const portalEntry = require.resolve('@rn-primitives/portal');
 const baseResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

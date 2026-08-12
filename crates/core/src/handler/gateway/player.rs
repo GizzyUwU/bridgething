@@ -60,21 +60,30 @@ impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
   type Output = HandlerResult;
 
   async fn snapshot(&self, params: PlayerState) -> HandlerResult {
-    self.handle.state.player.apply_companion_snapshot(params).await?;
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
+    self.handle.state.player.apply_companion_snapshot(addr, params).await?;
     Ok(())
   }
 
   async fn queue_changed(&self, params: QueueSnapshot) -> HandlerResult {
-    self.handle.state.player.apply_companion_queue(params).await?;
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
+    self.handle.state.player.apply_companion_queue(addr, params).await?;
     Ok(())
   }
 
   async fn targets_changed(&self, params: PlaybackTargets) -> HandlerResult {
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
     self
       .handle
       .state
       .playback_targets
-      .apply_companion(params.targets)
+      .apply_companion(addr, params.targets)
       .await?;
     Ok(())
   }

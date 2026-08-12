@@ -1,0 +1,19 @@
+---
+import type { TypeDoc } from '../../../sdk/types.ts';
+import { renderMdInline } from '../../lib/md.ts';
+import { renderTypeTs } from '../../lib/render-type.ts';
+import Snippet from './Snippet.astro';
+
+export type Props = {
+  name: string;
+  def: TypeDoc;
+};
+
+const { name, def } = Astro.props;
+const code = renderTypeTs(name, def);
+---
+
+<div class="scroll-mt-24 border-t border-white/10 py-7" id={`type-${name}`}>
+  {def.description && <p class="mb-2.5 max-w-xl text-sm text-white/60" set:html={renderMdInline(def.description)} />}
+  <Snippet code={code} />
+</div>

@@ -1,0 +1,73 @@
+---
+import Footer from '../../components/Footer.astro';
+import Header from '../../components/Header.astro';
+import InstallCTA from '../../components/InstallCTA.astro';
+import ReleaseCard from '../../components/ReleaseCard.astro';
+import Layout from '../../layouts/Layout.astro';
+import { loadManifest } from '../../lib/manifest';
+import { SITE } from '../../lib/site';
+
+const manifest = await loadManifest();
+
+const channels = manifest
+  ? Object.entries(manifest.channels)
+      .map(([slug, channel]) => ({
+        slug,
+        ...channel,
+        releaseList: channel.releases.map(v => manifest.releases[v]!),
+      }))
+      .sort((a, b) => Number(b.default) - Number(a.default))
+  : [];
+---
+
+<Layout title="releases" description="every public release of bridgething, with full changelogs.">
+  <Header />
+  <main class="container-site w-full flex-1 py-12 md:py-16">
+    <header class="mb-12 max-w-2xl">
+      <h1>releases</h1>
+      <p class="text-white/60">every public release, oldest at the bottom.</p>
+      <p class="mt-4 font-mono text-sm text-white/40">
+        manifest: <a href={SITE.manifestUrl}>{SITE.manifestUrl}</a>
+      </p>
+    </header>
+
+    {
+      manifest === null || channels.length === 0 ? (
+        <section class="border border-dashed border-white/25 p-16 text-center">
+          <h2 class="mb-2">no releases yet</h2>
+          <p class="text-white/60">the manifest exists but is empty.</p>
+        </section>
+      ) : (
+        <div class="grid grid-cols-1 gap-x-10 gap-y-16 lg:grid-cols-2">
+          {channels.map(channel => (
+            <section id={`channel-${channel.slug}`}>
+              <header class="mb-1 flex flex-wrap items-center gap-3 border-b border-white/20 pb-2">
+                <h2 class="m-0">{channel.name.toLowerCase()}</h2>
+                <span class:list={['pill', channel.stability === 'stable' ? 'pill-stable' : 'pill-experimental']}>
+                  {channel.stability}
+                </span>
+                {channel.default ? <span class="pill pill-default">default</span> : null}
+              </header>
+              <p class="text-white/60">{channel.description}</p>
+              <div class="my-4 flex flex-wrap items-center gap-5">
+                <InstallCTA channel={channel.slug} variant={channel.default ? 'primary' : 'secondary'} />
+                <span class="font-mono text-sm text-white/40">
+                  latest: <code class="text-white/70">{channel.latest}</code>
+                </span>
+              </div>
+              <div>
+                {channel.releaseList.map(release => (
+                  <ReleaseCard
+                    release={release}
+                    channelDefault={channel.default && release.version === channel.latest}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )
+    }
+  </main>
+  <Footer />
+</Layout>

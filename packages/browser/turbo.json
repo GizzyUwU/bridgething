@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/crates/delivery/wasm/**",
+        "$TURBO_ROOT$/crates/delivery/core/**",
+        "$TURBO_ROOT$/crates/gateway-rs/**",
+        "$TURBO_ROOT$/crates/io/**"
+      ],
+      "outputs": ["dist/**", "wasm/**"]
+    }
+  }
+}

@@ -111,7 +111,7 @@ impl VoiceHandler {
   async fn route(&self, resolved: &NluResolvedIntent) -> Routed {
     let slots = &resolved.slots;
     match resolved.intent.as_str() {
-      "PLAY" if has_catalog_slots(slots) => self.play_catalog(slots).await,
+      "PLAY" if slots.has_catalog_slots() => self.play_catalog(slots).await,
       "PLAY" => {
         self.handle.transport.play().await;
         Ok((VoiceDispatchTarget::Playback, None))
@@ -191,8 +191,6 @@ impl VoiceHandler {
           .handle
           .bluetooth
           .profile_man
-          .get()
-          .await
           .set_discoverable(enabled)
           .await
           .map_err(|err| (VoiceDispatchErrorCode::Internal, format!("{err}")))?;
@@ -460,17 +458,6 @@ impl VoiceHandler {
   }
 }
 
-fn has_catalog_slots(slots: &NluSlots) -> bool {
-  slots.target.is_some()
-    || slots.genre.is_some()
-    || slots.mood.is_some()
-    || slots.era.is_some()
-    || slots.popularity_filter.is_some()
-    || slots.position.is_some()
-    || slots.uri.is_some()
-    || slots.context_uri.is_some()
-}
-
 fn play_uri(slots: &NluSlots) -> Result<gateway::PlayUri, (VoiceDispatchErrorCode, String)> {
   let uri = slots.uri.clone().ok_or((
     VoiceDispatchErrorCode::PlaybackFailed,
@@ -538,20 +525,23 @@ mod tests {
 
   #[test]
   fn bare_play_is_not_a_catalog_play() {
-    assert!(!has_catalog_slots(&slots()));
+    assert!(!slots().has_catalog_slots());
   }
 
   #[test]
   fn any_catalog_slot_makes_it_a_catalog_play() {
     let mut s = slots();
     s.target = Some("mitski".into());
-    assert!(has_catalog_slots(&s));
+    assert!(s.has_catalog_slots());
     let mut s = slots();
     s.position = Some(3);
-    assert!(has_catalog_slots(&s));
+    assert!(s.has_catalog_slots());
     let mut s = slots();
     s.context_uri = Some("spotify:album:9".into());
-    assert!(has_catalog_slots(&s));
+    assert!(s.has_catalog_slots());
+    let mut s = slots();
+    s.target_type = Some(NluTargetType::Album);
+    assert!(s.has_catalog_slots());
   }
 
   #[test]

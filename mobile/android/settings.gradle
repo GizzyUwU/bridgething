@@ -21,42 +21,13 @@ def setProj(path, dir) {
   project(path).projectDir = file(dir)
 }
 
-setProj(':crates', "${repoRoot}/crates")
-setProj(':crates:lib', "${repoRoot}/crates/lib")
-setProj(':crates:lib:kotlin', "${repoRoot}/crates/lib/kotlin")
-setProj(':crates:lib:kotlin:schema', "${repoRoot}/crates/lib/kotlin/schema")
-
 setProj(':packages', "${repoRoot}/packages")
-
-setProj(':packages:gateway', "${repoRoot}/packages/gateway")
-setProj(':packages:gateway:kotlin', "${repoRoot}/packages/gateway/kotlin")
-setProj(':packages:gateway:kotlin:gateway', "${repoRoot}/packages/gateway/kotlin/gateway")
-
-setProj(':packages:glue', "${repoRoot}/packages/glue")
-setProj(':packages:glue:kotlin', "${repoRoot}/packages/glue/kotlin")
-setProj(':packages:glue:kotlin:glue', "${repoRoot}/packages/glue/kotlin/glue")
-
-setProj(':packages:lyrics', "${repoRoot}/packages/lyrics")
-setProj(':packages:lyrics:kotlin', "${repoRoot}/packages/lyrics/kotlin")
-setProj(':packages:lyrics:kotlin:lyrics', "${repoRoot}/packages/lyrics/kotlin/lyrics")
 
 setProj(':packages:companion', "${repoRoot}/packages/companion")
 setProj(':packages:companion:kotlin', "${repoRoot}/packages/companion/kotlin")
 setProj(':packages:companion:kotlin:companion', "${repoRoot}/packages/companion/kotlin/companion")
-
-setProj(':packages:spotify', "${repoRoot}/packages/spotify")
-setProj(':packages:spotify:kotlin', "${repoRoot}/packages/spotify/kotlin")
-setProj(':packages:spotify:kotlin:spotify', "${repoRoot}/packages/spotify/kotlin/spotify")
-
-setProj(':packages:nlu', "${repoRoot}/packages/nlu")
-setProj(':packages:nlu:kotlin', "${repoRoot}/packages/nlu/kotlin")
-setProj(':packages:nlu:kotlin:nlu', "${repoRoot}/packages/nlu/kotlin/nlu")
-setProj(':packages:nlu:kotlin:nlukit', "${repoRoot}/packages/nlu/kotlin/nlukit")
+setProj(':packages:companion:kotlin:core', "${repoRoot}/packages/companion/kotlin/core")
 
 setProj(':packages:asr', "${repoRoot}/packages/asr")
 setProj(':packages:asr:kotlin', "${repoRoot}/packages/asr/kotlin")
 setProj(':packages:asr:kotlin:whisper', "${repoRoot}/packages/asr/kotlin/whisper")
-
-setProj(':packages:apple-music', "${repoRoot}/packages/apple-music")
-setProj(':packages:apple-music:kotlin', "${repoRoot}/packages/apple-music/kotlin")
-setProj(':packages:apple-music:kotlin:apple-music', "${repoRoot}/packages/apple-music/kotlin/apple-music")

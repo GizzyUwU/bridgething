@@ -3,7 +3,9 @@ use std::time::Duration;
 use bridgething_iap2::csm::now_playing::{
   MediaItemAttributes as Iap2MediaItem, NowPlayingUpdate as Iap2NowPlaying, PlaybackAttributes, PlaybackState,
 };
-use bridgething_test_harness::{DeviceHarness, Harness, Iap2Source, Iap2SourceDriver};
+#[cfg(target_os = "linux")]
+use bridgething_test_harness::DeviceHarness;
+use bridgething_test_harness::{Harness, Iap2Source, Iap2SourceDriver};
 use serde_json::Value;
 
 #[tokio::test]
@@ -168,6 +170,7 @@ async fn forward_progress_under_load() {
   stock_noise.abort();
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires a booted Car Thing with the test-tap daemon + a host BT radio"]
 async fn slow_art_under_baseline() {
@@ -217,6 +220,7 @@ async fn slow_art_under_baseline() {
   }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires a booted Car Thing + host BT radio; measure device journald rejects around it"]
 async fn link_integrity_volume() {
@@ -277,6 +281,7 @@ async fn link_integrity_volume() {
   );
 }
 
+#[cfg(target_os = "linux")]
 fn device_ssh(cmd: &str) -> String {
   let host = std::env::var("SUPERBIRD_HOST").unwrap_or_else(|_| "bridgething.local".into());
   let out = std::process::Command::new("ssh")
@@ -304,12 +309,14 @@ fn device_ssh(cmd: &str) -> String {
   String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+#[cfg(target_os = "linux")]
 fn device_checksum_rejects() -> u64 {
   device_ssh("journalctl -u bridgething -b --no-pager | grep -c 'bad payload checksum' || true")
     .parse()
     .unwrap_or(0)
 }
 
+#[cfg(target_os = "linux")]
 fn device_hci_rx_bytes() -> u64 {
   device_ssh("hciconfig hci0 | grep -oE 'RX bytes:[0-9]+' | head -1")
     .trim_start_matches("RX bytes:")
@@ -318,6 +325,7 @@ fn device_hci_rx_bytes() -> u64 {
     .unwrap_or(0)
 }
 
+#[cfg(target_os = "linux")]
 fn init_test_tracing() {
   use tracing_subscriber::EnvFilter;
   let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("bridgething_iap2=debug,info"));
@@ -327,6 +335,7 @@ fn init_test_tracing() {
     .try_init();
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires a booted Car Thing with the test-tap daemon + a host BT radio"]
 async fn flood_iap2_and_companion_concurrent() {

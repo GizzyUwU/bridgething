@@ -10,22 +10,18 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
 /// Correlation handle the responder echoes back so the requester's pending future can resolve.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "wire.ts")]
 pub struct ResponseMeta {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub request_id: Uuid,
 }
 
 /// Intent the sender signals for each message
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "wire.ts")]
@@ -37,7 +33,6 @@ pub enum MsgMeta {
 }
 
 /// Protocol-level failure the responder ships when a request could not be reached or dispatched
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -66,9 +61,6 @@ pub trait WireEvent<W>: Into<W> {}
 
 /// A fire-and-forget command the receiver is expected to action
 pub trait WireCommand<W>: Into<W> {}
-
-/// A fire-and-forget event/command that must be addressed to a specific peer
-pub trait WireUnicast<W>: Into<W> {}
 
 /// A typed request whose response shape is statically known
 pub trait WireRequest: Sized + Into<Self::Outbound> {

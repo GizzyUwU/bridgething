@@ -1,0 +1,89 @@
+[package]
+name = "bridgething-desktop"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+
+[lib]
+name = "bridgething_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bridgething-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dev-dependencies]
+mdns-sd = "0.20.3"
+serde_json.workspace = true
+tauri = { version = "2.11.5", features = ["test"] }
+tempfile = "3.27.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[dependencies]
+bridgething-companion = { path = "../../crates/companion", features = ["native-io"] }
+bridgething-delivery = { path = "../../crates/delivery/core" }
+bridgething-gateway = { path = "../../crates/gateway-rs", features = ["native-ws"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+directories = "6.0.0"
+iana-time-zone = "0.1.65"
+libbridgething = { path = "../../crates/lib" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+spotify = { path = "../../crates/spotify" }
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-updater = "2.10.1"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["v7"] }
+whisper-rs = { version = "0.16.0", features = ["tracing_backend"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+ort = "2.0.0-rc.13"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-avf-audio = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-core-location = "0.3.2"
+objc2-core-ml = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-image-io = "0.3.2"
+objc2-uniform-type-identifiers = "0.3.2"
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+ort = "2.0.0-rc.13"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures.workspace = true
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Devices_Geolocation",
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Core",
+  "Media_Playback",
+  "Media_SpeechSynthesis",
+  "Networking_Connectivity",
+  "Storage_Streams",
+  "Win32_System_Com",
+] }

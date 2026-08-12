@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bluer::Address;
+use bridgething::Address;
 use bridgething_test_harness::Harness;
 use libbridgething::{
   CompanionAuthorityScope, Device, DeviceType, GatewayCapabilities, GatewayInfo, MediaItem, PeerIap2Status,
@@ -307,7 +307,7 @@ async fn bluez_forget_completes_deferred_removal() {
   peers.set_iap2(mac, PeerIap2Status::None).await;
 
   let gone = harness
-    .wait_for(|s| s.peers.snapshot().peers.get(&mac).is_none(), CONVERGE)
+    .wait_for(|s| !s.peers.snapshot().peers.contains_key(&mac), CONVERGE)
     .await;
   assert!(
     gone,

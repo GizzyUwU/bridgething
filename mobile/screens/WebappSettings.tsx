@@ -2,18 +2,22 @@ import type {
   BridgethingConfigField,
   SessionEvent,
 } from '@bridgething/session-react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { describeError } from '@bridgething/ui/errors';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 
-import { Button } from '../components/Button';
+import { Note } from '../components/Note';
+import { Press } from '../components/Press';
+import { ScrollScreen } from '../components/ScrollScreen';
+import { Spinner } from '../components/Spinner';
 import { getSession } from '../lib/session';
+import { TEXT } from '../lib/theme';
 import { useWebapps } from '../lib/webapps';
-import type { RootStackParamList } from '../navigation';
+import type { AppsScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'WebappSettings'>;
+type Props = AppsScreenProps<'WebappSettings'>;
 
 type BridgeRequest = {
   id: number;
@@ -31,9 +35,24 @@ export function WebappSettingsScreen({ navigation, route }: Props) {
   const [pageUri, setPageUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const finish = useCallback(() => navigation.goBack(), [navigation]);
+
   useEffect(() => {
-    navigation.setOptions({ title: `${name} settings` });
-  }, [name, navigation]);
+    navigation.setOptions({
+      title: `${name} settings`,
+      headerBackVisible: false,
+      headerLeft: () => (
+        <Press onPress={finish} hitSlop={10} className="pr-3">
+          <Text
+            className="font-mono uppercase text-accent"
+            style={TEXT.eyebrow}
+          >
+            ‹ back
+          </Text>
+        </Press>
+      ),
+    });
+  }, [finish, name, navigation]);
 
   const loadPage = useCallback(async () => {
     setError(null);
@@ -42,7 +61,7 @@ export function WebappSettingsScreen({ navigation, route }: Props) {
       const uri = await session.webappSettingsPage(deviceId, id);
       setPageUri(uri);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(describeError(err));
     }
   }, [deviceId, id, session]);
 
@@ -125,7 +144,7 @@ export function WebappSettingsScreen({ navigation, route }: Props) {
       if (typeof request.id !== 'number' || typeof request.verb !== 'string')
         return;
       if (request.verb === 'done') {
-        navigation.goBack();
+        finish();
         return;
       }
       void (async () => {
@@ -141,28 +160,25 @@ export function WebappSettingsScreen({ navigation, route }: Props) {
         }
       })();
     },
-    [deliver, handleVerb, navigation],
+    [deliver, finish, handleVerb],
   );
 
   if (error) {
     return (
-      <View className="flex-1 items-center justify-center gap-4 bg-background px-6">
-        <Text className="text-center text-[14px] text-destructive">
+      <ScrollScreen>
+        <Note tone="err" action="retry" onAction={() => void loadPage()}>
           {error}
-        </Text>
-        <Button onPress={loadPage} variant="primary">
-          retry
-        </Button>
-      </View>
+        </Note>
+      </ScrollScreen>
     );
   }
 
   if (!pageUri) {
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-background">
-        <ActivityIndicator size="small" color="hsl(199 100% 44%)" />
-        <Text className="text-[13px] text-muted-foreground">
-          fetching settings from your car thing...
+      <View className="flex-1 items-center justify-center gap-3 bg-bg">
+        <Spinner />
+        <Text className="font-mono text-dim" style={TEXT.hint}>
+          fetching settings from your car thing
         </Text>
       </View>
     );

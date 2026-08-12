@@ -1,13 +1,15 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-mod bridge;
+use web_time::Instant;
+
+mod endec;
 mod frame;
-mod gateway;
 mod probe;
+#[cfg(test)]
+mod trace;
 
-pub use bridge::*;
+pub use endec::*;
 pub use frame::*;
-pub use gateway::*;
 pub use probe::*;
 
 use crate::Priority;
@@ -20,12 +22,13 @@ const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 const COMPRESSION_NONE: u8 = 0x00;
 const COMPRESSION_GZIP: u8 = 0x01;
 
+pub const AUTO_GZIP_THRESHOLD_BYTES: usize = 16 * 1024 - 128;
+
 const ENCODING_MSGPACK: u8 = 0x00;
 const ENCODING_JSON: u8 = 0x01;
 
 #[derive(Debug, Clone)]
 struct EndecState {
-  version: u8,
   compression: Compression,
   encoding: Encoding,
   priority: Priority,
@@ -40,7 +43,6 @@ struct EndecState {
 impl Default for EndecState {
   fn default() -> Self {
     Self {
-      version: VERSION,
       compression: Compression::None,
       encoding: Encoding::Msgpack,
       priority: Priority::Normal,
@@ -95,10 +97,6 @@ fn mbps(elapsed: Duration, length: f64) -> f64 {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EndecError {
-  #[error("invalid magic number")]
-  InvalidMagic,
-  #[error("unsupported version: {0}")]
-  UnsupportedVersion(u8),
   #[error("serialization error: {0}")]
   RmpSerialization(#[from] rmp_serde::encode::Error),
   #[error("typed decode failed (recoverable): {error}")]
@@ -106,13 +104,22 @@ pub enum EndecError {
     error: TypedDecodeError,
     probe: Box<EnvelopeProbe>,
   },
+  #[error("decompression failed (recoverable): {0}")]
+  Decompress(std::io::Error),
+  #[error("decompressed payload over the {limit} byte cap (recoverable)")]
+  DecompressTooLarge { limit: usize },
+  #[error("compression failed: {0}")]
+  Compression(std::io::Error),
   #[error(transparent)]
   Io(#[from] std::io::Error),
 }
 
 impl EndecError {
   pub fn is_recoverable(&self) -> bool {
-    matches!(self, EndecError::TypedDecode { .. })
+    matches!(
+      self,
+      EndecError::TypedDecode { .. } | EndecError::Decompress(_) | EndecError::DecompressTooLarge { .. }
+    )
   }
 }
 

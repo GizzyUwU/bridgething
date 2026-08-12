@@ -9,12 +9,31 @@ homepage.workspace = true
 
 [dependencies]
 earshot = "1.2.1"
+hound = { version = "3.5.1", optional = true }
 num-complex = "0.4.6"
 realfft = "3.5.0"
 serde = { workspace = true, features = ["derive"] }
 
+[features]
+bench-fixtures = ["dep:hound"]
+
 [dev-dependencies]
 bridgething-wakeword = { path = "../wakeword" }
 hound = "3.5.1"
-num-complex = "0.4.6"
 serde_json.workspace = true
+
+[[example]]
+name = "vad_bench"
+required-features = ["bench-fixtures"]
+
+[[example]]
+name = "scene_bench"
+required-features = ["bench-fixtures"]
+
+[[example]]
+name = "scene_probe"
+required-features = ["bench-fixtures"]
+
+[[example]]
+name = "freeze_bench"
+required-features = ["bench-fixtures"]

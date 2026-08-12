@@ -1,12 +1,10 @@
 use bridgething_macros::WireEvent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Bridge-side identity announce
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
 #[wire(BridgeToGateway)]
@@ -19,6 +17,8 @@ pub struct BridgeThingMeta {
   pub nickname: Option<String>,
   pub app_version: String,
   pub daemon_sha256: Option<String>,
+  /// None when no wake word model resolved, or when the one that did carries no version stamp.
+  pub wakeword_model_version: Option<String>,
   pub os_name: String,
   pub os_version: String,
   pub os_description: String,
@@ -45,7 +45,6 @@ impl BridgeThingMeta {
 }
 
 /// What the streamed bytes are going to be applied as
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -59,7 +58,6 @@ pub enum OtaKind {
 
 /// Stage of the OTA orchestrator. The phase set is shared between
 /// kinds, with non-image kinds emitting a subset
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -72,7 +70,6 @@ pub enum OtaPhase {
 }
 
 /// Per-phase progress tick
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -88,7 +85,6 @@ pub struct OtaProgress {
 }
 
 /// Terminal error from the OTA orchestrator
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -111,7 +107,6 @@ pub enum OtaErrorCode {
   Internal,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -119,10 +114,14 @@ pub enum OtaErrorCode {
 pub struct OtaError {
   pub code: OtaErrorCode,
   pub msg: String,
+  /// which update failed. a resume re-drives the same artifact, so this is NOT unique per attempt.
+  pub update_id: Option<String>,
+  /// set only when the bridge is re-delivering a failure whose peer had already gone away
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub replayed: bool,
 }
 
 /// Terminal success from the OTA orchestrator, emitted for every `OtaKind`.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -133,7 +132,6 @@ pub struct OtaFinished {
 }
 
 /// Half-open byte range the daemon's range proxy asks the companion to serve
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -143,7 +141,6 @@ pub struct RangeSpec {
 }
 
 /// Resolved range the companion is about to serve
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

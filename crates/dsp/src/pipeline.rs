@@ -107,6 +107,16 @@ impl Beamformer {
     self.scene.as_ref().and_then(SceneEstimator::bearing_deg)
   }
 
+  pub fn target_agreement(&self) -> Option<f32> {
+    self.scene.as_ref().and_then(SceneEstimator::target_agreement)
+  }
+
+  pub fn hold_noise(&mut self, holding: bool) {
+    if let Some(scene) = self.scene.as_mut() {
+      scene.hold_noise(holding);
+    }
+  }
+
   pub fn measured_field(&self, bin: usize) -> Option<Field> {
     let scene = self.scene.as_ref()?;
     let freq = bin_frequencies(self.config.sample_rate_hz)[bin];

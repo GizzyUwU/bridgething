@@ -1,0 +1,64 @@
+name: deploy-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "packages/catalog/**"
+      - "packages/client-ts/**"
+      - "packages/browser/**"
+      - "packages/updater/**"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - run: bun install --frozen-lockfile
+      - run: bunx turbo run build --filter='@bridgething/site^...'
+      - name: pull current manifest from R2 (if exists)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ota.bridgething.com/manifest.json -o manifest/fixture.json || \
+            echo "no production manifest yet; site will render the empty state"
+      - name: pull companion pointer from R2 (if exists)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ota.bridgething.com/companion.json -o manifest/companion.json || \
+            echo "no companion pointer yet; the apk card will render its empty state"
+      - name: pull desktop pointer from R2 (if exists)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ota.bridgething.com/desktop/stable/desktop.json -o manifest/desktop.json || \
+            echo "no desktop pointer yet; the desktop cards will render their empty state"
+      - name: pull the published catalog from R2 (if exists)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://apps.bridgething.com/catalog.json -o apps/catalog.json || \
+            echo "no published catalog yet; the store will render its empty state"
+      - run: bun run build
+      - name: deploy
+        run: bunx wrangler deploy

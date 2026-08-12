@@ -1,3 +1,0 @@
-.build/
-# xcframework built by `just spotify-ios` (the rust uniffi client; binary, regenerated)
-Frameworks/

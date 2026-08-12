@@ -16,6 +16,7 @@ import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingDeviceWebappsEntry
 import com.margelo.nitro.bridgething.session.BridgethingOtaAvailable
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollStatus
+import com.margelo.nitro.bridgething.session.BridgethingOtaProgress
 import com.margelo.nitro.bridgething.session.BridgethingOtaRun
 import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
@@ -24,6 +25,7 @@ import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingVoiceModelState
+import com.margelo.nitro.bridgething.session.BridgethingVoiceTurn
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappSlot
@@ -45,6 +47,7 @@ public interface BridgethingSessionBackend {
 
     public suspend fun persistedLogSize(): Double
     public suspend fun logArchives(): Array<BridgethingLogArchive>
+    public suspend fun logArchiveLines(archiveId: String, limit: Double): Array<BridgethingDeviceLogLine>
     public suspend fun exportLogs(archiveId: String?): String
     public suspend fun shareLogs(archiveId: String?): Boolean
     public suspend fun deleteLogArchive(archiveId: String)
@@ -74,13 +77,16 @@ public interface BridgethingSessionBackend {
 
     public suspend fun voiceModelState(): BridgethingVoiceModelState
 
+    public suspend fun downloadVoiceModel()
+
     public suspend fun setDeviceAutoResume(deviceId: String, enabled: Boolean)
     public suspend fun isDeviceAutoResumeEnabled(deviceId: String): Boolean
 
     public suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?)
-    public suspend fun checkForOtaUpdate(rootUrl: String?)
-    public suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest
-    public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?)
+    public suspend fun checkForOtaUpdate(rootUrl: String)
+    public suspend fun fetchOtaManifest(rootUrl: String): BridgethingOtaManifest
+    public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String)
+    public fun otaRunProgress(deviceId: String, nowMs: Double): BridgethingOtaProgress?
 
     public suspend fun dismissOtaRun(deviceId: String)
 
@@ -120,13 +126,15 @@ public interface BridgethingSessionBackend {
     public fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit)
     public fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit)
     public fun setOnAncsAuthStatusChanged(callback: (String, BridgethingAncsAuthStatus) -> Unit)
-    public fun setOnLog(callback: (String, String) -> Unit)
+    public fun setOnLog(callback: (String, String, String) -> Unit)
     public fun setLogStreamingEnabled(enabled: Boolean)
     public fun setLocalLogStreamingEnabled(enabled: Boolean)
     public fun setOnWebappsChanged(callback: (BridgethingDeviceWebappsEntry) -> Unit)
     public fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnVoiceModelStateChanged(callback: (BridgethingVoiceModelState) -> Unit)
+
+    public fun setOnVoiceTurnChanged(callback: (BridgethingVoiceTurn) -> Unit)
     public fun setOnOtaRunChanged(callback: (BridgethingOtaRun) -> Unit)
 
     public fun setOnOtaAvailableChanged(callback: (BridgethingOtaAvailable) -> Unit)

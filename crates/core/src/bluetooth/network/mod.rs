@@ -13,7 +13,7 @@ use axum::{
   response::IntoResponse,
   routing::any,
 };
-use bluer::Address;
+use bridgething_sdk_runtime::{LaneFeed, OutboundLanes, lanes};
 use futures::{
   SinkExt, StreamExt,
   stream::{SplitSink, SplitStream},
@@ -21,7 +21,7 @@ use futures::{
 use libbridgething::{
   Device, DeviceType, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{encode_bridge_frame, parse_bridge_frame},
+  protocol::{BridgeEndec, Compress, DecodedFrame, encode_frame},
   wire::MsgMeta,
 };
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
@@ -31,13 +31,13 @@ use tokio_util::{
 };
 
 use super::{
-  BluetoothEvent, BluetoothResult, BluetoothTx, GatewaySendTx, GatewayType, InboundGatewayMessage,
-  OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode, peer_owners::PeerOwners,
+  Address, BluetoothEvent, BluetoothResult, BluetoothTx, GatewaySendTx, GatewayType, InboundGatewayMessage,
+  OutboundGatewayMessage, auto_nack_for_failed_decode, peer_owners::PeerOwners,
 };
 use crate::{peer::PeerTracker, state::meta::DeviceMeta};
 
 const NETWORK_BATCH_BYTES: usize = 16 * 1024;
-const LANE_CAPACITY: usize = 16;
+const NETWORK_LANE_BYTES: usize = 256 * 1024;
 const WS_MAX_FRAME_BYTES: usize = 1024 * 1024;
 const SYNTHETIC_NETWORK_ADDR_PREFIX: [u8; 2] = [0xfe, 0xfe];
 
@@ -79,32 +79,23 @@ struct ConnectAccepted {
 #[derive(Debug)]
 struct Connection {
   address: Address,
-  remote: SocketAddr,
-  normal_tx: mpsc::Sender<Bytes>,
-  bulk_tx: mpsc::Sender<Bytes>,
-  background_tx: mpsc::Sender<Bytes>,
+  lanes: OutboundLanes<Bytes>,
   _writer_handle: JoinHandle<()>,
   _reader_handle: JoinHandle<()>,
 }
 
 impl Connection {
-  fn new(address: Address, remote: SocketAddr, ws: WebSocket, tx: ConnectionTx) -> Self {
+  fn new(address: Address, ws: WebSocket, tx: ConnectionTx) -> Self {
     let (writer, reader) = ws.split();
 
     let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
 
-    let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
-    let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
-    let (background_tx, background_rx) = mpsc::channel(LANE_CAPACITY);
-    let packer = OutboundPacker::new(normal_rx, bulk_rx, background_rx, NETWORK_BATCH_BYTES);
-    let _writer_handle = tokio::spawn(writer_task(address, writer, packer));
+    let (lanes, feed) = lanes(NETWORK_LANE_BYTES, NETWORK_BATCH_BYTES);
+    let _writer_handle = tokio::spawn(writer_task(address, writer, feed));
 
     Self {
       address,
-      remote,
-      normal_tx,
-      bulk_tx,
-      background_tx,
+      lanes,
       _writer_handle,
       _reader_handle,
     }
@@ -113,14 +104,8 @@ impl Connection {
   async fn send(&self, msg: &BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
     tracing::trace!("({}) sending network message ({:?}): {:?}", self.address, priority, msg);
     let mut buf = BytesMut::new();
-    encode_bridge_frame(priority, msg, &mut buf)?;
-    let bytes = buf.freeze();
-    let lane = match priority {
-      Priority::Normal => &self.normal_tx,
-      Priority::Bulk => &self.bulk_tx,
-      Priority::Background => &self.background_tx,
-    };
-    if lane.send(bytes).await.is_err() {
+    encode_frame(priority, Compress::Auto, msg, &mut buf)?;
+    if !self.lanes.send(priority, buf.freeze()).await {
       tracing::debug!("({}) network writer lane closed; dropping frame", self.address);
     }
     Ok(())
@@ -146,9 +131,10 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
       ws::Message::Close(_) => break,
     };
 
+    let mut endec = BridgeEndec::default();
     while !chunk.is_empty() {
-      match parse_bridge_frame(&mut chunk) {
-        Ok(Some(frame)) => {
+      match endec.decode_bytes(&mut chunk) {
+        Ok(Some(DecodedFrame::Frame(frame))) => {
           if let Err(e) = tx.send((address, frame.msg.into())).await {
             tracing::error!("({address}) failed to forward network gateway message: {:?}", e);
             return;
@@ -161,7 +147,7 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
           );
           return;
         }
-        Err(e) if e.is_recoverable() => {
+        Ok(Some(DecodedFrame::Failed(e))) => {
           if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = e {
             tracing::warn!(
               target: "bridgething::network::decode",
@@ -192,9 +178,9 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
   }
 }
 
-async fn writer_task(address: Address, mut writer: SplitSink<WebSocket, ws::Message>, mut packer: OutboundPacker) {
-  while let Some(batch) = packer.next_batch().await {
-    if let Err(err) = writer.send(ws::Message::Binary(batch.freeze())).await {
+async fn writer_task(address: Address, mut writer: SplitSink<WebSocket, ws::Message>, mut feed: LaneFeed<Bytes>) {
+  while let Some(batch) = feed.next_batch().await {
+    if let Err(err) = writer.send(ws::Message::Binary(batch.into_bytes())).await {
       tracing::debug!("({address}) network ws write error: {:?}", err);
       break;
     }
@@ -376,7 +362,7 @@ impl NetworkGateway {
     let ConnectAccepted { remote, ws } = accepted;
     tracing::info!("network gateway: accepting connection from {remote} as synthetic {address}");
 
-    let connection = Connection::new(address, remote, ws, self.conn_tx.clone());
+    let connection = Connection::new(address, ws, self.conn_tx.clone());
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,

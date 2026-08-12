@@ -8,3 +8,8 @@ host_dylib() {
     *) echo "unsupported host os for binding generation: $(uname -s)" >&2; return 1 ;;
   esac
 }
+
+mobile_surface_target_dir() {
+  CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/companion-ffi"
+  export CARGO_TARGET_DIR
+}

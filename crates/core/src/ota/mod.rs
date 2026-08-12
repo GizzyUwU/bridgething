@@ -16,7 +16,6 @@ use std::{
   time::{Duration, Instant},
 };
 
-use bluer::Address;
 use libbridgething::{
   OtaError, OtaErrorCode, OtaFinished, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
   gateway::{
@@ -30,10 +29,13 @@ use tokio::{
   sync::{mpsc, oneshot, watch},
   task::JoinHandle,
 };
+pub use wakeword_swap::{
+  installed_version as wakeword_model_version, retire_superseded as retire_superseded_wakeword_model,
+};
 
 use crate::{
   asset::AssetCache,
-  bluetooth::GatewayMan,
+  bluetooth::{Address, GatewayMan},
   peer::{PeerSnapshot, PeerTracker},
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
@@ -65,6 +67,12 @@ enum Command {
     expected: Vec<String>,
   },
   Cancel,
+  HoldFailure {
+    peer: Address,
+    update_id: String,
+    code: OtaErrorCode,
+    msg: String,
+  },
   WriteFinished,
   StageFinished {
     result: Result<StagedPiece, WriteError>,
@@ -92,6 +100,7 @@ impl std::fmt::Debug for OtaOrchestrator {
 }
 
 impl OtaOrchestrator {
+  #[allow(clippy::too_many_arguments)]
   pub fn spawn(
     transfers: ChunkedTransfer,
     events_tx: OtaEventTx,
@@ -106,6 +115,7 @@ impl OtaOrchestrator {
   ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let peer_watch = peers.watch_snapshot();
+    let failure_watch = peers.watch_snapshot();
     let actor = OtaActor {
       transfers,
       events_tx,
@@ -114,6 +124,7 @@ impl OtaOrchestrator {
       range_proxy,
       peers,
       peer_watch,
+      failure_watch,
       installed_apply,
       wakeword_reload,
       sinks,
@@ -125,6 +136,7 @@ impl OtaOrchestrator {
       last_streaming_percent: None,
       staged: Vec::new(),
       staged_peer: None,
+      unsent_failure: None,
     };
     let handle = tokio::spawn(actor.run());
     (Self { cmd_tx }, handle)
@@ -163,6 +175,12 @@ impl OtaOrchestrator {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+struct BeginMeta {
+  provenance: Option<String>,
+  version: Option<String>,
+}
+
 enum OtaState {
   Idle,
   Streaming {
@@ -173,7 +191,7 @@ enum OtaState {
     transfer_id: uuid::Uuid,
     stream_rx: ForwardStream,
     patch: Option<OtaPatch>,
-    provenance: Option<String>,
+    begin_meta: BeginMeta,
   },
   Writing {
     kind: OtaKind,
@@ -202,6 +220,7 @@ struct OtaActor {
   range_proxy: RangeProxy,
   peers: PeerTracker,
   peer_watch: watch::Receiver<crate::peer::PeerSnapshot>,
+  failure_watch: watch::Receiver<crate::peer::PeerSnapshot>,
   installed_apply: InstalledWebappApply,
   wakeword_reload: WakewordReload,
   sinks: TransferSinks,
@@ -213,6 +232,14 @@ struct OtaActor {
   last_streaming_percent: Option<u8>,
   staged: Vec<StagedPiece>,
   staged_peer: Option<Address>,
+  unsent_failure: Option<UnsentFailure>,
+}
+
+struct UnsentFailure {
+  peer: Address,
+  update_id: String,
+  code: OtaErrorCode,
+  msg: String,
 }
 
 impl OtaActor {
@@ -220,16 +247,20 @@ impl OtaActor {
     tracing::info!("ota orchestrator started");
     staging::sweep_orphans().await;
     wakeword_swap::sweep_orphans().await;
+    daemon_swap::record_running_version().await;
     loop {
       enum Step {
         Cmd(Option<Command>),
         Stream(Option<TransferEvent>),
         PeerLost,
+        FailurePeerBack,
       }
       let step = {
         let cmd_rx = &mut self.cmd_rx;
         let state = &mut self.state;
         let peer_watch = &mut self.peer_watch;
+        let failure_watch = &mut self.failure_watch;
+        let failure_peer = self.unsent_failure.as_ref().map(|held| held.peer);
         let streaming_peer = match state {
           OtaState::Streaming { peer: Some(addr), .. } => Some(*addr),
           _ => None,
@@ -255,6 +286,19 @@ impl OtaActor {
               None => std::future::pending().await,
             }
           } => Step::PeerLost,
+          _ = async {
+            match failure_peer {
+              Some(addr) => loop {
+                if failure_watch.changed().await.is_err() {
+                  std::future::pending::<()>().await;
+                }
+                if Self::peer_link_alive(&failure_watch.borrow(), &addr) {
+                  return;
+                }
+              },
+              None => std::future::pending().await,
+            }
+          } => Step::FailurePeerBack,
         }
       };
       match step {
@@ -264,6 +308,20 @@ impl OtaActor {
           Command::Abandon { update_id } => self.handle_abandon(update_id).await,
           Command::Activate { expected } => self.handle_activate(expected).await,
           Command::Cancel => self.handle_cancel().await,
+          Command::HoldFailure {
+            peer,
+            update_id,
+            code,
+            msg,
+          } => {
+            send_error(&self.events_tx, code, msg.clone(), Some(update_id.clone()), false).await;
+            self.unsent_failure = Some(UnsentFailure {
+              peer,
+              update_id,
+              code,
+              msg,
+            });
+          }
           Command::WriteFinished => {
             self.state = OtaState::Idle;
             self.range_proxy.deactivate().await;
@@ -287,6 +345,12 @@ impl OtaActor {
             self.range_proxy.deactivate().await;
           }
         }
+        Step::FailurePeerBack => {
+          if let Some(held) = self.unsent_failure.take() {
+            tracing::info!(peer = %held.peer, update_id = %held.update_id, "replaying the failure its peer missed");
+            send_error(&self.events_tx, held.code, held.msg, Some(held.update_id), true).await;
+          }
+        }
       }
     }
     tracing::info!("ota orchestrator exiting");
@@ -305,6 +369,9 @@ impl OtaActor {
     peer: Option<Address>,
     ack: oneshot::Sender<Result<OtaBeginAck, OtaBeginRejected>>,
   ) {
+    if self.unsent_failure.as_ref().is_some_and(|held| Some(held.peer) == peer) {
+      self.unsent_failure = None;
+    }
     if let OtaState::Writing { update_id, .. } = &self.state {
       let _ = ack.send(Err(OtaBeginRejected {
         reason: format!("ota write of {update_id} in progress; cancel or wait first"),
@@ -444,7 +511,10 @@ impl OtaActor {
           transfer_id: req.transfer.id,
           stream_rx,
           patch: req.patch.clone(),
-          provenance: req.provenance.clone(),
+          begin_meta: BeginMeta {
+            provenance: req.provenance.clone(),
+            version: req.version.clone(),
+          },
         };
         let _ = ack.send(Ok(OtaBeginAck {
           resume_from_offset: resume_from_offset as u32,
@@ -471,7 +541,7 @@ impl OtaActor {
   }
 
   async fn handle_stream_event(&mut self, event: TransferEvent) {
-    let (kind, current_id, expected_size, peer, transfer_id, patch, provenance) = match &self.state {
+    let (kind, current_id, expected_size, peer, transfer_id, patch, begin_meta) = match &self.state {
       OtaState::Streaming {
         kind,
         update_id,
@@ -479,7 +549,7 @@ impl OtaActor {
         peer,
         transfer_id,
         patch,
-        provenance,
+        begin_meta,
         ..
       } => (
         *kind,
@@ -488,7 +558,7 @@ impl OtaActor {
         *peer,
         *transfer_id,
         patch.clone(),
-        provenance.clone(),
+        begin_meta.clone(),
       ),
       _ => return,
     };
@@ -530,7 +600,7 @@ impl OtaActor {
         self.last_streaming_emit_at = None;
         self.last_streaming_percent = None;
         self.sinks.unbind(transfer_id);
-        self.spawn_write(kind, current_id, peer, path, patch, provenance).await;
+        self.spawn_write(kind, current_id, peer, path, patch, begin_meta).await;
       }
       Err(err) => {
         let code = transfer_error_code(&err);
@@ -595,7 +665,7 @@ impl OtaActor {
     peer: Option<Address>,
     payload: PathBuf,
     patch: Option<OtaPatch>,
-    provenance: Option<String>,
+    begin_meta: BeginMeta,
   ) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     self.state = OtaState::Writing {
@@ -611,8 +681,9 @@ impl OtaActor {
     match kind {
       OtaKind::Image => {
         if let Some(addr) = peer {
-          let events_tx = self.events_tx.clone();
           let cancel_tx_for_watcher = cancel_tx.clone();
+          let self_tx_for_watcher = self.self_tx.clone();
+          let update_id_for_watcher = update_id.clone();
           let mut snapshot_rx = self.peers.watch_snapshot();
           tokio::spawn(async move {
             loop {
@@ -621,13 +692,15 @@ impl OtaActor {
               }
               let alive = Self::peer_link_alive(&snapshot_rx.borrow(), &addr);
               if !alive {
-                tracing::warn!(%addr, "pinned peer disconnected mid-write; signalling cancel + emitting OtaError");
-                emit_error(
-                  &events_tx,
-                  OtaErrorCode::Internal,
-                  "companion disconnected mid-install".into(),
-                )
-                .await;
+                tracing::warn!(%addr, "pinned peer disconnected mid-write; signalling cancel + holding OtaError");
+                let _ = self_tx_for_watcher
+                  .send(Command::HoldFailure {
+                    peer: addr,
+                    update_id: update_id_for_watcher.clone(),
+                    code: OtaErrorCode::Internal,
+                    msg: "companion disconnected mid-install".into(),
+                  })
+                  .await;
                 let _ = cancel_tx_for_watcher.send(true);
                 return;
               }
@@ -667,7 +740,9 @@ impl OtaActor {
         tokio::spawn(async move {
           emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
           let result = match wakeword_swap::target() {
-            Some(dest) => wakeword_swap::apply(&payload, &dest).await.map(|()| dest),
+            Some(dest) => wakeword_swap::apply(&payload, &dest, begin_meta.version.as_deref())
+              .await
+              .map(|()| dest),
             None => Err(wakeword_swap::ApplyError::NoTarget),
           };
           let _ = transfers.abandon(update_id.clone()).await;
@@ -696,7 +771,7 @@ impl OtaActor {
         let transfers = self.transfers.clone();
         tokio::spawn(async move {
           emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
-          let result = (apply)(payload.clone(), provenance).await;
+          let result = (apply)(payload.clone(), begin_meta.provenance).await;
           let _ = transfers.abandon(update_id.clone()).await;
           let _ = tokio::fs::remove_file(&payload).await;
           match result {
@@ -829,8 +904,23 @@ async fn emit_finished(events_tx: &OtaEventTx, kind: OtaKind, update_id: String)
 }
 
 async fn emit_error(events_tx: &OtaEventTx, code: OtaErrorCode, msg: String) {
+  send_error(events_tx, code, msg, None, false).await
+}
+
+async fn send_error(
+  events_tx: &OtaEventTx,
+  code: OtaErrorCode,
+  msg: String,
+  update_id: Option<String>,
+  replayed: bool,
+) {
   let _ = events_tx
-    .send(BridgeToGatewaySystemMsgEvent::OtaError(OtaError { code, msg }))
+    .send(BridgeToGatewaySystemMsgEvent::OtaError(OtaError {
+      code,
+      msg,
+      update_id,
+      replayed,
+    }))
     .await;
 }
 
@@ -883,9 +973,9 @@ async fn run_image_write(
     .map_err(|err| WriteError {
       code: match err {
         swupdate::Error::Cancelled => OtaErrorCode::Cancelled,
-        swupdate::Error::Io(_) | swupdate::Error::Ipc(_) | swupdate::Error::InstallFailed(_) => {
-          OtaErrorCode::WriteFailed
-        }
+        swupdate::Error::Io(_) => OtaErrorCode::WriteFailed,
+        #[cfg(feature = "swupdate")]
+        swupdate::Error::Ipc(_) | swupdate::Error::InstallFailed(_) => OtaErrorCode::WriteFailed,
       },
       msg: format!("swupdate failed: {err}"),
     })?;
@@ -1078,6 +1168,7 @@ mod tests {
     installed_apply_calls: Arc<AtomicUsize>,
     installed_apply_ok: Arc<AtomicBool>,
     installed_apply_provenance: Arc<std::sync::Mutex<Option<Option<String>>>>,
+    wakeword_reload_calls: Arc<AtomicUsize>,
     captured_acks: Arc<std::sync::Mutex<Vec<TransferAck>>>,
     _root: PathBuf,
   }
@@ -1125,7 +1216,14 @@ mod tests {
         }
       })
     });
-    let wakeword_reload: WakewordReload = Arc::new(|| Box::pin(async {}));
+    let wakeword_reload_calls = Arc::new(AtomicUsize::new(0));
+    let wakeword_reload_counter = wakeword_reload_calls.clone();
+    let wakeword_reload: WakewordReload = Arc::new(move || {
+      let counter = wakeword_reload_counter.clone();
+      Box::pin(async move {
+        counter.fetch_add(1, Ordering::SeqCst);
+      })
+    });
     let sinks = TransferSinks::default();
     let asset_db = crate::db::open(None).await.unwrap();
     let (assets, _asset_handle) = AssetCache::init(asset_db, root.join("assets")).await.unwrap().spawn();
@@ -1160,6 +1258,7 @@ mod tests {
       installed_apply_calls,
       installed_apply_ok,
       installed_apply_provenance,
+      wakeword_reload_calls,
       captured_acks,
       _root: root,
     }
@@ -1233,6 +1332,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1271,6 +1371,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         Some(peer),
       )
@@ -1326,6 +1427,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1362,6 +1464,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1397,6 +1500,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1422,6 +1526,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1445,6 +1550,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1479,6 +1585,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1500,12 +1607,13 @@ mod tests {
           update_id: "deadbeef".repeat(8),
           update_url_base: None,
           transfer: TransferRef {
-            id: tid_for(&"deadbeef".repeat(8)),
+            id: tid_for("deadbeef".repeat(8)),
             total_size: 32,
             sha256: Some("deadbeef".repeat(8)),
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1531,6 +1639,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1553,12 +1662,104 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
       .await
       .expect("begin after abandon");
     assert_eq!(ack.resume_from_offset, 0);
+  }
+
+  #[tokio::test]
+  async fn a_failure_its_peer_missed_is_replayed_when_that_peer_returns() {
+    use libbridgething::{Device, DeviceType, GatewayInfo, Peer};
+
+    let (peers, snapshot_tx) = PeerTracker::scripted();
+    let mut h = boot_with_peers(peers).await;
+    let (bytes, sha, size) = fixture_bytes();
+    let peer: Address = "AA:BB:CC:DD:EE:03".parse().unwrap();
+
+    let connected = || {
+      let mut p = Peer::new(Device {
+        name: "test-phone".into(),
+        device_type: DeviceType::default(),
+        mac: peer.to_string(),
+        default: false,
+      });
+      p.companion = PeerCompanionStatus::Connected(GatewayInfo::default());
+      p
+    };
+    let mut up = crate::peer::PeerSnapshot::default();
+    up.peers.insert(peer, connected());
+    snapshot_tx.send(up.clone()).unwrap();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+          patch: None,
+          provenance: None,
+          version: None,
+        },
+        Some(peer),
+      )
+      .await
+      .unwrap();
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing)),
+    )
+    .await;
+
+    let mut down = crate::peer::PeerSnapshot::default();
+    down.peers.insert(
+      peer,
+      Peer::new(Device {
+        name: "test-phone".into(),
+        device_type: DeviceType::default(),
+        mac: peer.to_string(),
+        default: false,
+      }),
+    );
+    snapshot_tx.send(down).unwrap();
+
+    let live = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(live) = live else {
+      panic!("expected the mid-write failure");
+    };
+    assert_eq!(live.update_id.as_deref(), Some(sha.as_str()));
+    assert!(!live.replayed, "the first emit is the live one, not a replay");
+
+    snapshot_tx.send(up).unwrap();
+
+    let replay = wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(e) if e.replayed),
+    )
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(replay) = replay else {
+      panic!("expected the replayed failure");
+    };
+    assert_eq!(
+      replay.update_id.as_deref(),
+      Some(sha.as_str()),
+      "a resume re-drives the same update_id, so the replay must be distinguishable by its flag alone"
+    );
+    assert_eq!(replay.code, live.code);
   }
 
   #[tokio::test]
@@ -1598,6 +1799,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         Some(peer_a),
       )
@@ -1627,6 +1829,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         Some(peer_b),
       )
@@ -1655,6 +1858,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         Some(peer_a),
       )
@@ -1675,6 +1879,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         Some(peer_b),
       )
@@ -1701,6 +1906,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1766,6 +1972,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1803,6 +2010,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1922,6 +2130,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1945,6 +2154,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1972,6 +2182,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )
@@ -1997,6 +2208,66 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn wakeword_model_push_always_reaches_a_terminal_status() {
+    let model = temp_root().join("hey_bridgething.btww");
+    tokio::fs::create_dir_all(model.parent().unwrap()).await.unwrap();
+    unsafe { std::env::set_var("BRIDGETHING_WAKEWORD_MODEL", &model) };
+
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::WakewordModel,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+          patch: None,
+          provenance: None,
+          version: Some("1.1.0".into()),
+        },
+        None,
+      )
+      .await
+      .expect("wakeword begin ok");
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
+
+    let terminal = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaFinished(f) if f.kind == OtaKind::WakewordModel
+      ) || matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+
+    assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0, "a model swap must not reboot");
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      0,
+      "a model swap must not restart"
+    );
+    match terminal {
+      BridgeToGatewaySystemMsgEvent::OtaFinished(f) => {
+        assert_eq!(f.update_id, sha, "finished names the run the sender began");
+        assert_eq!(h.wakeword_reload_calls.load(Ordering::SeqCst), 1, "mic reloaded once");
+      }
+      BridgeToGatewaySystemMsgEvent::OtaError(_) => {
+        assert_eq!(
+          h.wakeword_reload_calls.load(Ordering::SeqCst),
+          0,
+          "a refused model must not reload the mic"
+        );
+      }
+      other => unreachable!("matched a terminal status above, got {other:?}"),
+    }
+  }
+
+  #[tokio::test]
   async fn installed_webapp_forwards_provenance_to_apply() {
     let mut h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
@@ -2015,6 +2286,7 @@ mod tests {
           },
           patch: None,
           provenance: Some(source.into()),
+          version: None,
         },
         None,
       )
@@ -2057,6 +2329,7 @@ mod tests {
           },
           patch: None,
           provenance: Some("https://apps.bridgething.com/catalog.json".into()),
+          version: None,
         },
         None,
       )
@@ -2088,6 +2361,7 @@ mod tests {
           },
           patch: None,
           provenance: Some("x".repeat(libbridgething::WEBAPP_PROVENANCE_MAX_LEN + 1)),
+          version: None,
         },
         None,
       )
@@ -2119,6 +2393,7 @@ mod tests {
           },
           patch: None,
           provenance: None,
+          version: None,
         },
         None,
       )

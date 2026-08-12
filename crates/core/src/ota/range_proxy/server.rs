@@ -474,8 +474,6 @@ fn parse_range_header(header_value: &str) -> Result<Parsed, &'static str> {
 
 #[cfg(test)]
 mod tests {
-  use libbridgething::gateway::{BridgeToGatewayMsgData, BridgeToGatewayTransferMsg};
-
   use super::*;
   use crate::transfer::sinks::TransferSinks;
 

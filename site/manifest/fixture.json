@@ -1,0 +1,2135 @@
+{
+  "$schema": "https://terbium.app/schemas/manifest/v1.json",
+  "manifest_version": 1,
+  "updated_at": "2026-08-02T21:58:57Z",
+  "project": {
+    "id": "bridgething",
+    "name": "bridgething",
+    "description": "the bridge layer that lets the car thing remain itself while opening up to anything you build for it",
+    "publisher": "JoeyEamigh",
+    "publisher_url": "https://github.com/JoeyEamigh",
+    "license": "MIT",
+    "website": "https://bridgething.com",
+    "source_url": "https://github.com/JoeyEamigh/bridgething",
+    "issue_url": "https://github.com/JoeyEamigh/bridgething/issues",
+    "support_url": "https://tl.mt/d",
+    "icon_url": "https://bridgething.com/brand/icon-dark.svg",
+    "banner_url": null,
+    "screenshots": []
+  },
+  "channels": {
+    "stable": {
+      "name": "Stable",
+      "description": "daily-use image with the best performance.",
+      "stability": "stable",
+      "default": true,
+      "latest": "0.8.0+image.0.1.11",
+      "releases": [
+        "0.8.0+image.0.1.11",
+        "0.7.0+image.0.1.11",
+        "0.7.0+image.0.1.9",
+        "0.6.0+image.0.1.8",
+        "0.5.2+image.0.1.8",
+        "0.5.2+image.0.1.7",
+        "0.5.1+image.0.1.7",
+        "0.5.0+image.0.1.7",
+        "0.3.0+image.0.1.6",
+        "0.2.3+image.0.1.5",
+        "0.2.2+image.0.1.5",
+        "0.2.1+image.0.1.5",
+        "0.2.1+image.0.1.4",
+        "0.2.0+image.0.1.3",
+        "0.1.6+image.0.1.2",
+        "0.1.5+image.0.1.2",
+        "0.1.4+image.0.1.2",
+        "0.1.3+image.0.1.1",
+        "0.1.2+image.0.1.1",
+        "0.1.2+image.0.1.0",
+        "0.1.1+image.0.1.0",
+        "0.1.0+image.0.1.0"
+      ]
+    },
+    "dev": {
+      "name": "Dev",
+      "description": "dev image with more logging and debugging features. slower and hard on your emmc - not recommended.",
+      "stability": "experimental",
+      "default": false,
+      "latest": "0.8.0+image.0.1.11-dev",
+      "releases": [
+        "0.8.0+image.0.1.11-dev",
+        "0.7.0+image.0.1.11-dev",
+        "0.7.0+image.0.1.10-dev",
+        "0.7.0+image.0.1.9-dev",
+        "0.6.0+image.0.1.8-dev",
+        "0.5.2+image.0.1.8-dev",
+        "0.5.2+image.0.1.7-dev",
+        "0.5.1+image.0.1.7-dev",
+        "0.5.0+image.0.1.7-dev",
+        "0.3.0+image.0.1.6-dev",
+        "0.2.3+image.0.1.5-dev",
+        "0.2.2+image.0.1.5-dev",
+        "0.2.1+image.0.1.5-dev",
+        "0.2.1+image.0.1.4-dev",
+        "0.2.0+image.0.1.3-dev",
+        "0.1.6+image.0.1.2-dev",
+        "0.1.5+image.0.1.2-dev",
+        "0.1.4+image.0.1.2-dev",
+        "0.1.3+image.0.1.1-dev",
+        "0.1.2+image.0.1.1-dev",
+        "0.1.2+image.0.1.0-dev",
+        "0.1.1+image.0.1.0-dev",
+        "0.1.0+image.0.1.0-dev"
+      ]
+    }
+  },
+  "releases": {
+    "0.1.0+image.0.1.0": {
+      "version": "0.1.0+image.0.1.0",
+      "channel": "stable",
+      "released_at": "2026-06-28T05:10:20Z",
+      "summary": "initial build (change me)",
+      "changelog": "## daemon 0.1.0\n\ninitial build (change me)\n\n## image 0.1.0\n\nborked initial build\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.0+image.0.1.0-stable.zip",
+        "size": 380176571,
+        "sha256": "667a06d08736a2abe0dc9c4c742942edaa4481a7fd77084f720fb696afea7436"
+      }
+    },
+    "0.1.0+image.0.1.0-dev": {
+      "version": "0.1.0+image.0.1.0-dev",
+      "channel": "dev",
+      "released_at": "2026-07-06T01:04:56Z",
+      "summary": "initial build (change me)",
+      "changelog": "## daemon 0.1.0\n\ninitial build (change me)\n\n## image 0.1.0-dev\n\ncast_shell + squashfs preview\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.0+image.0.1.0-dev.zip",
+        "size": 466931090,
+        "sha256": "7d79a65f5cf8ca7726e95b4470f21da5bf539fd3c32d64a43eafacd86f000cb2"
+      }
+    },
+    "0.1.1+image.0.1.0": {
+      "version": "0.1.1+image.0.1.0",
+      "channel": "stable",
+      "released_at": "2026-07-07T19:27:51Z",
+      "summary": "better library browse and optimistic playback recovery on flaky connections.",
+      "changelog": "## daemon 0.1.1\n\n## Highlights\n- optimistic queue advance keeps playback moving through dealer-silent song changes on bad internet.\n- slimmer staples-first home browse with live invalidation on library changes.\n- assorted browse and now-playing fixes.\n\n## image 0.1.0\n\nborked initial build\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.1+image.0.1.0.zip",
+        "size": 380296297,
+        "sha256": "3a75507db5c677ee561ee70893f44e37bdadfd3f52893e161c67257e0ddac60f"
+      }
+    },
+    "0.1.1+image.0.1.0-dev": {
+      "version": "0.1.1+image.0.1.0-dev",
+      "channel": "dev",
+      "released_at": "2026-07-07T19:31:31Z",
+      "summary": "better library browse and optimistic playback recovery on flaky connections.",
+      "changelog": "## daemon 0.1.1\n\n## Highlights\n- optimistic queue advance keeps playback moving through dealer-silent song changes on bad internet.\n- slimmer staples-first home browse with live invalidation on library changes.\n- assorted browse and now-playing fixes.\n\n## image 0.1.0-dev\n\ncast_shell + squashfs preview\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.1+image.0.1.0-dev.zip",
+        "size": 466977753,
+        "sha256": "228d39e6d3feabaeeb3c72b985eb011ad4cac6d149f26fea6e87106d09cf3937"
+      }
+    },
+    "0.1.2+image.0.1.0": {
+      "version": "0.1.2+image.0.1.0",
+      "channel": "stable",
+      "released_at": "2026-07-07T23:35:27Z",
+      "summary": "more reliable OTA updates over flaky Bluetooth, plus builtin webapp delivery.",
+      "changelog": "## daemon 0.1.2\n\n## Highlights\n- OTA transfers ack on a rolling byte window instead of only at chunk boundaries, so streams keep flowing on slow or lossy links.\n- update progress only redraws when the percent actually moves, ending the stall-then-jump reporting during long transfers.\n- companion OTA streaming reworked on both platforms for cleaner resume and fewer stuck updates.\n- builtin hub and stock webapps now ride the daemon release and update over OTA.\n\n## image 0.1.0\n\nborked initial build\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.2+image.0.1.0.zip",
+        "size": 380296638,
+        "sha256": "71465390df1e727f1857c9685bbac327cdfe5ebf96f54f36bdcb4fad461d3b58"
+      }
+    },
+    "0.1.2+image.0.1.0-dev": {
+      "version": "0.1.2+image.0.1.0-dev",
+      "channel": "dev",
+      "released_at": "2026-07-07T23:38:38Z",
+      "summary": "more reliable OTA updates over flaky Bluetooth, plus builtin webapp delivery.",
+      "changelog": "## daemon 0.1.2\n\n## Highlights\n- OTA transfers ack on a rolling byte window instead of only at chunk boundaries, so streams keep flowing on slow or lossy links.\n- update progress only redraws when the percent actually moves, ending the stall-then-jump reporting during long transfers.\n- companion OTA streaming reworked on both platforms for cleaner resume and fewer stuck updates.\n- builtin hub and stock webapps now ride the daemon release and update over OTA.\n\n## image 0.1.0-dev\n\ncast_shell + squashfs preview\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.2+image.0.1.0-dev.zip",
+        "size": 466976738,
+        "sha256": "e3f7e48e128566ea4c2035eea556ae783c260df9dd294d4900728e0e79369be0"
+      }
+    },
+    "0.1.2+image.0.1.1-dev": {
+      "version": "0.1.2+image.0.1.1-dev",
+      "channel": "dev",
+      "released_at": "2026-07-08T20:49:11Z",
+      "summary": "more reliable OTA updates over flaky Bluetooth, plus builtin webapp delivery.",
+      "changelog": "## daemon 0.1.2\n\n## Highlights\n- OTA transfers ack on a rolling byte window instead of only at chunk boundaries, so streams keep flowing on slow or lossy links.\n- update progress only redraws when the percent actually moves, ending the stall-then-jump reporting during long transfers.\n- companion OTA streaming reworked on both platforms for cleaner resume and fewer stuck updates.\n- builtin hub and stock webapps now ride the daemon release and update over OTA.\n\n## image 0.1.1-dev\n\ninitial dev build - everything in stable, plus:\n- squashfs rootfs\n- more devtools\n- weston desktop shell w/ vnc\n- a bit slower\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.2+image.0.1.1-dev.zip",
+        "size": 467019727,
+        "sha256": "ee2c20ac1be4faabda508b482e6433932dd468b5b21d7cdf8b36654ac89ef116"
+      }
+    },
+    "0.1.2+image.0.1.1": {
+      "version": "0.1.2+image.0.1.1",
+      "channel": "stable",
+      "released_at": "2026-07-08T20:56:33Z",
+      "summary": "more reliable OTA updates over flaky Bluetooth, plus builtin webapp delivery.",
+      "changelog": "## daemon 0.1.2\n\n## Highlights\n- OTA transfers ack on a rolling byte window instead of only at chunk boundaries, so streams keep flowing on slow or lossy links.\n- update progress only redraws when the percent actually moves, ending the stall-then-jump reporting during long transfers.\n- companion OTA streaming reworked on both platforms for cleaner resume and fewer stuck updates.\n- builtin hub and stock webapps now ride the daemon release and update over OTA.\n\n## image 0.1.1\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.2+image.0.1.1.zip",
+        "size": 380876374,
+        "sha256": "71cff379b84639d61b2464099e37310681781d5a17250d0095c7c5cf23930d2e"
+      }
+    },
+    "0.1.3+image.0.1.1": {
+      "version": "0.1.3+image.0.1.1",
+      "channel": "stable",
+      "released_at": "2026-07-08T21:47:32Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.3\n\n## Highlights\n- fix liked songs collection having no cover art\n\n## image 0.1.1\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.3+image.0.1.1.zip",
+        "size": 380351761,
+        "sha256": "7cfe563a3c281e54b70255b212a3daacd01f28c60cfa86d8fae3898ee3a612e4"
+      }
+    },
+    "0.1.3+image.0.1.1-dev": {
+      "version": "0.1.3+image.0.1.1-dev",
+      "channel": "dev",
+      "released_at": "2026-07-08T21:50:43Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.3\n\n## Highlights\n- fix liked songs collection having no cover art\n\n## image 0.1.1-dev\n\ninitial dev build - everything in stable, plus:\n- squashfs rootfs\n- more devtools\n- weston desktop shell w/ vnc\n- a bit slower\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.3+image.0.1.1-dev.zip",
+        "size": 467032142,
+        "sha256": "6fe26308395975df4d8d252840f6c819eeb39babaf16d5b13d2f5c7e4797a02a"
+      }
+    },
+    "0.1.4+image.0.1.2": {
+      "version": "0.1.4+image.0.1.2",
+      "channel": "stable",
+      "released_at": "2026-07-09T07:50:20Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.4\n\n## Highlights\n- fix ota (again)\n\n## image 0.1.2\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40224960,
+          "sha256": "a27fbdecae35009178be8ef2cf01d258846092b1aa2618b1d2065a3ef18bf33f"
+        },
+        "image_swu": {
+          "size": 805376,
+          "sha256": "d8799ec66f14e889c9c7c560d1d4f8bd0196bc1639e55fb5b4395fedffb3b2a9"
+        },
+        "image_zck": {
+          "size": 173507463,
+          "sha256": "f42784df66c36d484c36b9336993c74b1b10602489ade121d9368829105d29cc"
+        },
+        "image_boot_zck": {
+          "size": 9958554,
+          "sha256": "3365575f92b275e867abaca42d2a843a42e91ff912e143161ed7f82b13eb4f1f"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013211,
+            "sha256": "d55f3c42374840e2003726540775a1dc7583dc978bdd0c5e1eed235457b11f76"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "40ac6a6948689e4b86fdbe71ef4c9a80f0636c32eefe63e4628ff85d22e31493"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.4+image.0.1.2.zip",
+        "size": 381154666,
+        "sha256": "9846b3f23397ab64863c2b0a06b9821c2acfb4b4b4ecf2ee156b4f01b0e15dd8"
+      }
+    },
+    "0.1.4+image.0.1.2-dev": {
+      "version": "0.1.4+image.0.1.2-dev",
+      "channel": "dev",
+      "released_at": "2026-07-09T07:57:57Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.4\n\n## Highlights\n- fix ota (again)\n\n## image 0.1.2-dev\n\ninitial dev build - everything in stable, plus:\n- squashfs rootfs\n- more devtools\n- weston desktop shell w/ vnc\n- a bit slower\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40224960,
+          "sha256": "a27fbdecae35009178be8ef2cf01d258846092b1aa2618b1d2065a3ef18bf33f"
+        },
+        "image_swu": {
+          "size": 493568,
+          "sha256": "26dd63ce33402a205f49faf4d31b903960a38301153bee28abe1c1662705f97f"
+        },
+        "image_zck": {
+          "size": 214379512,
+          "sha256": "a3de26f3322dfb91d51f68cce4770b08e0c28c779ba77aebf6afc751619dccd5"
+        },
+        "image_boot_zck": {
+          "size": 9958554,
+          "sha256": "3365575f92b275e867abaca42d2a843a42e91ff912e143161ed7f82b13eb4f1f"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013211,
+            "sha256": "d55f3c42374840e2003726540775a1dc7583dc978bdd0c5e1eed235457b11f76"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "5b27776072ea399888325066f00da89f54436507850670f03888861b9faa985d"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.4+image.0.1.2-dev.zip",
+        "size": 467335718,
+        "sha256": "8e4f6da1de817630cb76a3b2c21f2105cb5304b422733d87316825cedaf79304"
+      }
+    },
+    "0.1.5+image.0.1.2": {
+      "version": "0.1.5+image.0.1.2",
+      "channel": "stable",
+      "released_at": "2026-07-09T16:37:41Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.5\n\n## Highlights\n- fix ota fr fr this time (i think)\n\n## image 0.1.2\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40290544,
+          "sha256": "406375b91050466db643f55e70322c054c74d2d411a831697290390f11c12c7e"
+        },
+        "image_swu": {
+          "size": 804352,
+          "sha256": "4e2af8265333ccdcf94556bdf1c67a82d7e88df78c10dc3f011e031c4bc55768"
+        },
+        "image_zck": {
+          "size": 173532028,
+          "sha256": "3eabed445d4f06bacb026342d0a0f17e05a67d7b0cc0520efb1166b75d8528ae"
+        },
+        "image_boot_zck": {
+          "size": 9958554,
+          "sha256": "3365575f92b275e867abaca42d2a843a42e91ff912e143161ed7f82b13eb4f1f"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013215,
+            "sha256": "0ee2d2f5e80eb64132cc6e6e18a3ba923c5be612314cb130285727ce0a5354a8"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "359e1af5e6824fd16c87b622402966afa7e0aa9fbdc29844008148781be509fa"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.5+image.0.1.2.zip",
+        "size": 381249013,
+        "sha256": "f0be3db3715f9a88f96365d277ce37018910003e68c5500ef5a5c105f4381d56"
+      }
+    },
+    "0.1.5+image.0.1.2-dev": {
+      "version": "0.1.5+image.0.1.2-dev",
+      "channel": "dev",
+      "released_at": "2026-07-09T16:46:13Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.5\n\n## Highlights\n- fix ota fr fr this time (i think)\n\n## image 0.1.2-dev\n\ninitial dev build - everything in stable, plus:\n- squashfs rootfs\n- more devtools\n- weston desktop shell w/ vnc\n- a bit slower\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40290544,
+          "sha256": "406375b91050466db643f55e70322c054c74d2d411a831697290390f11c12c7e"
+        },
+        "image_swu": {
+          "size": 492544,
+          "sha256": "6e1c4bace0d96e1959b4def8885497dd3fbaf6c0b0553f6df1e03fc148828da7"
+        },
+        "image_zck": {
+          "size": 214412591,
+          "sha256": "155b7c45dcec83aa1123a0759036c3df247bb2ff09b4e220be677914cfb2dd50"
+        },
+        "image_boot_zck": {
+          "size": 9958554,
+          "sha256": "3365575f92b275e867abaca42d2a843a42e91ff912e143161ed7f82b13eb4f1f"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013215,
+            "sha256": "0ee2d2f5e80eb64132cc6e6e18a3ba923c5be612314cb130285727ce0a5354a8"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "836bfa2e702319c6ed45effe791d0ce057f6ad19777da8c6b2870b339eb917aa"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.5+image.0.1.2-dev.zip",
+        "size": 467412218,
+        "sha256": "a116c00f6f2da76bb12fadec8eb825b031dd327c5621091459a321bd3a4da4ba"
+      }
+    },
+    "0.1.6+image.0.1.2": {
+      "version": "0.1.6+image.0.1.2",
+      "channel": "stable",
+      "released_at": "2026-07-09T23:04:58Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.6\n\n## Highlights\n- ota fixed. i swear. this is the one.\n\n## image 0.1.2\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40421808,
+          "sha256": "19577cc3e7ec91d8f66272fb52a13c932f2fb14fe1ff0072dbba105039882a91"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.6+image.0.1.2.zip",
+        "size": 380420922,
+        "sha256": "fee388c3b854c57c66093148d5f04b499077ea936d3f10d991b16fe2a67f5cd8"
+      }
+    },
+    "0.1.6+image.0.1.2-dev": {
+      "version": "0.1.6+image.0.1.2-dev",
+      "channel": "dev",
+      "released_at": "2026-07-09T23:08:15Z",
+      "summary": "initial stable release",
+      "changelog": "## daemon 0.1.6\n\n## Highlights\n- ota fixed. i swear. this is the one.\n\n## image 0.1.2-dev\n\ninitial dev build - everything in stable, plus:\n- squashfs rootfs\n- more devtools\n- weston desktop shell w/ vnc\n- a bit slower\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40421808,
+          "sha256": "19577cc3e7ec91d8f66272fb52a13c932f2fb14fe1ff0072dbba105039882a91"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.1.6+image.0.1.2-dev.zip",
+        "size": 467101713,
+        "sha256": "4e912d4306b0aa7bfbdd140207574bd483d04c351134b94d33be19506bbdbe22"
+      }
+    },
+    "0.2.0+image.0.1.3": {
+      "version": "0.2.0+image.0.1.3",
+      "channel": "stable",
+      "released_at": "2026-07-13T06:43:33Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.0\n\n## Highlights\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.3\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- (added cjk fonts)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40749696,
+          "sha256": "e919a67fd082617e33a48d1110721f0a2e7d0dfc46ab58d1f138e374c0a78578"
+        },
+        "image_swu": {
+          "size": 861184,
+          "sha256": "d2e652247d48a5146e110f3d30708d0228b8f595a2b5d0717f16849d47d37864"
+        },
+        "image_zck": {
+          "size": 193236994,
+          "sha256": "a953ef18fea344c847fd9494e9cabe50b8b677f1f5b93c58ba5c28333c2e2f13"
+        },
+        "image_boot_zck": {
+          "size": 9993420,
+          "sha256": "4bd3960d6a1c86613d7145ec97fc167b0c423b2b12473f6284423782f71f3ae5"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013822,
+            "sha256": "bcfd6a6dc1445eb69a8e16f6ff20a1af1fbede84ef71a7b0acc8e753790bfdb3"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "46ac0e0dfbb3faf67bcac7e8cc889538b4bb3c460f78fd74818f303fb84c8033"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.0+image.0.1.3.zip",
+        "size": 421089261,
+        "sha256": "009fc8e3e9470287886fb67ebf4287b8650c8dac4c9b183ddaeac131112d362d"
+      }
+    },
+    "0.2.0+image.0.1.3-dev": {
+      "version": "0.2.0+image.0.1.3-dev",
+      "channel": "dev",
+      "released_at": "2026-07-13T07:05:10Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.0\n\n## Highlights\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.3-dev\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- (added cjk fonts)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40749696,
+          "sha256": "e919a67fd082617e33a48d1110721f0a2e7d0dfc46ab58d1f138e374c0a78578"
+        },
+        "image_swu": {
+          "size": 532480,
+          "sha256": "38183d63491fa66e431e0555694e97b34c7c213c6552d8aae502b9ebc0b01638"
+        },
+        "image_zck": {
+          "size": 234310680,
+          "sha256": "2f0324fde0f8323a0acf645d786782bb748ea578fd5ecb3bdd331ac6d3dd1f1d"
+        },
+        "image_boot_zck": {
+          "size": 9993420,
+          "sha256": "4bd3960d6a1c86613d7145ec97fc167b0c423b2b12473f6284423782f71f3ae5"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013822,
+            "sha256": "bcfd6a6dc1445eb69a8e16f6ff20a1af1fbede84ef71a7b0acc8e753790bfdb3"
+          },
+          "stock": {
+            "size": 1218458,
+            "sha256": "1f48f5468355ab6a22d604888e82fa79800d078e3d8c97112e76a2ada1dd6a6a"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.0+image.0.1.3-dev.zip",
+        "size": 507506971,
+        "sha256": "10679015b94a6a1849ed30c04c8fbb6bb3ab63a43dc0c1d4f8c24e28bf21302b"
+      }
+    },
+    "0.2.1+image.0.1.4-dev": {
+      "version": "0.2.1+image.0.1.4-dev",
+      "channel": "dev",
+      "released_at": "2026-07-14T03:50:11Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.1\n\n## Highlights\n- application overlay for system-wide events\n- less aggressive play resume (only play to phone)\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.4-dev\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- (added cjk fonts, stock webapp overlay config)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "9e8a6f3dd92286a16fff4bddbc431b07e4ee2c7a23b42488d30506beb1173abb"
+        },
+        "image_swu": {
+          "size": 533504,
+          "sha256": "2473201a78528431a31bf91e31fb7efd4e9ce540a85f971b1b684a95c98f7199"
+        },
+        "image_zck": {
+          "size": 234349915,
+          "sha256": "fc0ca1480612fb718f13583a4971277fb6dc9e1b9617a85806d648f123f7f159"
+        },
+        "image_boot_zck": {
+          "size": 9993420,
+          "sha256": "4bd3960d6a1c86613d7145ec97fc167b0c423b2b12473f6284423782f71f3ae5"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013621,
+            "sha256": "21e769a64292e692a530b1a40f2855f1ddd330f6dd059b50b017aeb52223dd54"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "878c9d24f0740e1a5849b0d9d68c20b49d0c69ddd263b44faf9a6180676de4ae"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.1+image.0.1.4-dev.zip",
+        "size": 507628132,
+        "sha256": "23d469216c8d4e6b56fffe65633f3aff7db88f0ccc3eb98b36f86ad7ed17205f"
+      }
+    },
+    "0.2.1+image.0.1.4": {
+      "version": "0.2.1+image.0.1.4",
+      "channel": "stable",
+      "released_at": "2026-07-14T04:15:51Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.1\n\n## Highlights\n- application overlay for system-wide events\n- less aggressive play resume (only play to phone)\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.4\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- (added cjk fonts, stock webapp overlay config)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "9e8a6f3dd92286a16fff4bddbc431b07e4ee2c7a23b42488d30506beb1173abb"
+        },
+        "image_swu": {
+          "size": 862208,
+          "sha256": "e4d9706879f4ef8d7bfd1ce7bbd4105df0669b2e4aec3b9e675b7245434dbcce"
+        },
+        "image_zck": {
+          "size": 193309969,
+          "sha256": "b7362fec7e1865b52374b3520296fa1b38fc27a72fd6c2a346968668ff740094"
+        },
+        "image_boot_zck": {
+          "size": 9993420,
+          "sha256": "4bd3960d6a1c86613d7145ec97fc167b0c423b2b12473f6284423782f71f3ae5"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013621,
+            "sha256": "21e769a64292e692a530b1a40f2855f1ddd330f6dd059b50b017aeb52223dd54"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "63e00cfc8ef6c5e60364b1543d55ba83a66ee3e4e2f72dee01bbba9b774f8fe8"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.1+image.0.1.4.zip",
+        "size": 421240524,
+        "sha256": "a8508c0b1cdde4e8ecde497c5079ff8899d559758d79d8fe6f4d029066eb04b2"
+      }
+    },
+    "0.2.1+image.0.1.5-dev": {
+      "version": "0.2.1+image.0.1.5-dev",
+      "channel": "dev",
+      "released_at": "2026-07-18T23:31:59Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.1\n\n## Highlights\n- application overlay for system-wide events\n- less aggressive play resume (only play to phone)\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.5-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "9e8a6f3dd92286a16fff4bddbc431b07e4ee2c7a23b42488d30506beb1173abb"
+        },
+        "image_swu": {
+          "size": 530944,
+          "sha256": "5946a16d0aeb00aa777e812ca0fe7a89105f60f5bf38948cbb0e2bf9086187d5"
+        },
+        "image_zck": {
+          "size": 234351351,
+          "sha256": "a12576255252f615f035467e839bdb96e700054af75d085324176715ca98d98c"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013623,
+            "sha256": "fecce0c43406195f5e117cfdf2cb04ae6515f6db5b821e89889314ebfda30ba4"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "ad624d25ce6ce2480b9e1c386f6c22f1515dac28d62dd8070208590afccec9ff"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.1+image.0.1.5-dev.zip",
+        "size": 507625542,
+        "sha256": "ac26d64659a0be96d90f3e54855de704245b55c7bff6ccfb32318222526a7aa2"
+      }
+    },
+    "0.2.1+image.0.1.5": {
+      "version": "0.2.1+image.0.1.5",
+      "channel": "stable",
+      "released_at": "2026-07-19T00:12:50Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.1\n\n## Highlights\n- application overlay for system-wide events\n- less aggressive play resume (only play to phone)\n- the daemon can now send an html page to be used for configuring custom weapps\n- various other bugfixes\n\n## image 0.1.5\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "725ff2f31615c7fe12768842e1653c6a3c77f78600fbce01904c303d29c26c42"
+        },
+        "image_swu": {
+          "size": 859648,
+          "sha256": "114abf6b20866c112dbd8d97aacbf671c58d7cd1d3f6b5e9bfd8d4b6be4658d5"
+        },
+        "image_zck": {
+          "size": 193310435,
+          "sha256": "fb2223f976e89e8323d37759b01d4963a8119c2c2614d0ca9fa97f135b069d08"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013623,
+            "sha256": "fecce0c43406195f5e117cfdf2cb04ae6515f6db5b821e89889314ebfda30ba4"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "18b6dceab28ff587fe3900f62c8fecf310c133850d385eaf5d024bb92b6f287f"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.1+image.0.1.5.zip",
+        "size": 421267314,
+        "sha256": "a90de7ec1992db73fcc41275ee1214cae51acdc0ccaf286c0b9eb4858a3d6ef1"
+      }
+    },
+    "0.2.2+image.0.1.5": {
+      "version": "0.2.2+image.0.1.5",
+      "channel": "stable",
+      "released_at": "2026-07-19T05:20:08Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.2\n\n## Highlights\n- fix spotify not auto-starting and daemon art bounces\n\n## image 0.1.5\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.2+image.0.1.5.zip",
+        "size": 421255588,
+        "sha256": "69ae8684c946f6be9c0eabd01ed0f1d52144e53b8c17503f08d299e99b78ecd9"
+      }
+    },
+    "0.2.2+image.0.1.5-dev": {
+      "version": "0.2.2+image.0.1.5-dev",
+      "channel": "dev",
+      "released_at": "2026-07-19T05:25:02Z",
+      "summary": "new dynamic configuration for webapps",
+      "changelog": "## daemon 0.2.2\n\n## Highlights\n- fix spotify not auto-starting and daemon art bounces\n\n## image 0.1.5-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880816,
+          "sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.2+image.0.1.5-dev.zip",
+        "size": 507616066,
+        "sha256": "7865da19949c4df9a9c46ac1c3b0102fc35b0cef45144fc3633f0139ca98e238"
+      }
+    },
+    "0.2.3+image.0.1.5": {
+      "version": "0.2.3+image.0.1.5",
+      "channel": "stable",
+      "released_at": "2026-07-19T07:15:26Z",
+      "summary": "fixes for ota updates on bad bluetooth connections",
+      "changelog": "## daemon 0.2.3\n\n## Highlights\n- fix spotify not auto-starting and daemon art bounces\n- more ota update fixes for bad bluetooth connections\n\n## image 0.1.5\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880984,
+          "sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.3+image.0.1.5.zip",
+        "size": 421267024,
+        "sha256": "ed0867ef7cad026b7fdceb715782e170103d7a1b69b286923347b7c64c4285fc"
+      }
+    },
+    "0.2.3+image.0.1.5-dev": {
+      "version": "0.2.3+image.0.1.5-dev",
+      "channel": "dev",
+      "released_at": "2026-07-19T07:19:46Z",
+      "summary": "fixes for ota updates on bad bluetooth connections",
+      "changelog": "## daemon 0.2.3\n\n## Highlights\n- fix spotify not auto-starting and daemon art bounces\n- more ota update fixes for bad bluetooth connections\n\n## image 0.1.5-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40880984,
+          "sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.2.3+image.0.1.5-dev.zip",
+        "size": 507627481,
+        "sha256": "641540bff35cbb64a3e802f0317faa4df7757d47db6deb7026ac041ed52b1535"
+      }
+    },
+    "0.3.0+image.0.1.6-dev": {
+      "version": "0.3.0+image.0.1.6-dev",
+      "channel": "dev",
+      "released_at": "2026-07-24T03:14:58Z",
+      "summary": "make daemon-only ota updates faster",
+      "changelog": "## daemon 0.3.0\n\n## Highlights\n- make daemon-only ota updates faster\n- better apple music support\n\n## image 0.1.6-dev\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 41864056,
+          "sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+        },
+        "image_swu": {
+          "size": 529408,
+          "sha256": "29cdb8b013fa3ef55160a9f77ecc102b555176febcfcbb5451b8effb513e887e"
+        },
+        "image_zck": {
+          "size": 234520023,
+          "sha256": "c2b1ec1021f2ad132dd8f47e9ee3796d036ecd15128a43b4a1120f0abd86f47d"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013623,
+            "sha256": "008cbd8da0921a5d0003ca1bd6ae704e01d515353024e4c9270310aece9edfb5"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "0669728ae06c9d3f4390de7337a373f1220ae3222bb4b03596e665b40b6711c8"
+          }
+        },
+        "daemon_patches": {
+          "0.2.3": {
+            "size": 4531169,
+            "sha256": "5fa50fd5ca68bbd23e0635966276bbdb73583fce770feecbbf66b10a820efb75"
+          },
+          "0.2.2": {
+            "size": 4595183,
+            "sha256": "0a6860ea210f01e420a2bcebadbcc6460e2ba0d5731c11cb356cc036f2422217"
+          },
+          "0.1.6": {
+            "size": 4927277,
+            "sha256": "0b4119ac0376064bf877318ad113c148fa265600aae51a6bd9ad5450d4116ec6"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.3.0+image.0.1.6-dev.zip",
+        "size": 508415402,
+        "sha256": "af34315e89e8f417e08151efd7466a1b604c7511be706e6a5148839e0ed9dbd4"
+      }
+    },
+    "0.3.0+image.0.1.6": {
+      "version": "0.3.0+image.0.1.6",
+      "channel": "stable",
+      "released_at": "2026-07-24T03:20:50Z",
+      "summary": "make daemon-only ota updates faster",
+      "changelog": "## daemon 0.3.0\n\n## Highlights\n- make daemon-only ota updates faster\n- better apple music support\n\n## image 0.1.6\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.1.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 41864056,
+          "sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+        },
+        "image_swu": {
+          "size": 864256,
+          "sha256": "b7bf03c624238b2ee847c92dc01b94cd49b9e1d061445591fba37ffd4c6adf36"
+        },
+        "image_zck": {
+          "size": 193554761,
+          "sha256": "8948cf929944684d8a312b6fbcb3863037178a752175960bddeaec4dd09b7db8"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1013623,
+            "sha256": "008cbd8da0921a5d0003ca1bd6ae704e01d515353024e4c9270310aece9edfb5"
+          },
+          "stock": {
+            "size": 1218509,
+            "sha256": "e86b7e4ce719ec891c38435ee3a648355575eed5caf27e65aa298c38e4016191"
+          }
+        },
+        "daemon_patches": {
+          "0.2.3": {
+            "size": 4531169,
+            "sha256": "5fa50fd5ca68bbd23e0635966276bbdb73583fce770feecbbf66b10a820efb75"
+          },
+          "0.2.2": {
+            "size": 4595183,
+            "sha256": "0a6860ea210f01e420a2bcebadbcc6460e2ba0d5731c11cb356cc036f2422217"
+          },
+          "0.1.6": {
+            "size": 4927277,
+            "sha256": "0b4119ac0376064bf877318ad113c148fa265600aae51a6bd9ad5450d4116ec6"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.3.0+image.0.1.6.zip",
+        "size": 422028230,
+        "sha256": "17f244dc198a5e599850fe0e4f6bdce6736a8ff665030e259dc78304c45a750a"
+      }
+    },
+    "0.5.0+image.0.1.7-dev": {
+      "version": "0.5.0+image.0.1.7-dev",
+      "channel": "dev",
+      "released_at": "2026-07-26T06:04:44Z",
+      "summary": "fixing some latent bugs mostly",
+      "changelog": "## daemon 0.5.0\n\n## Highlights\n\n- fixing some latent bugs mostly\n\n## image 0.1.7-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.0",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 44420632,
+          "sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+        },
+        "daemon_patches": {
+          "0.3.0": {
+            "size": 5306942,
+            "sha256": "715a5eb8e2763ec8a277caf8161576e4097e9c1bba83e9f26ce08b4e1b4dfed5"
+          },
+          "0.2.3": {
+            "size": 5715606,
+            "sha256": "e9b018ff70f74917b88e0bb8ec8b4a4541d4c90ca586cd816f3716701cfd0b8c"
+          },
+          "0.2.2": {
+            "size": 5775984,
+            "sha256": "51d8d3b13bb9d3dc187a191dc3615934f89e711aec5f8823da4dbe57d0328325"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.0+image.0.1.7-dev.zip",
+        "size": 511167431,
+        "sha256": "7cd4e1761ef6e68fdbb15b8f71c2c36f26a8a19919c5162d9af33c18ca709131"
+      }
+    },
+    "0.5.0+image.0.1.7": {
+      "version": "0.5.0+image.0.1.7",
+      "channel": "stable",
+      "released_at": "2026-07-26T06:00:50Z",
+      "summary": "fixing some latent bugs mostly",
+      "changelog": "## daemon 0.5.0\n\n## Highlights\n\n- fixing some latent bugs mostly\n\n## image 0.1.7\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.0",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 44420632,
+          "sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+        },
+        "daemon_patches": {
+          "0.3.0": {
+            "size": 5306942,
+            "sha256": "715a5eb8e2763ec8a277caf8161576e4097e9c1bba83e9f26ce08b4e1b4dfed5"
+          },
+          "0.2.3": {
+            "size": 5715606,
+            "sha256": "e9b018ff70f74917b88e0bb8ec8b4a4541d4c90ca586cd816f3716701cfd0b8c"
+          },
+          "0.2.2": {
+            "size": 5775984,
+            "sha256": "51d8d3b13bb9d3dc187a191dc3615934f89e711aec5f8823da4dbe57d0328325"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.0+image.0.1.7.zip",
+        "size": 424766574,
+        "sha256": "e1039f09c1a81d5eae4c897f7ef1cdddfab9487bc08d46d819c3830c8db2bfe1"
+      }
+    },
+    "0.5.1+image.0.1.7": {
+      "version": "0.5.1+image.0.1.7",
+      "channel": "stable",
+      "released_at": "2026-07-26T07:17:36Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.1\n\n## Highlights\n\n- public release version\n\n## image 0.1.7\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.0",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 44420632,
+          "sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+        },
+        "daemon_patches": {
+          "0.5.0": {
+            "size": 3646862,
+            "sha256": "0acd6d89b41d5c5244123ce37c8dcf63e0316eb566cf7b542366741109183ef3"
+          },
+          "0.3.0": {
+            "size": 5310319,
+            "sha256": "b33746154ae24c785db14508af73e0799ca6a53e53ca598d73ae3683948e576b"
+          },
+          "0.2.3": {
+            "size": 5701385,
+            "sha256": "b61482e519eab0b581d82762c80b2cd0b4cedb09e66c143ea7f5504c646d73ce"
+          },
+          "0.2.2": {
+            "size": 5770875,
+            "sha256": "1a235aafa64d0d126c606b9db2c9474113497a9e15be9af8f16442dc52118bce"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.1+image.0.1.7.zip",
+        "size": 424780350,
+        "sha256": "a1206efb50cc85e652bd27b94eb74ca0f1c95669d3647cd9e5eed6b4dc06bde0"
+      }
+    },
+    "0.5.1+image.0.1.7-dev": {
+      "version": "0.5.1+image.0.1.7-dev",
+      "channel": "dev",
+      "released_at": "2026-07-26T07:21:05Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.1\n\n## Highlights\n\n- public release version\n\n## image 0.1.7-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.0",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 44420632,
+          "sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+        },
+        "daemon_patches": {
+          "0.5.0": {
+            "size": 3646862,
+            "sha256": "0acd6d89b41d5c5244123ce37c8dcf63e0316eb566cf7b542366741109183ef3"
+          },
+          "0.3.0": {
+            "size": 5310319,
+            "sha256": "b33746154ae24c785db14508af73e0799ca6a53e53ca598d73ae3683948e576b"
+          },
+          "0.2.3": {
+            "size": 5701385,
+            "sha256": "b61482e519eab0b581d82762c80b2cd0b4cedb09e66c143ea7f5504c646d73ce"
+          },
+          "0.2.2": {
+            "size": 5770875,
+            "sha256": "1a235aafa64d0d126c606b9db2c9474113497a9e15be9af8f16442dc52118bce"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.1+image.0.1.7-dev.zip",
+        "size": 511180939,
+        "sha256": "92ba53c177a91d36e8e4e98a497d0d674dc7dfb6147a8d46d3cc3efd46d71a0f"
+      }
+    },
+    "0.5.2+image.0.1.7-dev": {
+      "version": "0.5.2+image.0.1.7-dev",
+      "channel": "dev",
+      "released_at": "2026-07-27T17:15:59Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.2\n\n## Highlights\n\n- public release version\n\n## image 0.1.7-dev\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38129088,
+          "sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+        },
+        "daemon_zst": {
+          "size": 11471270,
+          "sha256": "cb8e0b1352192c6aa6f1c51d434e321cc2e97943bcf3bdf6d9b0fe80e2c73f60"
+        },
+        "daemon_patches": {
+          "0.5.1": {
+            "size": 9298105,
+            "sha256": "512e72e0141c857aa707c428d5ddb6c521ee1ddbe1183093ce023cf74e2bbeec",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 9302457,
+            "sha256": "b87b3bc396c8b11971dbe34fc1bb897b652a1aeea26b193debedcc972a0bfc38",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          },
+          "0.3.0": {
+            "size": 9335324,
+            "sha256": "8786f338d0aa0b6b750ca4b1b455281ed1790274edad04bef2276447c20bd35f",
+            "source_sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+          },
+          "0.2.3": {
+            "size": 9454074,
+            "sha256": "4c6ca58ca1837cb693b7c3fc74e50bcbafb1d9dea5d79b431d7af0b81c440ec1",
+            "source_sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+          },
+          "0.2.2": {
+            "size": 9476025,
+            "sha256": "afb43cbc772b85d38d441fa58a9f82d9ba4125b553e6170378d1fa36d633faf4",
+            "source_sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.2+image.0.1.7-dev.zip",
+        "size": 509900427,
+        "sha256": "901818791c9a1fec61f3a3e596e60c5c7bbafc51afd81841d3c4b96ca5eb9ee6"
+      }
+    },
+    "0.5.2+image.0.1.7": {
+      "version": "0.5.2+image.0.1.7",
+      "channel": "stable",
+      "released_at": "2026-07-27T17:11:50Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.2\n\n## Highlights\n\n- public release version\n\n## image 0.1.7\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38129088,
+          "sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+        },
+        "daemon_zst": {
+          "size": 11471270,
+          "sha256": "cb8e0b1352192c6aa6f1c51d434e321cc2e97943bcf3bdf6d9b0fe80e2c73f60"
+        },
+        "daemon_patches": {
+          "0.5.1": {
+            "size": 9298105,
+            "sha256": "512e72e0141c857aa707c428d5ddb6c521ee1ddbe1183093ce023cf74e2bbeec",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 9302457,
+            "sha256": "b87b3bc396c8b11971dbe34fc1bb897b652a1aeea26b193debedcc972a0bfc38",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          },
+          "0.3.0": {
+            "size": 9335324,
+            "sha256": "8786f338d0aa0b6b750ca4b1b455281ed1790274edad04bef2276447c20bd35f",
+            "source_sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+          },
+          "0.2.3": {
+            "size": 9454074,
+            "sha256": "4c6ca58ca1837cb693b7c3fc74e50bcbafb1d9dea5d79b431d7af0b81c440ec1",
+            "source_sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+          },
+          "0.2.2": {
+            "size": 9476025,
+            "sha256": "afb43cbc772b85d38d441fa58a9f82d9ba4125b553e6170378d1fa36d633faf4",
+            "source_sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.2+image.0.1.7.zip",
+        "size": 423499793,
+        "sha256": "fb689129615e8e62707c348ad3f7aeacc3531d79d6395a69b9899ef42d0037ce"
+      }
+    },
+    "0.5.2+image.0.1.8-dev": {
+      "version": "0.5.2+image.0.1.8-dev",
+      "channel": "dev",
+      "released_at": "2026-07-27T20:07:31Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.2\n\n## Highlights\n\n- public release version\n\n## image 0.1.8-dev\n\n## Highlights\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38129088,
+          "sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+        },
+        "image_swu": {
+          "size": 533504,
+          "sha256": "bd890797ebe6760f6576a84be9298503fa6ed673045829c7986563f03b3da231"
+        },
+        "image_zck": {
+          "size": 235473269,
+          "sha256": "d620f607346f16e7d88f5b4e46b2e907e0aa58acc4258c8af447cceb619306dc"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "daemon_zst": {
+          "size": 11471270,
+          "sha256": "cb8e0b1352192c6aa6f1c51d434e321cc2e97943bcf3bdf6d9b0fe80e2c73f60"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045446,
+            "sha256": "9a90ebd863d0a6d79375a6a15f1e5ff539eb1e4f39bfb980119855fc182ff6c3"
+          },
+          "browser": {
+            "size": 901137,
+            "sha256": "b9da581fda174f5d451d7312f54b2921dc4affc6b182c8575da4cb43ed5cb502"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "c697ede17670d8ebb060a56aac03d0c602820af984780c5121469ee26b16133b"
+          }
+        },
+        "daemon_patches": {
+          "0.5.1": {
+            "size": 9298105,
+            "sha256": "512e72e0141c857aa707c428d5ddb6c521ee1ddbe1183093ce023cf74e2bbeec",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 9302457,
+            "sha256": "b87b3bc396c8b11971dbe34fc1bb897b652a1aeea26b193debedcc972a0bfc38",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          },
+          "0.3.0": {
+            "size": 9335324,
+            "sha256": "8786f338d0aa0b6b750ca4b1b455281ed1790274edad04bef2276447c20bd35f",
+            "source_sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+          },
+          "0.2.3": {
+            "size": 9454074,
+            "sha256": "4c6ca58ca1837cb693b7c3fc74e50bcbafb1d9dea5d79b431d7af0b81c440ec1",
+            "source_sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+          },
+          "0.2.2": {
+            "size": 9476025,
+            "sha256": "afb43cbc772b85d38d441fa58a9f82d9ba4125b553e6170378d1fa36d633faf4",
+            "source_sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.2+image.0.1.8-dev.zip",
+        "size": 509979181,
+        "sha256": "c46573221cdd3a30788cd5656416d6aa0fa5e9fd05484490e69234879aa13dd3"
+      }
+    },
+    "0.5.2+image.0.1.8": {
+      "version": "0.5.2+image.0.1.8",
+      "channel": "stable",
+      "released_at": "2026-07-27T20:15:01Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.5.2\n\n## Highlights\n\n- public release version\n\n## image 0.1.8\n\n## Highlights\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38129088,
+          "sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+        },
+        "image_swu": {
+          "size": 866816,
+          "sha256": "0c0eaab81f02f78b80cbd95c444ca6d6276b9c06ea5a7563c3e38dfc0715f02b"
+        },
+        "image_zck": {
+          "size": 194437440,
+          "sha256": "d3ba29c9b3044dccc66b6d115594ce483e19d42ec2825118a24a4e8aaf1446b6"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "daemon_zst": {
+          "size": 11471270,
+          "sha256": "cb8e0b1352192c6aa6f1c51d434e321cc2e97943bcf3bdf6d9b0fe80e2c73f60"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045446,
+            "sha256": "9a90ebd863d0a6d79375a6a15f1e5ff539eb1e4f39bfb980119855fc182ff6c3"
+          },
+          "browser": {
+            "size": 901137,
+            "sha256": "b9da581fda174f5d451d7312f54b2921dc4affc6b182c8575da4cb43ed5cb502"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "8d46b49f369e2c1506e8a2e3741e717ef65d37314a4e0fcf53e1e18fdc6334ce"
+          }
+        },
+        "daemon_patches": {
+          "0.5.1": {
+            "size": 9298105,
+            "sha256": "512e72e0141c857aa707c428d5ddb6c521ee1ddbe1183093ce023cf74e2bbeec",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 9302457,
+            "sha256": "b87b3bc396c8b11971dbe34fc1bb897b652a1aeea26b193debedcc972a0bfc38",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          },
+          "0.3.0": {
+            "size": 9335324,
+            "sha256": "8786f338d0aa0b6b750ca4b1b455281ed1790274edad04bef2276447c20bd35f",
+            "source_sha256": "521e14a93440be55fef679e1fced5ed5fb78a2aad399b423f5a988db39cf090b"
+          },
+          "0.2.3": {
+            "size": 9454074,
+            "sha256": "4c6ca58ca1837cb693b7c3fc74e50bcbafb1d9dea5d79b431d7af0b81c440ec1",
+            "source_sha256": "92477d0d932b44d9188166e9d926e3939ac5e1b0dda8959ab41532a3a5a8d4e8"
+          },
+          "0.2.2": {
+            "size": 9476025,
+            "sha256": "afb43cbc772b85d38d441fa58a9f82d9ba4125b553e6170378d1fa36d633faf4",
+            "source_sha256": "a783119a9463f7458e2c4d9b2906812ad233904f740b604f1599c44ef5fae694"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.5.2+image.0.1.8.zip",
+        "size": 423556705,
+        "sha256": "f9040b0966a1b66bdec8ba4f9897a884d600d5a9e7525abcf9665eef14e78bd1"
+      }
+    },
+    "0.6.0+image.0.1.8-dev": {
+      "version": "0.6.0+image.0.1.8-dev",
+      "channel": "dev",
+      "released_at": "2026-07-28T04:06:06Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.6.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.8-dev\n\n_no change since previous release._\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38391592,
+          "sha256": "5d19800334a6651b61b4e5059c50d7da9ff269cbfb8533af4f91ba9c85f95f98"
+        },
+        "image_swu": {
+          "size": 533504,
+          "sha256": "bd890797ebe6760f6576a84be9298503fa6ed673045829c7986563f03b3da231"
+        },
+        "image_zck": {
+          "size": 235473269,
+          "sha256": "d620f607346f16e7d88f5b4e46b2e907e0aa58acc4258c8af447cceb619306dc"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045646,
+            "sha256": "0badd9ec05ab9bd3adef89ebc81f405d4a4ab7e1cd61b65632b0550a822b0331"
+          },
+          "browser": {
+            "size": 901234,
+            "sha256": "662535a1b380a561f265de1e9aea5d497bb8a0f336e661ead6fd5f30b59c0c39"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "7a71fc6a7a7201585ed148a9b9aecaf0a3d55c5be2f29a8ef30ab666e420e7a2"
+          }
+        },
+        "daemon_patches": {
+          "0.5.2": {
+            "size": 8973594,
+            "sha256": "c1af11db8ef230ff6b749edddb675162866e539856c7c5f684b2f7a6345a0592"
+          },
+          "0.5.1": {
+            "size": 9994970,
+            "sha256": "94de8458b1e3e5ccf1ba0e8d3c9ac3bb4152d1066e9195abf3eb82417239f076"
+          },
+          "0.5.0": {
+            "size": 10006435,
+            "sha256": "3207d5ac6b435e23de52986b53504998f9349e1fc1f4f037e1940ab4b3b2caa1"
+          },
+          "0.3.0": {
+            "size": 10023401,
+            "sha256": "8886ef0d9ab586a70baee618af556c8e898d93da18ec618ac1fbe13b3fee120c"
+          },
+          "0.2.3": {
+            "size": 10052247,
+            "sha256": "1c34100554a343f3ce250f3b2c26366864b35906bc6d2639075361a00a9e9934"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.6.0+image.0.1.8-dev.zip",
+        "size": 509889813,
+        "sha256": "2c7f869d381b412ffa004499f3e69a6532a63b70ea2523d75e22d14ecd84880b"
+      }
+    },
+    "0.6.0+image.0.1.8": {
+      "version": "0.6.0+image.0.1.8",
+      "channel": "stable",
+      "released_at": "2026-07-28T03:32:21Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.6.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.8\n\n_no change since previous release._\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38391592,
+          "sha256": "5d19800334a6651b61b4e5059c50d7da9ff269cbfb8533af4f91ba9c85f95f98"
+        },
+        "image_swu": {
+          "size": 866816,
+          "sha256": "0c0eaab81f02f78b80cbd95c444ca6d6276b9c06ea5a7563c3e38dfc0715f02b"
+        },
+        "image_zck": {
+          "size": 194437440,
+          "sha256": "d3ba29c9b3044dccc66b6d115594ce483e19d42ec2825118a24a4e8aaf1446b6"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045646,
+            "sha256": "0badd9ec05ab9bd3adef89ebc81f405d4a4ab7e1cd61b65632b0550a822b0331"
+          },
+          "browser": {
+            "size": 901234,
+            "sha256": "662535a1b380a561f265de1e9aea5d497bb8a0f336e661ead6fd5f30b59c0c39"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "7a71fc6a7a7201585ed148a9b9aecaf0a3d55c5be2f29a8ef30ab666e420e7a2"
+          }
+        },
+        "daemon_patches": {
+          "0.5.2": {
+            "size": 8973594,
+            "sha256": "c1af11db8ef230ff6b749edddb675162866e539856c7c5f684b2f7a6345a0592"
+          },
+          "0.5.1": {
+            "size": 9994970,
+            "sha256": "94de8458b1e3e5ccf1ba0e8d3c9ac3bb4152d1066e9195abf3eb82417239f076"
+          },
+          "0.5.0": {
+            "size": 10006435,
+            "sha256": "3207d5ac6b435e23de52986b53504998f9349e1fc1f4f037e1940ab4b3b2caa1"
+          },
+          "0.3.0": {
+            "size": 10023401,
+            "sha256": "8886ef0d9ab586a70baee618af556c8e898d93da18ec618ac1fbe13b3fee120c"
+          },
+          "0.2.3": {
+            "size": 10052247,
+            "sha256": "1c34100554a343f3ce250f3b2c26366864b35906bc6d2639075361a00a9e9934"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.6.0+image.0.1.8.zip",
+        "size": 423467155,
+        "sha256": "a9dd24b46fe03b65aaf8401e4f87ebae0a24da3d350a5913026a107d3ca18b4f"
+      }
+    },
+    "0.7.0+image.0.1.9-dev": {
+      "version": "0.7.0+image.0.1.9-dev",
+      "channel": "dev",
+      "released_at": "2026-07-29T04:58:38Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.7.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.9-dev\n\n## Highlights\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n- set +S on cast_shell storage for power loss\n- reverse proxy for cast_shell cdp\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38850568,
+          "sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+        },
+        "image_swu": {
+          "size": 534528,
+          "sha256": "f0201bd5157dd4c454991d9309b632259e4e57379883ab54fd6a89621a1fbd32"
+        },
+        "image_zck": {
+          "size": 235900116,
+          "sha256": "cd31878725cf110025536fd480ebc210947b18817960b69c1dc2d9e1f4cd4b0e"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "e7d75c01c66ec2d18feeb86ed2138386b2fbc7b64398be94b10b536e029264de"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "35cdf007452c2494b71bf04a79f8e39b6536090034469889d7ad9c693420b046"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9c63d5d1e0c88d86179531c3e196bbda95a9ef72e50111dcedf64a3ee57e7e82"
+          }
+        },
+        "daemon_patches": {
+          "0.6.0": {
+            "size": 4064843,
+            "sha256": "aac1664a36a9dbc50d671214a9f2f7ae0062ea387ab44d340195e4b8411e7b52"
+          },
+          "0.5.2": {
+            "size": 9084422,
+            "sha256": "cd8142b490acf3e48c10d5d8768923fd2b032832916efa3c8b938326fba374ff"
+          },
+          "0.5.1": {
+            "size": 10087034,
+            "sha256": "77e45b3e4d059a75e09a4186ccca8a2be2ce4d50988721f806992b2d82aa5b5c"
+          },
+          "0.5.0": {
+            "size": 10097039,
+            "sha256": "5e78f5f40374f04caa4648de7a04ed949ee5a7f76089b62d69634471116edda9"
+          },
+          "0.3.0": {
+            "size": 10114142,
+            "sha256": "9fef2370d9d0643657ea9c38d0eefc2adcc14ee66e49e3f0ffee16a08ccbd4dd"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.7.0+image.0.1.9-dev.zip",
+        "size": 510814988,
+        "sha256": "6b4379d27437d17ac369cfca5c2f9e3959cfb9bc78b23fc62bb3ed5fbc8f4a3c"
+      }
+    },
+    "0.7.0+image.0.1.9": {
+      "version": "0.7.0+image.0.1.9",
+      "channel": "stable",
+      "released_at": "2026-07-29T04:56:08Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.7.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.9\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n- set +S on cast_shell storage for power loss\n- reverse proxy for cast_shell cdp\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38850568,
+          "sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+        },
+        "image_swu": {
+          "size": 868352,
+          "sha256": "4b2d0efa232d8752291f7bf7719c1e6aed826c0ca4223f6980022f4814b7eba4"
+        },
+        "image_zck": {
+          "size": 194825953,
+          "sha256": "9b0b60992873ebcaa84dfedb163452243b01376396fdbac639b45cde1c603f41"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "e7d75c01c66ec2d18feeb86ed2138386b2fbc7b64398be94b10b536e029264de"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "35cdf007452c2494b71bf04a79f8e39b6536090034469889d7ad9c693420b046"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9c63d5d1e0c88d86179531c3e196bbda95a9ef72e50111dcedf64a3ee57e7e82"
+          }
+        },
+        "daemon_patches": {
+          "0.6.0": {
+            "size": 4064843,
+            "sha256": "aac1664a36a9dbc50d671214a9f2f7ae0062ea387ab44d340195e4b8411e7b52"
+          },
+          "0.5.2": {
+            "size": 9084422,
+            "sha256": "cd8142b490acf3e48c10d5d8768923fd2b032832916efa3c8b938326fba374ff"
+          },
+          "0.5.1": {
+            "size": 10087034,
+            "sha256": "77e45b3e4d059a75e09a4186ccca8a2be2ce4d50988721f806992b2d82aa5b5c"
+          },
+          "0.5.0": {
+            "size": 10097039,
+            "sha256": "5e78f5f40374f04caa4648de7a04ed949ee5a7f76089b62d69634471116edda9"
+          },
+          "0.3.0": {
+            "size": 10114142,
+            "sha256": "9fef2370d9d0643657ea9c38d0eefc2adcc14ee66e49e3f0ffee16a08ccbd4dd"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.7.0+image.0.1.9.zip",
+        "size": 424373874,
+        "sha256": "59b371512adb29eabb57627a1c75bfe7e5feeef58e7e4ee90336fec93c19c13d"
+      }
+    },
+    "0.7.0+image.0.1.10-dev": {
+      "version": "0.7.0+image.0.1.10-dev",
+      "channel": "dev",
+      "released_at": "2026-07-29T05:56:23Z",
+      "summary": "initial dev build",
+      "changelog": "## daemon 0.7.0\n\n_no change since previous release._\n\n## image 0.1.10-dev\n\n## Highlights\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n- set +S on cast_shell storage for power loss\n- reverse proxy for cast_shell cdp\n- fix daemon ota digest check\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38850568,
+          "sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+        },
+        "image_swu": {
+          "size": 529920,
+          "sha256": "12286a2a117c039762f9f47044f635d0b38247b63c2a85187694fd9bb7d5b4a0"
+        },
+        "image_zck": {
+          "size": 234822916,
+          "sha256": "3784497f3d540f25b1d9f3950f9c77bfe7ae09f28cddffb3e7f142ef9366e894"
+        },
+        "image_boot_zck": {
+          "size": 9968986,
+          "sha256": "8f85605a984a3d807b3bda2aed1bb91a74667aeece68415f9d7a8f59ecbd4a3d"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "e7d75c01c66ec2d18feeb86ed2138386b2fbc7b64398be94b10b536e029264de"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "35cdf007452c2494b71bf04a79f8e39b6536090034469889d7ad9c693420b046"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9c63d5d1e0c88d86179531c3e196bbda95a9ef72e50111dcedf64a3ee57e7e82"
+          }
+        },
+        "daemon_patches": {
+          "0.6.0": {
+            "size": 4064843,
+            "sha256": "aac1664a36a9dbc50d671214a9f2f7ae0062ea387ab44d340195e4b8411e7b52"
+          },
+          "0.5.2": {
+            "size": 9084422,
+            "sha256": "cd8142b490acf3e48c10d5d8768923fd2b032832916efa3c8b938326fba374ff"
+          },
+          "0.5.1": {
+            "size": 10087034,
+            "sha256": "77e45b3e4d059a75e09a4186ccca8a2be2ce4d50988721f806992b2d82aa5b5c"
+          },
+          "0.5.0": {
+            "size": 10097039,
+            "sha256": "5e78f5f40374f04caa4648de7a04ed949ee5a7f76089b62d69634471116edda9"
+          },
+          "0.3.0": {
+            "size": 10114142,
+            "sha256": "9fef2370d9d0643657ea9c38d0eefc2adcc14ee66e49e3f0ffee16a08ccbd4dd"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.7.0+image.0.1.10-dev.zip",
+        "size": 508502639,
+        "sha256": "70e268c529b55e3a6d288681d810750d9ec91c19fd54bce52c368432e569aafa"
+      }
+    },
+    "0.7.0+image.0.1.11-dev": {
+      "version": "0.7.0+image.0.1.11-dev",
+      "channel": "dev",
+      "released_at": "2026-07-30T05:52:42Z",
+      "summary": "initial dev build",
+      "changelog": "## daemon 0.7.0\n\n_no change since previous release._\n\n## image 0.1.11-dev\n\n## Highlights\n\ninitial dev build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n- set +S on cast_shell storage for power loss\n- reverse proxy for cast_shell cdp\n- fix daemon ota digest check\n- hw accelerated video decode for some reason\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38850568,
+          "sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+        },
+        "image_swu": {
+          "size": 527360,
+          "sha256": "1b694bdd9910a4b5bc00f72e7f5366bf8784a79b9768c993596556f4b0c70a50"
+        },
+        "image_zck": {
+          "size": 235799988,
+          "sha256": "51e1e74fa2f73b5e459f80f00c07b67140256fe6a20050100e9cacb9a6bd0d2f"
+        },
+        "image_boot_zck": {
+          "size": 9986415,
+          "sha256": "4c2eb95ceeb516f96004d040f4486012cc9e21ddd9802ad17751b0fa7fe81171"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "e7d75c01c66ec2d18feeb86ed2138386b2fbc7b64398be94b10b536e029264de"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "35cdf007452c2494b71bf04a79f8e39b6536090034469889d7ad9c693420b046"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9c63d5d1e0c88d86179531c3e196bbda95a9ef72e50111dcedf64a3ee57e7e82"
+          }
+        },
+        "daemon_patches": {
+          "0.6.0": {
+            "size": 4064843,
+            "sha256": "aac1664a36a9dbc50d671214a9f2f7ae0062ea387ab44d340195e4b8411e7b52"
+          },
+          "0.5.2": {
+            "size": 9084422,
+            "sha256": "cd8142b490acf3e48c10d5d8768923fd2b032832916efa3c8b938326fba374ff"
+          },
+          "0.5.1": {
+            "size": 10087034,
+            "sha256": "77e45b3e4d059a75e09a4186ccca8a2be2ce4d50988721f806992b2d82aa5b5c"
+          },
+          "0.5.0": {
+            "size": 10097039,
+            "sha256": "5e78f5f40374f04caa4648de7a04ed949ee5a7f76089b62d69634471116edda9"
+          },
+          "0.3.0": {
+            "size": 10114142,
+            "sha256": "9fef2370d9d0643657ea9c38d0eefc2adcc14ee66e49e3f0ffee16a08ccbd4dd"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.7.0+image.0.1.11-dev.zip",
+        "size": 510488045,
+        "sha256": "addb6a73985a4969677984d92defa388a1652e8fbabc0d3f071dbde91f289a1d"
+      }
+    },
+    "0.7.0+image.0.1.11": {
+      "version": "0.7.0+image.0.1.11",
+      "channel": "stable",
+      "released_at": "2026-07-30T05:55:21Z",
+      "summary": "initial stable build",
+      "changelog": "## daemon 0.7.0\n\n_no change since previous release._\n\n## image 0.1.11\n\n## Highlights\n\ninitial stable build:\n- mainline uboot\n- linux 7.0\n- weston kiosk shell\n- chromium cast_shell 147\n- bridgething\n- a/b boot\n- fixes screen artifacts on rapid fb updates (thank you @68p)\n- marginally faster boot\n- fix chrome having dementia (thx @68p)\n- bridgething bandaid no longer gets clobbered\n- better mtime setting\n- set +S on cast_shell storage for power loss\n- reverse proxy for cast_shell cdp\n- fix daemon ota digest check\n- hw accelerated video decode for some reason\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 38850568,
+          "sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+        },
+        "image_swu": {
+          "size": 865792,
+          "sha256": "ae6585d599c9532a938585f33a8cfb33a293d2867ea60aecf3c120ed06ad2def"
+        },
+        "image_zck": {
+          "size": 195242214,
+          "sha256": "4ac4cf789a1a9f50559e268acb727829207cda6c9baf4710f621ee544d8c72f5"
+        },
+        "image_boot_zck": {
+          "size": 9986415,
+          "sha256": "4c2eb95ceeb516f96004d040f4486012cc9e21ddd9802ad17751b0fa7fe81171"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "e7d75c01c66ec2d18feeb86ed2138386b2fbc7b64398be94b10b536e029264de"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "35cdf007452c2494b71bf04a79f8e39b6536090034469889d7ad9c693420b046"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9c63d5d1e0c88d86179531c3e196bbda95a9ef72e50111dcedf64a3ee57e7e82"
+          }
+        },
+        "daemon_patches": {
+          "0.6.0": {
+            "size": 4064843,
+            "sha256": "aac1664a36a9dbc50d671214a9f2f7ae0062ea387ab44d340195e4b8411e7b52"
+          },
+          "0.5.2": {
+            "size": 9084422,
+            "sha256": "cd8142b490acf3e48c10d5d8768923fd2b032832916efa3c8b938326fba374ff"
+          },
+          "0.5.1": {
+            "size": 10087034,
+            "sha256": "77e45b3e4d059a75e09a4186ccca8a2be2ce4d50988721f806992b2d82aa5b5c"
+          },
+          "0.5.0": {
+            "size": 10097039,
+            "sha256": "5e78f5f40374f04caa4648de7a04ed949ee5a7f76089b62d69634471116edda9"
+          },
+          "0.3.0": {
+            "size": 10114142,
+            "sha256": "9fef2370d9d0643657ea9c38d0eefc2adcc14ee66e49e3f0ffee16a08ccbd4dd"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.7.0+image.0.1.11.zip",
+        "size": 425166172,
+        "sha256": "5995aa33392bdaf55fc4ff15928aa6618d0a52ba9e6ce75d40685f4607f65fee"
+      }
+    },
+    "0.8.0+image.0.1.11": {
+      "version": "0.8.0+image.0.1.11",
+      "channel": "stable",
+      "released_at": "2026-07-30T06:30:45Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.8.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.11\n\n_no change since previous release._\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40620104,
+          "sha256": "47d32dbdb554d927a566aa68bcc3c93893ae69c8c166128ec50c429d8c9bce33"
+        },
+        "daemon_zst": {
+          "size": 11776605,
+          "sha256": "d27f17096c9145bc55d843e86adfa73d508beb33583893a789da85f7d4f5e4eb"
+        },
+        "image_swu": {
+          "size": 865792,
+          "sha256": "ae6585d599c9532a938585f33a8cfb33a293d2867ea60aecf3c120ed06ad2def"
+        },
+        "image_zck": {
+          "size": 195242214,
+          "sha256": "4ac4cf789a1a9f50559e268acb727829207cda6c9baf4710f621ee544d8c72f5"
+        },
+        "image_boot_zck": {
+          "size": 9986415,
+          "sha256": "4c2eb95ceeb516f96004d040f4486012cc9e21ddd9802ad17751b0fa7fe81171"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "b411fe14c7bd5157d1762f7dbcd95027da02a7eaa26bcd552f8a6ffd147b7685"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "d521c6775092fd33f0efd895b721cfef842e04aa43624021002d7469d6ed63c2"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9ff870564f8fd5e7d697e4b576a634dd2ecf6cdc908509fe72676c655adb8e5e"
+          }
+        },
+        "daemon_patches": {
+          "0.7.0": {
+            "size": 4817282,
+            "sha256": "d366d6b55c4930cc6aefa5519d4dd45441d63aeab28bb8197203484d843dbed6",
+            "source_sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+          },
+          "0.6.0": {
+            "size": 5129279,
+            "sha256": "503b505025e8e5838a80d4a1042f2e99d3a79e60681e1a9204fb0b7ad2ab9e31",
+            "source_sha256": "5d19800334a6651b61b4e5059c50d7da9ff269cbfb8533af4f91ba9c85f95f98"
+          },
+          "0.5.2": {
+            "size": 9493343,
+            "sha256": "ad5fd5f42558efd23a87741eb1e9ea33ad452b4ee4b427ba5c49b4065ea7b090",
+            "source_sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+          },
+          "0.5.1": {
+            "size": 10446106,
+            "sha256": "40daeefbec287dd2559149223e493ceb2d1f45706bde42b2f3bbe93b727122b2",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 10454343,
+            "sha256": "198e71551f54115318cd5d24ebfec165c1e67b48bade29e27e3180482eb134a9",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.8.0+image.0.1.11.zip",
+        "size": 425637820,
+        "sha256": "b8f319ecd4041b50bbc3473972bf1b15a251b83b8834b3bd334a0c685eddfc15"
+      }
+    },
+    "0.8.0+image.0.1.11-dev": {
+      "version": "0.8.0+image.0.1.11-dev",
+      "channel": "dev",
+      "released_at": "2026-07-30T06:32:25Z",
+      "summary": "public release version",
+      "changelog": "## daemon 0.8.0\n\n## Highlights\n\n- public release version\n\n## image 0.1.11-dev\n\n_no change since previous release._\n",
+      "changelog_url": null,
+      "yanked": null,
+      "deprecated": false,
+      "builtin_webapps": {
+        "hub": "0.5.1",
+        "browser": "0.5.0",
+        "stock": "8.9.2"
+      },
+      "artifacts": {
+        "daemon": {
+          "size": 40620104,
+          "sha256": "47d32dbdb554d927a566aa68bcc3c93893ae69c8c166128ec50c429d8c9bce33"
+        },
+        "daemon_zst": {
+          "size": 11776605,
+          "sha256": "d27f17096c9145bc55d843e86adfa73d508beb33583893a789da85f7d4f5e4eb"
+        },
+        "image_swu": {
+          "size": 527360,
+          "sha256": "1b694bdd9910a4b5bc00f72e7f5366bf8784a79b9768c993596556f4b0c70a50"
+        },
+        "image_zck": {
+          "size": 235799988,
+          "sha256": "51e1e74fa2f73b5e459f80f00c07b67140256fe6a20050100e9cacb9a6bd0d2f"
+        },
+        "image_boot_zck": {
+          "size": 9986415,
+          "sha256": "4c2eb95ceeb516f96004d040f4486012cc9e21ddd9802ad17751b0fa7fe81171"
+        },
+        "webapps": {
+          "hub": {
+            "size": 1045882,
+            "sha256": "b411fe14c7bd5157d1762f7dbcd95027da02a7eaa26bcd552f8a6ffd147b7685"
+          },
+          "browser": {
+            "size": 901477,
+            "sha256": "d521c6775092fd33f0efd895b721cfef842e04aa43624021002d7469d6ed63c2"
+          },
+          "stock": {
+            "size": 1218496,
+            "sha256": "9ff870564f8fd5e7d697e4b576a634dd2ecf6cdc908509fe72676c655adb8e5e"
+          }
+        },
+        "daemon_patches": {
+          "0.7.0": {
+            "size": 4817282,
+            "sha256": "d366d6b55c4930cc6aefa5519d4dd45441d63aeab28bb8197203484d843dbed6",
+            "source_sha256": "1e8fc583a4a5631681f2c73ba70d314156d02b07351e630f5a96e540013c3dba"
+          },
+          "0.6.0": {
+            "size": 5129279,
+            "sha256": "503b505025e8e5838a80d4a1042f2e99d3a79e60681e1a9204fb0b7ad2ab9e31",
+            "source_sha256": "5d19800334a6651b61b4e5059c50d7da9ff269cbfb8533af4f91ba9c85f95f98"
+          },
+          "0.5.2": {
+            "size": 9493343,
+            "sha256": "ad5fd5f42558efd23a87741eb1e9ea33ad452b4ee4b427ba5c49b4065ea7b090",
+            "source_sha256": "bd782649869e8e57fa4ecd05d69dca1282ff55ce0cbc651a89ff62fe2074e306"
+          },
+          "0.5.1": {
+            "size": 10446106,
+            "sha256": "40daeefbec287dd2559149223e493ceb2d1f45706bde42b2f3bbe93b727122b2",
+            "source_sha256": "dac9310422a68b1edbc4b284d29c60b8fe4ccb74a6fa39bbc0ffe0f69abbb34c"
+          },
+          "0.5.0": {
+            "size": 10454343,
+            "sha256": "198e71551f54115318cd5d24ebfec165c1e67b48bade29e27e3180482eb134a9",
+            "source_sha256": "fddce0c34c9bb17a7153bbe85975178086c39a4ea263916457157c2faa703f48"
+          }
+        }
+      },
+      "download": {
+        "url": "https://ota.bridgething.com/r/bridgething-0.8.0+image.0.1.11-dev.zip",
+        "size": 510959864,
+        "sha256": "14ddbb8d0da2a58c4fda7e712b2d0e8a0a5f2adf82d8f9d7ef7f6725295f3794"
+      }
+    }
+  }
+}

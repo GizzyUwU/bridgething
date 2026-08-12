@@ -16,11 +16,13 @@ import type {
   BridgethingOtaManifest,
   BridgethingOtaPollConfig,
   BridgethingOtaPollStatus,
+  BridgethingOtaProgress,
   BridgethingOtaRun,
   BridgethingProviderInfo,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
   BridgethingVoiceModelState,
+  BridgethingVoiceTurn,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingWebappSlot,
@@ -41,6 +43,7 @@ export type {
   BridgethingCompanionDebug,
   BridgethingConfigEntry,
   BridgethingConfigField,
+  BridgethingDeviceAutoResume,
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
   BridgethingDeviceMetaEntry,
@@ -58,6 +61,7 @@ export type {
   BridgethingOtaPhase,
   BridgethingOtaPollConfig,
   BridgethingOtaPollStatus,
+  BridgethingOtaProgress,
   BridgethingOtaRelease,
   BridgethingOtaRun,
   BridgethingOtaStep,
@@ -69,8 +73,12 @@ export type {
   BridgethingServiceHealthKind,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
+  BridgethingVoiceDebug,
   BridgethingVoiceModelState,
   BridgethingVoiceModelStatus,
+  BridgethingVoiceTurn,
+  BridgethingVoiceTurnPhase,
+  BridgethingVoiceTurnTrigger,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingWebappSlot,
@@ -92,11 +100,12 @@ export type SessionEvent =
   | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'voiceModelStateChanged'; state: BridgethingVoiceModelState }
+  | { type: 'voiceTurnChanged'; turn: BridgethingVoiceTurn }
   | { type: 'otaRunChanged'; run: BridgethingOtaRun }
   | { type: 'otaAvailableChanged'; available: BridgethingOtaAvailable }
   | { type: 'otaPollChanged'; status: BridgethingOtaPollStatus }
   | { type: 'resumed'; snapshot: BridgethingSessionSnapshot }
-  | { type: 'log'; level: string; message: string };
+  | { type: 'log'; origin: string; level: string; message: string };
 
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
@@ -174,6 +183,10 @@ export class BridgethingSession {
 
   async logArchives(): Promise<BridgethingLogArchive[]> {
     return this.native.logArchives();
+  }
+
+  async logArchiveLines(archiveId: string, limit: number): Promise<BridgethingDeviceLogLine[]> {
+    return this.native.logArchiveLines(archiveId, limit);
   }
 
   async exportLogs(archiveId: string | null = null): Promise<string> {
@@ -272,6 +285,10 @@ export class BridgethingSession {
     return this.native.voiceModelState();
   }
 
+  async downloadVoiceModel(): Promise<void> {
+    await this.native.downloadVoiceModel();
+  }
+
   async setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void> {
     await this.native.setDeviceAutoResume(deviceId, enabled);
   }
@@ -284,21 +301,20 @@ export class BridgethingSession {
     await this.native.setOtaPollConfig(config);
   }
 
-  async checkForOtaUpdate(rootUrl: string | null = null): Promise<void> {
+  async checkForOtaUpdate(rootUrl: string): Promise<void> {
     await this.native.checkForOtaUpdate(rootUrl);
   }
 
-  async fetchOtaManifest(rootUrl: string | null = null): Promise<BridgethingOtaManifest> {
+  async fetchOtaManifest(rootUrl: string): Promise<BridgethingOtaManifest> {
     return this.native.fetchOtaManifest(rootUrl);
   }
 
-  async applyOtaUpdate(
-    deviceId: string,
-    channel: string,
-    version: string,
-    rootUrl: string | null = null,
-  ): Promise<void> {
+  async applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string): Promise<void> {
     await this.native.applyOtaUpdate(deviceId, channel, version, rootUrl);
+  }
+
+  otaRunProgress(deviceId: string, nowMs: number): BridgethingOtaProgress | null {
+    return this.native.otaRunProgress(deviceId, nowMs);
   }
 
   async dismissOtaRun(deviceId: string): Promise<void> {
@@ -410,6 +426,9 @@ export class BridgethingSession {
     this.native.setOnVoiceModelStateChanged(state => {
       this.dispatch({ type: 'voiceModelStateChanged', state });
     });
+    this.native.setOnVoiceTurnChanged(turn => {
+      this.dispatch({ type: 'voiceTurnChanged', turn });
+    });
     this.native.setOnOtaRunChanged(run => {
       this.dispatch({ type: 'otaRunChanged', run });
     });
@@ -422,8 +441,8 @@ export class BridgethingSession {
     this.native.setOnResumed(snapshot => {
       this.dispatch({ type: 'resumed', snapshot });
     });
-    this.native.setOnLog((level, message) => {
-      this.dispatch({ type: 'log', level, message });
+    this.native.setOnLog((origin, level, message) => {
+      this.dispatch({ type: 'log', origin, level, message });
     });
   }
 }

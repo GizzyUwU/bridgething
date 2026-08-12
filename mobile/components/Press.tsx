@@ -1,74 +1,48 @@
-import { forwardRef, type ReactNode } from 'react';
+import { forwardRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
   type PressableProps,
   type StyleProp,
+  type View,
   type ViewStyle,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+import { usePalette } from '../lib/theme';
 
 type Props = Omit<PressableProps, 'children' | 'style'> & {
   children: ReactNode;
-  scaleTo?: number;
-  fade?: boolean;
   className?: string;
   style?: StyleProp<ViewStyle>;
 };
 
-/**
- * Pressable that springs slightly inward + dims while held. The base
- * affordance for every interactive surface in the app; wrap around tiles,
- * list rows, action buttons. Disabled mode skips the animation entirely.
- */
-export const Press = forwardRef<typeof AnimatedPressable, Props>(function Press(
-  { children, scaleTo = 0.97, fade = true, disabled, style, ...rest },
-  _ref,
+export const Press = forwardRef<View, Props>(function Press(
+  { children, disabled, style, onPressIn, onPressOut, ...rest },
+  ref,
 ) {
-  const scale = useSharedValue(1);
-  const opacity = useSharedValue(1);
-
-  const animated = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
-  }));
-
-  const onPressIn = (
-    e: Parameters<NonNullable<PressableProps['onPressIn']>>[0],
-  ) => {
-    if (!disabled) {
-      scale.value = withSpring(scaleTo, {
-        mass: 0.4,
-        stiffness: 320,
-        damping: 22,
-      });
-      if (fade) opacity.value = withTiming(0.78, { duration: 90 });
-    }
-    rest.onPressIn?.(e);
-  };
-  const onPressOut = (
-    e: Parameters<NonNullable<PressableProps['onPressOut']>>[0],
-  ) => {
-    scale.value = withSpring(1, { mass: 0.4, stiffness: 320, damping: 22 });
-    if (fade) opacity.value = withTiming(1, { duration: 140 });
-    rest.onPressOut?.(e);
-  };
+  const palette = usePalette();
+  const [pressed, setPressed] = useState(false);
 
   return (
-    <AnimatedPressable
+    <Pressable
       {...rest}
+      ref={ref}
       disabled={disabled}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
-      style={[animated, style]}
+      onPressIn={event => {
+        setPressed(true);
+        onPressIn?.(event);
+      }}
+      onPressOut={event => {
+        setPressed(false);
+        onPressOut?.(event);
+      }}
+      style={[
+        pressed && !disabled
+          ? { backgroundColor: palette.neutralSoft }
+          : undefined,
+        style,
+      ]}
     >
       {children}
-    </AnimatedPressable>
+    </Pressable>
   );
 });

@@ -1,4 +1,6 @@
 pub mod beamformer;
+#[cfg(feature = "bench-fixtures")]
+pub mod bench;
 pub mod calibration;
 pub mod geometry;
 pub mod highpass;

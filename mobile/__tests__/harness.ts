@@ -2,12 +2,15 @@ import type { FakeNative } from '../__mocks__/react-native-nitro-modules';
 
 type Modules = {
   session: typeof import('../lib/session');
+  setup: typeof import('../lib/setup');
   storage: typeof import('../lib/storage');
   webapps: typeof import('../lib/webapps');
   ota: typeof import('../lib/ota');
   bridge: typeof import('../lib/bridge');
   catalog: typeof import('../lib/catalog');
+  diagnostics: typeof import('../lib/diagnostics');
   permissions: typeof import('react-native-permissions');
+  picker: typeof import('../__mocks__/@react-native-documents/picker');
 };
 
 export type Rig = Modules & {
@@ -16,7 +19,12 @@ export type Rig = Modules & {
   relaunch(): Rig;
 };
 
-const MMKV_KEYS = ['setup.completed', 'device.ledger', 'catalog.sources'];
+const MMKV_KEYS = [
+  'setup.completed',
+  'setup.voiceIntro',
+  'device.ledger',
+  'catalog.sources',
+];
 
 export type RigOptions = { platform?: 'ios' | 'android' };
 
@@ -38,13 +46,16 @@ function build(opts: RigOptions, carry?: Record<string, string>): Rig {
     for (const [key, value] of Object.entries(carry))
       storage.storage.set(key, value);
 
+  const setup = require('../lib/setup') as Modules['setup'];
   const bridge = require('../lib/bridge') as Modules['bridge'];
   const session = require('../lib/session') as Modules['session'];
   const webapps = require('../lib/webapps') as Modules['webapps'];
   const ota = require('../lib/ota') as Modules['ota'];
   const catalog = require('../lib/catalog') as Modules['catalog'];
+  const diagnostics = require('../lib/diagnostics') as Modules['diagnostics'];
   const permissions =
     require('react-native-permissions') as Modules['permissions'];
+  const picker = require('@react-native-documents/picker') as Modules['picker'];
 
   session.registerSessionDomain();
   webapps.registerWebappsDomain();
@@ -55,18 +66,18 @@ function build(opts: RigOptions, carry?: Record<string, string>): Rig {
 
   return {
     session,
+    setup,
     storage,
     webapps,
     ota,
     bridge,
     catalog,
+    diagnostics,
     permissions,
+    picker,
     native,
     emit(event, ...args) {
-      const handler = native.__handlers.get(event);
-      if (!handler)
-        throw new Error(`no native handler registered for "${event}"`);
-      handler(...args);
+      native.__emit(event, ...args);
     },
     relaunch() {
       const bytes: Record<string, string> = {};

@@ -4,7 +4,6 @@ use std::{
   time::{Duration, Instant},
 };
 
-use bluer::Address;
 use bridgething_iap2::{
   SessionEvent,
   csm::now_playing::{
@@ -21,7 +20,7 @@ use tokio::{sync::Mutex, task::JoinHandle};
 use crate::{
   asset::Retention,
   bluetooth::{
-    BluetoothMan,
+    Address, BluetoothError, BluetoothMan,
     iap2::{EaActivity, Iap2EaGatewayHandle, Iap2Event, Iap2ReconnectHandle, StreamClosed, StreamOpened},
   },
   state::State,
@@ -136,10 +135,14 @@ impl Iap2EventRouter {
           peer_max_len = lsp.max_len,
           "iAP2 link Established",
         );
-        if let Some(profile_man) = self.bluetooth.profile_man.try_get()
-          && let Err(err) = profile_man.upsert_paired_device(address, DeviceType::Ios).await
+        match self
+          .bluetooth
+          .profile_man
+          .upsert_paired_device(address, DeviceType::Ios)
+          .await
         {
-          tracing::warn!(%address, ?err, "failed to upsert peer for iAP2 link");
+          Ok(_) | Err(BluetoothError::NoRadio) => {}
+          Err(err) => tracing::warn!(%address, ?err, "failed to upsert peer for iAP2 link"),
         }
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::LinkUp).await;
         self.bluetooth.le.attach(address).await;

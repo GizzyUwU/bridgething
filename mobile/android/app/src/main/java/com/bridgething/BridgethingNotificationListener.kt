@@ -8,22 +8,22 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import com.bridgething.companion.AndroidNotificationBackend
 import com.bridgething.companion.BridgethingCompanion
-import com.bridgething.schema.DismissReason
-import com.bridgething.schema.NotificationAction
-import com.bridgething.schema.NotificationApp
-import com.bridgething.schema.NotificationCategory
-import com.bridgething.schema.NotificationFlags
-import com.bridgething.schema.NotificationRemoved
-import com.bridgething.schema.Notification as WireNotification
+import com.bridgething.companion.shell.AndroidNotificationBackend
+import uniffi.bridgething_companion.DismissReason
+import uniffi.bridgething_companion.NotificationAction
+import uniffi.bridgething_companion.NotificationApp
+import uniffi.bridgething_companion.NotificationCategory
+import uniffi.bridgething_companion.NotificationFlags
+import uniffi.bridgething_companion.NotificationRemoved
+import uniffi.bridgething_companion.WireNotification
 
 public class BridgethingNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationBridgeRegistry.listener = this
-        NotificationBridgeRegistry.companion?.refreshSystemMedia()
+        NotificationBridgeRegistry.companion?.mediaSessions?.refresh()
         Log.i(TAG, "notification listener connected")
     }
 
@@ -54,9 +54,9 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         if (shouldSkip(sbnIt)) return
         val dismissReason = when (reason) {
             REASON_APP_CANCEL, REASON_APP_CANCEL_ALL, REASON_LISTENER_CANCEL, REASON_LISTENER_CANCEL_ALL ->
-                DismissReason.RemoteDismissed
-            REASON_CLICK -> DismissReason.Acted
-            else -> DismissReason.UserDismissed
+                DismissReason.REMOTE_DISMISSED
+            REASON_CLICK -> DismissReason.ACTED
+            else -> DismissReason.USER_DISMISSED
         }
         NotificationBridgeRegistry.backend?.emitRemoved(NotificationRemoved(id = sbnIt.key, reason = dismissReason))
     }
@@ -125,15 +125,15 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }.getOrDefault(NotificationManager.IMPORTANCE_DEFAULT)
 
     private fun mapCategory(raw: String?): NotificationCategory = when (raw) {
-        Notification.CATEGORY_CALL -> NotificationCategory.IncomingCall
-        Notification.CATEGORY_MISSED_CALL -> NotificationCategory.MissedCall
-        Notification.CATEGORY_VOICEMAIL -> NotificationCategory.Voicemail
-        Notification.CATEGORY_MESSAGE, Notification.CATEGORY_SOCIAL -> NotificationCategory.Social
-        Notification.CATEGORY_REMINDER, Notification.CATEGORY_EVENT -> NotificationCategory.Schedule
-        Notification.CATEGORY_EMAIL -> NotificationCategory.Email
-        Notification.CATEGORY_NAVIGATION, Notification.CATEGORY_LOCATION_SHARING -> NotificationCategory.Location
-        Notification.CATEGORY_RECOMMENDATION, Notification.CATEGORY_PROMO -> NotificationCategory.News
-        else -> NotificationCategory.Other
+        Notification.CATEGORY_CALL -> NotificationCategory.INCOMING_CALL
+        Notification.CATEGORY_MISSED_CALL -> NotificationCategory.MISSED_CALL
+        Notification.CATEGORY_VOICEMAIL -> NotificationCategory.VOICEMAIL
+        Notification.CATEGORY_MESSAGE, Notification.CATEGORY_SOCIAL -> NotificationCategory.SOCIAL
+        Notification.CATEGORY_REMINDER, Notification.CATEGORY_EVENT -> NotificationCategory.SCHEDULE
+        Notification.CATEGORY_EMAIL -> NotificationCategory.EMAIL
+        Notification.CATEGORY_NAVIGATION, Notification.CATEGORY_LOCATION_SHARING -> NotificationCategory.LOCATION
+        Notification.CATEGORY_RECOMMENDATION, Notification.CATEGORY_PROMO -> NotificationCategory.NEWS
+        else -> NotificationCategory.OTHER
     }
 
     private companion object {

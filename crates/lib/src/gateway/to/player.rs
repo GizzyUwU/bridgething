@@ -1,12 +1,10 @@
-use bridgething_macros::BridgeEnum;
+use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 use crate::{PlayContext, QueuePosition, RepeatMode};
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -16,7 +14,6 @@ pub struct PlayUri {
   pub context: Option<PlayContext>,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +23,6 @@ pub struct QueueUri {
   pub position: QueuePosition,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -34,7 +30,6 @@ pub struct SeekTo {
   pub position_ms: u32,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -42,7 +37,6 @@ pub struct SkipToIndex {
   pub index: u32,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -50,7 +44,6 @@ pub struct SetShuffle {
   pub on: bool,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -58,7 +51,6 @@ pub struct SetRepeat {
   pub mode: RepeatMode,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -66,7 +58,6 @@ pub struct SetSpeed {
   pub speed: f32,
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +66,6 @@ pub struct SetCrossfade {
   pub duration_ms: Option<u32>,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -83,7 +73,21 @@ pub struct TransferTo {
   pub target_id: String,
 }
 
-#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = BridgeToGateway,
+  surface = Player,
+  request_variant = SnapshotRequest,
+  response = crate::gateway::PlayerSnapshotAck,
+  response_variant = SnapshotAck,
+  error = crate::gateway::PlayerErrorReply,
+  error_variant = ErrorReply,
+)]
+pub struct PlayerSnapshotRequest {}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -116,4 +120,6 @@ pub enum BridgeToGatewayPlayerMsg {
   SetCrossfade(SetCrossfade),
   #[bridge_command]
   TransferTo(TransferTo),
+  #[bridge_request]
+  SnapshotRequest(PlayerSnapshotRequest),
 }

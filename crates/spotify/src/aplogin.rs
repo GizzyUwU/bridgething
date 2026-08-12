@@ -1,5 +1,6 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use bridgething_io::HttpMethod;
 use hmac::{Hmac, KeyInit, Mac};
 use librespot_protocol::{
   authentication::{APWelcome, AuthenticationType, ClientResponseEncrypted, CpuFamily, Os},
@@ -22,7 +23,7 @@ use crate::{
   auth::Auth,
   error::{Error, Result},
   http::SpHttp,
-  httpx::{HttpMethod, with_query},
+  httpx::with_query,
 };
 
 const SPOTIFY_VERSION: u64 = 124200290;
@@ -62,7 +63,7 @@ fn rand_bytes(n: usize) -> Vec<u8> {
   (0..n).map(|_| rand::random::<u8>()).collect()
 }
 
-pub async fn resolve_and_cache(auth: &Auth, http: &SpHttp, device_id: &str) -> Result<String> {
+pub async fn resolve_and_cache(auth: &Arc<Auth>, http: &SpHttp, device_id: &str) -> Result<String> {
   if let Some(u) = auth.store().load_username() {
     return Ok(u);
   }
@@ -91,7 +92,7 @@ async fn apresolve(http: &SpHttp) -> Result<(String, u16)> {
     &[("type", "accesspoint".to_string())],
   )?;
   let resp = http
-    .send(HttpMethod::Get, url, reqwest::header::HeaderMap::new(), Vec::new(), 0)
+    .send(HttpMethod::Get, url, ::http::header::HeaderMap::new(), Vec::new(), 0)
     .await?;
   let v: Value = serde_json::from_slice(&resp.body)?;
   let entry = v["accesspoint"][0]

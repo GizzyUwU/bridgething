@@ -1,17 +1,29 @@
 import type {
   BridgethingOtaAvailable,
+  BridgethingOtaPollConfig,
   BridgethingOtaPollStatus,
+  BridgethingOtaProgress,
+  BridgethingOtaRelease,
   BridgethingOtaRun,
-  BridgethingOtaStep,
 } from '@bridgething/session-react-native';
+import { describeError } from '@bridgething/ui/errors';
 import { useState } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import { getSession, registerDomain } from './bridge';
 import { useAppActiveInterval } from './poll';
+import { DEFAULT_OTA_ROOT_URL } from './storage';
+import { relativeTime } from './utils';
 
 const NOW_TICK_MS = 500;
+
+export function rootUrlOf(
+  config: BridgethingOtaPollConfig | null | undefined,
+): string {
+  const held = config?.rootUrl?.trim();
+  return held && held.length > 0 ? held : DEFAULT_OTA_ROOT_URL;
+}
 
 type OtaState = {
   poll: BridgethingOtaPollStatus;
@@ -59,118 +71,6 @@ export function registerOtaDomain(): void {
   });
 }
 
-const REBOOT_SECS = 45;
-const BATCH_APPLY_SECS = 15;
-const MIN_STEP_SECS = 1;
-const NOMINAL_TRANSFER_BYTES_PER_SEC = 750_000;
-const APPLY_BYTES_PER_SEC = 750_000;
-
-function stepWeight(step: BridgethingOtaStep): number {
-  switch (step.kind) {
-    case 'download':
-    case 'stream':
-      return step.bytes > 0
-        ? Math.max(MIN_STEP_SECS, step.bytes / NOMINAL_TRANSFER_BYTES_PER_SEC)
-        : MIN_STEP_SECS;
-    case 'apply':
-      return step.bytes > 0
-        ? Math.max(MIN_STEP_SECS, step.bytes / APPLY_BYTES_PER_SEC)
-        : BATCH_APPLY_SECS;
-    case 'reboot':
-      return REBOOT_SECS;
-  }
-}
-
-function stepSeconds(step: BridgethingOtaStep, run: BridgethingOtaRun): number {
-  switch (step.kind) {
-    case 'download':
-    case 'stream': {
-      const rate = run.ratePerSec && run.ratePerSec > 0 ? run.ratePerSec : null;
-      if (!rate || step.bytes === 0) return stepWeight(step);
-      return Math.max(MIN_STEP_SECS, step.bytes / rate);
-    }
-    default:
-      return stepWeight(step);
-  }
-}
-
-function stepFraction(
-  step: BridgethingOtaStep,
-  run: BridgethingOtaRun,
-  now: number,
-): number {
-  if (step.kind === 'reboot') {
-    const elapsed = Math.max(0, now - run.phaseStartedAt) / 1000;
-    return 1 - Math.exp(-elapsed / REBOOT_SECS);
-  }
-  if (step.kind === 'apply') {
-    if (run.otaKind === 'image') {
-      if (run.phase === 'confirming' || run.phase === 'reboot') return 1;
-      return Math.min(1, (run.dwlPercent ?? 0) / 100);
-    }
-    return run.phase === 'writing' || run.phase === 'confirming' ? 1 : 0;
-  }
-  const total = run.stageTotal ?? 0;
-  if (total > 0) return Math.min(1, (run.stageReceived ?? 0) / total);
-  return 0;
-}
-
-export type OtaProgress = {
-  percent: number;
-  stepIndex: number;
-  stepCount: number;
-  stepLabel: string | null;
-  etaSeconds: number | null;
-};
-
-export function otaProgress(run: BridgethingOtaRun, now: number): OtaProgress {
-  const weights = run.steps.map(stepWeight);
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
-  const index = Math.max(
-    0,
-    run.steps.findIndex(s => s.id === run.stepId),
-  );
-
-  if (run.outcome === 'succeeded') {
-    return {
-      percent: 100,
-      stepIndex: index,
-      stepCount: run.steps.length,
-      stepLabel: null,
-      etaSeconds: 0,
-    };
-  }
-  if (totalWeight <= 0) {
-    return {
-      percent: 0,
-      stepIndex: index,
-      stepCount: run.steps.length,
-      stepLabel: null,
-      etaSeconds: null,
-    };
-  }
-
-  let done = 0;
-  let remaining = 0;
-  run.steps.forEach((step, at) => {
-    if (at < index) {
-      done += weights[at];
-      return;
-    }
-    const fraction = at === index ? stepFraction(step, run, now) : 0;
-    done += weights[at] * fraction;
-    remaining += stepSeconds(step, run) * (1 - fraction);
-  });
-
-  return {
-    percent: Math.min(100, Math.round((done / totalWeight) * 100)),
-    stepIndex: index,
-    stepCount: run.steps.length,
-    stepLabel: run.steps[index]?.label ?? null,
-    etaSeconds: Math.round(remaining),
-  };
-}
-
 export function isRunning(
   run: BridgethingOtaRun | undefined,
 ): run is BridgethingOtaRun {
@@ -195,13 +95,14 @@ function useNow(active: boolean): number {
 
 export function useOtaProgress(
   deviceId: string | null,
-): (OtaProgress & { run: BridgethingOtaRun }) | null {
+): (BridgethingOtaProgress & { run: BridgethingOtaRun }) | null {
   const run = useOtaRun(deviceId);
   const timed =
     run !== undefined && run.outcome === undefined && run.phase === 'reboot';
   const now = useNow(timed);
-  if (!run) return null;
-  return { ...otaProgress(run, now), run };
+  if (!run || !deviceId) return null;
+  const progress = getSession().otaRunProgress(deviceId, now);
+  return progress ? { ...progress, run } : null;
 }
 
 export function dismissOtaRun(deviceId: string): void {
@@ -210,15 +111,83 @@ export function dismissOtaRun(deviceId: string): void {
     .catch(() => {});
 }
 
+export type OtaInstallCopy = {
+  title: string;
+  body: string;
+  detail: string;
+  warning: string | null;
+};
+
+export function describeOtaInstall(
+  release: BridgethingOtaRelease,
+  target: string,
+  deviceChannel: string | undefined,
+): OtaInstallCopy {
+  const crossing = deviceChannel != null && deviceChannel !== target;
+  return {
+    title: `install ${release.version}?`,
+    body: 'your car thing will restart and be unavailable for a few minutes.',
+    detail: `detail: daemon ${release.daemonVersion} · image ${release.imageVersion}`,
+    warning: crossing
+      ? `${release.version} is a ${target} release. your car thing is on ${deviceChannel}.`
+      : null,
+  };
+}
+
+export type OtaOfferInput = {
+  available?: BridgethingOtaAvailable;
+  lastCheckedAt: number | null;
+  error?: unknown;
+  now?: number;
+};
+
+export type OtaOffer = {
+  version: string | null;
+  value: string;
+  detail: string | null;
+};
+
+export function describeOtaOffer(input: OtaOfferInput): OtaOffer {
+  const version = input.available?.releaseVersion?.trim() || null;
+  const offered =
+    version != null ||
+    input.available?.daemonVersion != null ||
+    input.available?.imageVersion != null;
+
+  return {
+    version,
+    value: version
+      ? `${version} available`
+      : offered
+        ? 'update available'
+        : 'up to date',
+    detail: input.error
+      ? describeError(input.error)
+      : input.lastCheckedAt
+        ? `checked ${relativeTime(input.lastCheckedAt, input.now ?? Date.now())}`
+        : null,
+  };
+}
+
+export function lastCheckedAt(
+  poll: BridgethingOtaPollStatus,
+  local: number | null,
+): number | null {
+  const polled = poll.lastPolledAt ? Date.parse(poll.lastPolledAt) : NaN;
+  const best = Math.max(local ?? 0, Number.isNaN(polled) ? 0 : polled);
+  return best > 0 ? best : null;
+}
+
 export async function installLatestOta(
   deviceId: string,
   channel: string,
+  rootUrl: string,
 ): Promise<void> {
   const session = getSession();
-  const manifest = await session.fetchOtaManifest(null);
+  const manifest = await session.fetchOtaManifest(rootUrl);
   const found = manifest.channels.find(c => c.slug === channel);
   if (!found) throw new Error(`no ${channel} channel in the update manifest`);
   if (!found.latest)
     throw new Error(`the ${channel} channel has no release yet`);
-  await session.applyOtaUpdate(deviceId, channel, found.latest, null);
+  await session.applyOtaUpdate(deviceId, channel, found.latest, rootUrl);
 }

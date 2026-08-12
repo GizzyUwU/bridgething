@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHANNEL=stable
 DRY=0
 MODEL_VERSION=""
+RUNTIME_VERSION=""
 
 log()  { printf '\033[1;36m[publish-wakeword]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[publish-wakeword]\033[0m %s\n' "$*" >&2; }
@@ -14,12 +15,17 @@ usage() {
   cat >&2 <<EOF
 usage: bridgething-publish-wakeword --model <ver> [options]
 
-  --model <ver>   phrase model version to publish
-  --channel <ch>  default: stable
-  --dry-run       digest and print the fragment; upload nothing
+  --model <ver>    phrase model version to publish
+  --runtime <ver>  daemon version whose embedding stack this model was trained
+                   against; defaults to the workspace version in Cargo.toml
+  --channel <ch>   default: stable
+  --dry-run        digest and print the fragment; upload nothing
 
 The detector and the embedding stack ride in the daemon, so the phrase model is
-the only wake-word artifact that ships on its own.
+the only wake-word artifact that ships on its own. That is also why the release
+manifest pairs every model with a runtime version: a phrase model only fires
+against the embedding graph it was trained on, and a mismatched pin ships a wake
+word that silently never triggers.
 
 Publishing needs rclone configured with an 'r2' remote, plus R2_BUCKET and PUBLIC_BASE.
 EOF
@@ -29,6 +35,7 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) MODEL_VERSION="${2:?}"; shift 2 ;;
+    --runtime) RUNTIME_VERSION="${2:?}"; shift 2 ;;
     --channel) CHANNEL="${2:?}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage ;;
@@ -37,6 +44,12 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$MODEL_VERSION" ] || usage
+
+if [ -z "$RUNTIME_VERSION" ]; then
+  RUNTIME_VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([^"]*\)".*/\1/p' \
+    "$REPO_ROOT/Cargo.toml" | head -n1)
+  [ -n "$RUNTIME_VERSION" ] || die "could not read the workspace version from Cargo.toml; pass --runtime"
+fi
 
 MODEL_KEY="wakeword/${CHANNEL}/model/${MODEL_VERSION}/hey_bridgething.btww"
 MODEL="$REPO_ROOT/crates/wakeword/models/hey_bridgething.btww"
@@ -72,13 +85,40 @@ else
   warn "dry run: nothing uploaded"
 fi
 
+SIDECAR=$(mktemp -t bridgething-wakeword-sidecar)
+trap 'rm -f "$SIDECAR"' EXIT
+cat >"$SIDECAR" <<EOF
+{
+  "kind": "wakeword-model",
+  "channel": "${CHANNEL}",
+  "version": "${MODEL_VERSION}",
+  "runtime": "${RUNTIME_VERSION}",
+  "released_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "artifacts": { "model": { "size": ${MODEL_SIZE}, "sha256": "${MODEL_SHA}" } }
+}
+EOF
+
+if [ "$DRY" = 0 ]; then
+  "$REPO_ROOT/scripts/r2-put" "$SIDECAR" "wakeword/${CHANNEL}/model/${MODEL_VERSION}/release.json" \
+    application/json "public, max-age=300, must-revalidate"
+fi
+
 cat <<EOF
 {
-  "wakeword": { "model": "${MODEL_VERSION}" },
+  "wakeword": {
+    "runtime": "${RUNTIME_VERSION}",
+    "model": "${MODEL_VERSION}",
+    "model_trained_against": { "${MODEL_VERSION}": "${RUNTIME_VERSION}" }
+  },
   "artifacts": {
     "wakeword": { "model": { "size": ${MODEL_SIZE}, "sha256": "${MODEL_SHA}" } }
   }
 }
 EOF
 
-log "pin the image to it with: just pin-wakeword ${MODEL_VERSION}"
+log "carry it into the next release with:"
+log "  --wakeword-runtime ${RUNTIME_VERSION} \\"
+log "  --wakeword-model ${MODEL_VERSION} \\"
+log "  --wakeword-trained-against ${MODEL_VERSION}=${RUNTIME_VERSION} \\"
+log "  --wakeword-artifact model=${MODEL_SIZE}:${MODEL_SHA}"
+log "then 'just pin-wakeword' in yocto-superbird to bake it as the image's floor copy"

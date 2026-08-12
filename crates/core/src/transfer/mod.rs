@@ -1,6 +1,5 @@
 mod actor;
 pub mod outbound;
-pub mod pacer;
 pub mod sinks;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -21,7 +20,7 @@ const COMMAND_MAILBOX_CAPACITY: usize = 16;
 #[derive(Debug)]
 pub enum ChunkOutcome {
   Continue { received: u64 },
-  Completed { path: PathBuf, sha256: String },
+  Completed { path: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -204,8 +203,7 @@ mod tests {
       .await
       .unwrap();
     match outcome {
-      ChunkOutcome::Completed { path, sha256 } => {
-        assert_eq!(sha256, sha);
+      ChunkOutcome::Completed { path } => {
         let bytes = tokio::fs::read(&path).await.unwrap();
         assert_eq!(bytes, body);
       }
@@ -235,7 +233,7 @@ mod tests {
       offset = end as u64;
       match (outcome, last) {
         (ChunkOutcome::Continue { received }, false) => assert_eq!(received, offset),
-        (ChunkOutcome::Completed { sha256, .. }, true) => assert_eq!(sha256, sha),
+        (ChunkOutcome::Completed { .. }, true) => (),
         _ => panic!("unexpected outcome"),
       }
     }
@@ -321,7 +319,7 @@ mod tests {
       .await
       .unwrap();
     match outcome {
-      ChunkOutcome::Completed { sha256, .. } => assert_eq!(sha256, sha),
+      ChunkOutcome::Completed { .. } => (),
       _ => panic!("expected Completed"),
     }
   }

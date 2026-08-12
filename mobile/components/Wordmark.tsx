@@ -1,51 +1,37 @@
 import { Text, View } from 'react-native';
 
-/**
- * Bridgething wordmark. Single string, lowercase, never split.
- * "bridge" in Outfit Medium, "thing" in Outfit ExtraLight.
- * Tracking -3% at display sizes, -2% in small lockups.
- * Blue is accent only, never inside the wordmark.
- */
-const SIZES = {
-  xs: { font: 14, tracking: -0.28, lineHeight: 16 },
-  sm: { font: 18, tracking: -0.36, lineHeight: 20 },
-  md: { font: 28, tracking: -0.84, lineHeight: 32 },
-  lg: { font: 44, tracking: -1.32, lineHeight: 48 },
-  xl: { font: 64, tracking: -1.92, lineHeight: 68 },
-} as const;
+import { TYPE } from '../lib/theme';
 
-type Size = keyof typeof SIZES;
+export type WordmarkSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+
+const SIZE: Record<WordmarkSize, number> = {
+  xs: TYPE.body,
+  sm: TYPE.rowLg,
+  md: TYPE.hero,
+  lg: TYPE.screenTitle,
+  xl: Math.round(TYPE.screenTitle * 1.9),
+};
 
 export function Wordmark({
   size = 'md',
   className,
 }: {
-  size?: Size;
+  size?: WordmarkSize;
   className?: string;
 }) {
-  const s = SIZES[size];
+  const fontSize = SIZE[size];
+  const style = {
+    fontSize,
+    lineHeight: Math.round(fontSize * 1.1),
+    letterSpacing: fontSize * -0.03,
+  };
+
   return (
     <View className={`flex-row items-end ${className ?? ''}`}>
-      <Text
-        className="text-foreground"
-        style={{
-          fontFamily: 'Outfit-Medium',
-          fontSize: s.font,
-          lineHeight: s.lineHeight,
-          letterSpacing: s.tracking,
-        }}
-      >
+      <Text className="font-display text-fg" style={style}>
         bridge
       </Text>
-      <Text
-        className="text-foreground"
-        style={{
-          fontFamily: 'Outfit-ExtraLight',
-          fontSize: s.font,
-          lineHeight: s.lineHeight,
-          letterSpacing: s.tracking,
-        }}
-      >
+      <Text className="font-display-light text-fg" style={style}>
         thing
       </Text>
     </View>

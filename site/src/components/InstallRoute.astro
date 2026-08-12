@@ -1,0 +1,40 @@
+---
+export type Props = {
+  name: string;
+  detail: string;
+  status: 'ready' | 'soon';
+  href?: string;
+  cta?: string;
+  command?: string;
+  note?: string;
+};
+
+const { name, detail, status, href, cta, command, note } = Astro.props;
+const ready = status === 'ready';
+---
+
+<div class="flex flex-wrap items-start gap-x-10 gap-y-4 border-b border-white/10 py-5 last:border-b-0">
+  <div class="flex min-w-0 flex-1 basis-72 flex-col gap-1.5">
+    <h3 class="font-display m-0 text-lg font-medium">{name}</h3>
+    <p class="m-0 text-base text-pretty text-white/60">{detail}</p>
+    {note && <p class="m-0 font-mono text-xs text-pretty text-white/35">{note}</p>}
+  </div>
+
+  <div class="flex shrink-0 items-center">
+    {
+      !ready ? (
+        <span class="btn btn-soon">coming soon</span>
+      ) : command ? (
+        <code class="border border-white/15 bg-black px-4 py-2.5 text-sm text-white/70">
+          <span class="text-accent">$</span> {command}
+        </code>
+      ) : href ? (
+        <a href={href} class="btn" rel="noopener">
+          {cta ?? 'open'}
+        </a>
+      ) : (
+        <span class="text-ok/70 font-mono text-sm">already on</span>
+      )
+    }
+  </div>
+</div>

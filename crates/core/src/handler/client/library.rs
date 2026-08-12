@@ -19,7 +19,7 @@ use libbridgething::{
 
 use super::{HandlerResult, MsgHandle};
 use crate::{
-  bluetooth::GatewayMan,
+  bluetooth::{Address, GatewayMan},
   player::{Player, is_synthetic_uri},
   state::{BrowseContentCache, RootBrowseCache},
 };
@@ -104,6 +104,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
     };
     match browse_request(
       &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
       &self.handle.state.root_browse,
       &self.handle.state.browse_content,
       &self.handle.state.player,
@@ -142,7 +143,8 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    let primary = self.handle.state.capabilities.primary_addr();
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -173,7 +175,8 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: req.limit.min(BROWSE_LIMIT_MAX),
       offset: req.offset,
     };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    let primary = self.handle.state.capabilities.primary_addr();
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -211,7 +214,10 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       .handle
       .bluetooth
       .gateway_man
-      .request(None, LibraryResolveContextRequest { uri })
+      .request(
+        self.handle.state.capabilities.primary_addr(),
+        LibraryResolveContextRequest { uri },
+      )
       .await
     {
       Ok(reply) => {
@@ -244,7 +250,8 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    let primary = self.handle.state.capabilities.primary_addr();
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -277,7 +284,13 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
     let mut uris = uris;
     uris.truncate(FAVORITES_CONTAINS_MAX);
     let outbound = LibraryFavoritesContainsRequest { uris };
-    match favorites_contains_request(&self.handle.bluetooth.gateway_man, outbound).await {
+    match favorites_contains_request(
+      &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
+      outbound,
+    )
+    .await
+    {
       Ok(reply) => {
         self
           .handle
@@ -329,6 +342,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
 
 pub(super) async fn browse_request(
   gateway_man: &GatewayMan,
+  primary: Option<Address>,
   root_cache: &RootBrowseCache,
   content_cache: &BrowseContentCache,
   player: &Player,
@@ -347,7 +361,7 @@ pub(super) async fn browse_request(
     let shape = (req.sections, req.preview);
     let result = root_cache
       .get_or_fetch(shape, player.root_browse_gen(), ROOT_BROWSE_TTL, || async {
-        gateway_man.request(None, req).await.map(|reply| reply.result)
+        gateway_man.request(primary, req).await.map(|reply| reply.result)
       })
       .await?;
     return Ok(BrowseReply { result });
@@ -356,7 +370,7 @@ pub(super) async fn browse_request(
   let limit = req.limit;
   let result = content_cache
     .get_or_fetch(&node_id, offset, limit, player.root_browse_gen(), || async move {
-      gateway_man.request(None, req).await.map(|reply| reply.result)
+      gateway_man.request(primary, req).await.map(|reply| reply.result)
     })
     .await?;
   Ok(BrowseReply { result })
@@ -364,6 +378,7 @@ pub(super) async fn browse_request(
 
 pub(super) async fn favorites_contains_request(
   gateway_man: &GatewayMan,
+  primary: Option<Address>,
   req: LibraryFavoritesContainsRequest,
 ) -> Result<FavoritesContainsReply, RequestError<gateway::LibraryErrorReply>> {
   if !req.uris.is_empty() && req.uris.iter().all(|uri| is_synthetic_uri(uri)) {
@@ -371,5 +386,5 @@ pub(super) async fn favorites_contains_request(
       liked: vec![false; req.uris.len()],
     });
   }
-  gateway_man.request(None, req).await
+  gateway_man.request(primary, req).await
 }

@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "component": "TransferPacer",
+  "phase": "frozen",
+  "description": "Hand-written frozen answers for the adaptive transfer pacer. Every value here was derived from the contract in pacer-trace.json and checked against the three emitted arms, not copied from one of them. An arm conforms when its pacer-trace.<impl>.json matches these constants and every step of every case. Rust asserts against this file today because the daemon is the peer both companions must satisfy; Swift and Kotlin still only emit, and start asserting when their pacers are deleted in favour of the shared core.",
+  "reconciled": {
+    "window_bytes": "ROUNDS. Rust and Swift round the rate*target-delay product; Kotlin truncates it (`.toLong()`). Numeric divergence, daemon behavior wins, so the shared core rounds and the Kotlin arm is the one that has to change. Visible only where the product carries a real fractional part: mid-range-window-on-a-fractional-rate reports 90001, not 90000. The neighbouring round-rate case proves the intuitive guess wrong -- 150000*0.6 lands within half an ulp of 90000.0, so round and truncate agree there.",
+    "fragment_bytes": "API asymmetry, recorded not asserted. Swift and Kotlin hang a 16384-byte sender fragment size off the pacer; the daemon pacer carries none, because the daemon never streams a paced transfer outward. Nothing here is a behavioral disagreement, so there is no daemon value to tie-break against. The shared core owns fragment size when it takes both sender paths.",
+    "start_offset": "API asymmetry, recorded not asserted. Swift and Kotlin construct the pacer with a resume offset so a range-resumed OTA does not record its resume point as one enormous first sample; the daemon pacer has no such constructor because it has no resume-sender path. The contract pins construction at acked = 0, which is why no case exercises it. The shared core carries it, defaulting to 0."
+  },
+  "constants": {
+    "target_delay_ms": 600,
+    "ack_interval_bytes": 16384,
+    "min_window_bytes": 65536,
+    "max_window_bytes": 262144,
+    "rate_sample_count": 8
+  },
+  "asymmetries": {
+    "fragment_bytes": "companion-only; see reconciled.fragment_bytes"
+  },
+  "cases": [
+    {
+      "name": "unmeasured-opens-at-the-floor",
+      "steps": [{ "t_ms": 0, "window_bytes": 65536, "rate_micros": null }]
+    },
+    {
+      "name": "non-advancing-acks-are-ignored",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 100, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 200, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 1000, "window_bytes": 65536, "rate_micros": 32768000000 }
+      ]
+    },
+    {
+      "name": "a-slow-link-stays-at-the-floor",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 1000, "window_bytes": 65536, "rate_micros": 16384000000 },
+        { "t_ms": 2000, "window_bytes": 65536, "rate_micros": 16384000000 },
+        { "t_ms": 3000, "window_bytes": 65536, "rate_micros": 16384000000 },
+        { "t_ms": 4000, "window_bytes": 65536, "rate_micros": 16384000000 }
+      ]
+    },
+    {
+      "name": "a-fast-link-rides-the-cap",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 1000, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 2000, "window_bytes": 262144, "rate_micros": 1000000000000 }
+      ]
+    },
+    {
+      "name": "mid-range-window-on-a-round-rate",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 1000, "window_bytes": 90000, "rate_micros": 150000000000 }
+      ]
+    },
+    {
+      "name": "mid-range-window-on-a-fractional-rate",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 1000, "window_bytes": 90001, "rate_micros": 150001000000 }
+      ]
+    },
+    {
+      "name": "rate-is-the-max-of-the-window-not-the-mean",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 1100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 2100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 3100, "window_bytes": 262144, "rate_micros": 1000000000000 }
+      ]
+    },
+    {
+      "name": "the-sample-window-evicts-the-oldest",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 1100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 2100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 3100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 4100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 5100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 6100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 7100, "window_bytes": 262144, "rate_micros": 1000000000000 },
+        { "t_ms": 8100, "window_bytes": 65536, "rate_micros": 100000000 },
+        { "t_ms": 9100, "window_bytes": 65536, "rate_micros": 100000000 }
+      ]
+    },
+    {
+      "name": "a-zero-length-interval-clamps-to-one-millisecond",
+      "steps": [
+        { "t_ms": 0, "window_bytes": 65536, "rate_micros": null },
+        { "t_ms": 0, "window_bytes": 262144, "rate_micros": 50000000000000 },
+        { "t_ms": 0, "window_bytes": 262144, "rate_micros": 50000000000000 },
+        { "t_ms": 5000, "window_bytes": 262144, "rate_micros": 50000000000000 }
+      ]
+    }
+  ]
+}

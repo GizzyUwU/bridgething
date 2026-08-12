@@ -3691,12 +3691,6 @@ export type PartialClientMessageHandlers = {
   forward?: Partial<ForwardInboundHandlers>;
 };
 
-/**
- * Codegen-emitted shape applied to `BridgethingClient` at runtime via
- * `applyDispatch()`. `index.ts` declares `interface BridgethingClient
- * extends ClientSurfaces {}` so class+interface merging picks these up
- * for consumers regardless of how the published `.d.ts` is bundled.
- */
 export interface ClientSurfaces {
   /** Methods scoped to the `Asset` wire surface. */
   readonly asset: AssetSurface;
@@ -3769,10 +3763,6 @@ type ClientSurfaceCache = {
   store?: StoreSurface;
 };
 
-/**
- * Apply codegen-emitted prototype augmentations to BridgethingClient.
- * Called once from `index.ts` after the class definition. Idempotent.
- */
 export function applyDispatch(): void {
   const surfaceCache = new WeakMap<BridgethingClient, ClientSurfaceCache>();
   function bucketFor(c: BridgethingClient): ClientSurfaceCache {

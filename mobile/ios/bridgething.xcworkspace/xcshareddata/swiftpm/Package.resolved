@@ -1,24 +1,6 @@
 {
-  "originHash" : "9696149358f1f6817f73b39d62148158839a45c85e088b59f736b74ede5974db",
+  "originHash" : "234e795a34a1eac11e5cc158bbbe776971190ef4f11e34f12d1afb21669bf4b4",
   "pins" : [
-    {
-      "identity" : "gzipswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/1024jp/GzipSwift",
-      "state" : {
-        "revision" : "56bf51fdd2fe4b2cf254b2cf34aede3d7caccc6c",
-        "version" : "6.1.0"
-      }
-    },
-    {
-      "identity" : "msgpack-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/fumoboy007/msgpack-swift",
-      "state" : {
-        "revision" : "fe3101819f4f82b086da5279a9df81f6754798e9",
-        "version" : "2.0.6"
-      }
-    },
     {
       "identity" : "swift-log",
       "kind" : "remoteSourceControl",
@@ -26,15 +8,6 @@
       "state" : {
         "revision" : "5073617dac96330a486245e4c0179cb0a6fd2256",
         "version" : "1.12.0"
-      }
-    },
-    {
-      "identity" : "zipfoundation",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/weichsel/ZIPFoundation.git",
-      "state" : {
-        "revision" : "22787ffb59de99e5dc1fbfe80b19c97a904ad48d",
-        "version" : "0.9.20"
       }
     }
   ],

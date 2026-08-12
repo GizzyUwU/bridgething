@@ -1,0 +1,107 @@
+---
+import Snippet from '../../components/docs/Snippet.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const refdes = 'text-accent m-0 mb-4 font-mono text-sm font-normal tracking-normal';
+
+const manifestSnippet = `{
+  "id": "…",
+  "name": "My App",
+  "version": "0.1.0",
+  "settings": "settings.html"
+}`;
+
+const sdkSnippet = `import { settings } from '@bridgething/client/settings';
+
+const { webappId, name } = await settings.context();
+
+// the user's saved config values (and the manifest schema, for rendering a form)
+const fields = await settings.config.fields();
+const values = await settings.config.list();
+await settings.config.set('base_url', url);
+
+// the shared doc namespace: what your phone-side page authors, your on-device webapp reads
+await settings.doc.set('selected_entities', ids.join(','));
+const off = settings.onDocChanged((key, value) => sync(key, value));
+
+settings.done(); // closes the sheet`;
+
+const deviceSnippet = `// on-device webapp: adopt what the settings page authored, live
+const saved = await client.doc.get({ key: 'selected_entities' });
+client.doc.onChanged(c => applySelection(c.value));`;
+
+const buildSnippet = `// package.json: the scaffold ships this wiring
+"build": "vite build && vite build -c vite.settings.config.ts"`;
+---
+
+<DocsLayout
+  title="settings pages"
+  description="give your webapp a rich companion-side settings ui: one self-contained html page rendered in the phone app."
+  current="settings-pages">
+  <header class="mb-12">
+    <h1>settings pages</h1>
+    <p class="text-white/60">
+      typing a url or picking from many entities on the car screen is painful. a settings page moves that to the phone.
+      it is one self-contained html file in your bundle. the companion app renders it in a webview.
+    </p>
+  </header>
+
+  <section class="mb-14">
+    <h2 class={refdes}>s1 - declare it</h2>
+    <p class="text-white/60">
+      point <code>manifest.json</code> at the built file. it must be a single self-contained html file, all js and css inlined.
+      the cap is 1&nbsp;MiB at install. keep it lean.
+    </p>
+    <Snippet code={manifestSnippet} lang="json" />
+    <p class="mt-3 text-sm text-white/60">
+      <code>bun create bridgething</code> scaffolds all of this: a preact page under <code>settings/</code>, a
+      single-file vite build with size warnings at 200&nbsp;KiB, and the manifest entry.
+    </p>
+    <Snippet code={buildSnippet} lang="json" />
+  </section>
+
+  <section class="mb-14">
+    <h2 class={refdes}>s2 - talk to the companion</h2>
+    <p class="text-white/60">
+      inside the page, import <code>@bridgething/client/settings</code>. it is a tiny bridge sdk. it reads and writes
+      your app's declared config and writes the <strong class="text-white/80">doc namespace</strong>: shared per-app
+      key/value state.
+    </p>
+    <Snippet code={sdkSnippet} />
+    <p class="mt-3 text-white/60">
+      on the device side, your webapp reads the same doc namespace over the normal client:
+    </p>
+    <Snippet code={deviceSnippet} />
+  </section>
+
+  <section class="mb-14 scroll-mt-24" id="network">
+    <h2 class={refdes}>s3 - network: use websocket apis or permissive origins</h2>
+    <p class="text-white/60">
+      the page runs on the phone, so it has real internet. but it loads from a <code>file://</code> origin, and the webview
+      enforces cors on <code>fetch</code>/xhr from that origin. in practice:
+    </p>
+    <ul role="list" class="mt-4 space-y-1.5 text-sm text-white/60">
+      <li>
+        <strong class="text-white/80">websocket apis work.</strong> the ws handshake is not cors-gated.
+      </li>
+      <li>
+        <strong class="text-white/80">plain http apis work only if the server sends permissive cors headers</strong>
+        (your requests arrive with <code>Origin: null</code> or <code>*</code>). most public apis are fine.
+      </li>
+    </ul>
+    <p class="mt-4 text-sm text-white/60">
+      rule of thumb: if the service has a websocket api, use it from the settings page. if it's http-only and
+      cors-strict, do the fetching in your on-device webapp via <code>client.net</code>, which tunnels through the phone
+      and is not origin-restricted.
+    </p>
+  </section>
+
+  <section>
+    <h2 class={refdes}>s4 - a worked example</h2>
+    <p class="text-white/60">
+      the home assistant example app ships a settings page. it dials your ha server over its websocket api. it lists
+      every entity, grouped and searchable. it saves your selection as a doc the device app applies live. the entity
+      picker never renders on the car screen.
+    </p>
+  </section>
+</DocsLayout>

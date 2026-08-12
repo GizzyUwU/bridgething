@@ -150,6 +150,19 @@ export type BridgethingVoiceModelState = {
   error?: string;
 };
 
+export type BridgethingVoiceTurnTrigger = 'pushToTalk' | 'assistant' | 'wakeWord';
+
+export type BridgethingVoiceTurnPhase = 'listening' | 'resolved' | 'cancelled';
+
+export type BridgethingVoiceTurn = {
+  deviceId: string;
+  streamId: string;
+  trigger: BridgethingVoiceTurnTrigger;
+  phase: BridgethingVoiceTurnPhase;
+  transcript?: string;
+  intent?: string;
+};
+
 export type BridgethingOtaPollConfig = {
   intervalSeconds: number;
   autoPush: boolean;
@@ -198,8 +211,17 @@ export type BridgethingOtaRun = {
   releaseVersion?: string;
   daemonVersion?: string;
   imageVersion?: string;
+  resumable: boolean;
   webappId?: string;
   webappName?: string;
+};
+
+export type BridgethingOtaProgress = {
+  percent: number;
+  stepIndex: number;
+  stepCount: number;
+  stepLabel?: string;
+  etaSeconds?: number;
 };
 
 export type BridgethingOtaAvailable = {
@@ -306,6 +328,7 @@ export type BridgethingSessionSnapshot = {
 export type BridgethingDeviceLogLine = {
   seq: number;
   ts: number;
+  origin: string;
   level: string;
   message: string;
 };
@@ -318,9 +341,32 @@ export type BridgethingLogArchive = {
   current: boolean;
 };
 
+export type BridgethingDeviceAutoResume = {
+  deviceId: string;
+  enabled: boolean;
+};
+
+export type BridgethingVoiceDebug = {
+  hasModel: boolean;
+  armedBundle?: string;
+  transferAllowed: boolean;
+  nluBundleDir?: string;
+  asrWeights?: string;
+};
+
 export type BridgethingCompanionDebug = {
   authorityPlaybackHeld: boolean;
   authorityMetadataHeld: boolean;
+  authorityVolumeHeld: boolean;
+  authorityAppBundle?: string;
+  arbitratedSource?: string;
+  librarySource?: string;
+  lastPlayedFrom?: string;
+  attachedProviders: string[];
+  attachedSchemes: string[];
+  linkedDevices: string[];
+  autoResume: BridgethingDeviceAutoResume[];
+  voice: BridgethingVoiceDebug;
 };
 
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
@@ -340,6 +386,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   persistedLogSize(): Promise<number>;
   logArchives(): Promise<BridgethingLogArchive[]>;
+  logArchiveLines(archiveId: string, limit: number): Promise<BridgethingDeviceLogLine[]>;
   exportLogs(archiveId: string | null): Promise<string>;
   shareLogs(archiveId: string | null): Promise<boolean>;
   deleteLogArchive(archiveId: string): Promise<void>;
@@ -368,14 +415,16 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
   voiceModelState(): Promise<BridgethingVoiceModelState>;
+  downloadVoiceModel(): Promise<void>;
 
   setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void>;
   isDeviceAutoResumeEnabled(deviceId: string): Promise<boolean>;
 
   setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void>;
-  checkForOtaUpdate(rootUrl: string | null): Promise<void>;
-  fetchOtaManifest(rootUrl: string | null): Promise<BridgethingOtaManifest>;
-  applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string | null): Promise<void>;
+  checkForOtaUpdate(rootUrl: string): Promise<void>;
+  fetchOtaManifest(rootUrl: string): Promise<BridgethingOtaManifest>;
+  applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string): Promise<void>;
+  otaRunProgress(deviceId: string, nowMs: number): BridgethingOtaProgress | null;
 
   installWebappFromUrl(
     deviceId: string,
@@ -413,7 +462,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
   setOnAncsAuthStatusChanged(callback: (deviceId: string, status: BridgethingAncsAuthStatus) => void): void;
-  setOnLog(callback: (level: string, message: string) => void): void;
+  setOnLog(callback: (origin: string, level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
   setLocalLogStreamingEnabled(enabled: boolean): void;
 
@@ -423,6 +472,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   ): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   setOnVoiceModelStateChanged(callback: (state: BridgethingVoiceModelState) => void): void;
+  setOnVoiceTurnChanged(callback: (turn: BridgethingVoiceTurn) => void): void;
 
   dismissOtaRun(deviceId: string): Promise<void>;
 

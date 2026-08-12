@@ -4,23 +4,30 @@ use std::{
   time::Duration,
 };
 
+#[cfg(feature = "chrome")]
 mod chrome;
+#[cfg(target_os = "linux")]
 mod device;
 pub mod model;
 mod seam;
 use anyhow::Result;
-use bluer::Address;
-use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, Iap2TransportCommand, ServerAddrs, State, TappedFrame};
+use bridgething::{
+  Address, DaemonConfig, HeadlessInject, Iap2Event, Iap2TransportCommand, ServerAddrs, State, TappedFrame,
+};
 use bridgething_client::Client as CommandClient;
 use bridgething_gateway::Gateway;
 use bridgething_iap2::SessionEvent;
+#[cfg(feature = "chrome")]
 pub use chrome::ChromeView;
+#[cfg(target_os = "linux")]
 pub use device::DeviceHarness;
 use futures::StreamExt;
 pub use seam::{
-  CommandDriver, DeviceIap2Source, DeviceTier, FrameObserve, GatewayDriver, HarnessIap2Source, Iap2OutboundObserve,
-  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport, WebappProvision,
+  CommandDriver, FrameObserve, GatewayDriver, HarnessIap2Source, Iap2OutboundObserve, Iap2Source, Iap2SourceDriver,
+  ModernClientDriver, OverAirTransport, WebappProvision,
 };
+#[cfg(target_os = "linux")]
+pub use seam::{DeviceIap2Source, DeviceTier};
 use tokio::{net::TcpStream, sync::broadcast, task::JoinHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 use uuid::Uuid;
@@ -113,11 +120,15 @@ impl Harness {
   }
 
   pub async fn connect_android(&self) -> Result<Gateway> {
+    Ok(Gateway::from_io(self.connect_android_io().await?))
+  }
+
+  pub async fn connect_android_io(&self) -> Result<tokio::io::DuplexStream> {
     let (daemon_half, phone_half) = tokio::io::duplex(DUPLEX_BUF);
     let n = self.next_peer.fetch_add(1, Ordering::Relaxed);
     let addr = Address([0xFE, 0xED, 0x00, 0x00, 0x00, n]);
     self.inject.rfcomm.send((addr, daemon_half)).await?;
-    Ok(Gateway::from_io(phone_half))
+    Ok(phone_half)
   }
 
   pub async fn inject_iap2(&self, address: Address, event: SessionEvent) -> Result<()> {
@@ -192,6 +203,7 @@ impl Harness {
     self.server_addrs.proxy.expect("SOCKS proxy bound")
   }
 
+  #[cfg(feature = "chrome")]
   pub async fn open_stock_chrome(&self) -> Result<ChromeView> {
     ChromeView::launch(self.server_addrs.modern, self.server_addrs.stock.port()).await
   }

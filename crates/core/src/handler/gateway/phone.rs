@@ -22,18 +22,30 @@ impl GatewayToBridgePhoneMsgEventDispatch for PhoneHandler {
   type Output = HandlerResult;
 
   async fn snapshot(&self, params: PhoneStateReply) -> HandlerResult {
-    if let Err(err) = self.handle.state.telephony.apply_companion_snapshot(params.state).await {
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
+    if let Err(err) = self
+      .handle
+      .state
+      .telephony
+      .apply_companion_snapshot(addr, params.state)
+      .await
+    {
       tracing::warn!(?err, "failed to apply companion phone event");
     }
     Ok(())
   }
 
   async fn communications_snapshot(&self, params: CommunicationsSnapshot) -> HandlerResult {
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
     if let Err(err) = self
       .handle
       .state
       .telephony
-      .apply_companion_communications(params.state)
+      .apply_companion_communications(addr, params.state)
       .await
     {
       tracing::warn!(?err, "failed to apply companion phone event");
@@ -42,14 +54,32 @@ impl GatewayToBridgePhoneMsgEventDispatch for PhoneHandler {
   }
 
   async fn call_started(&self, params: PhoneCall) -> HandlerResult {
-    if let Err(err) = self.handle.state.telephony.apply_companion_call_started(params).await {
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
+    if let Err(err) = self
+      .handle
+      .state
+      .telephony
+      .apply_companion_call_started(addr, params)
+      .await
+    {
       tracing::warn!(?err, "failed to apply companion phone event");
     }
     Ok(())
   }
 
   async fn call_updated(&self, params: PhoneCall) -> HandlerResult {
-    if let Err(err) = self.handle.state.telephony.apply_companion_call_updated(params).await {
+    let Some(addr) = self.handle.address else {
+      return Ok(());
+    };
+    if let Err(err) = self
+      .handle
+      .state
+      .telephony
+      .apply_companion_call_updated(addr, params)
+      .await
+    {
       tracing::warn!(?err, "failed to apply companion phone event");
     }
     Ok(())

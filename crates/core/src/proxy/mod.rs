@@ -1,9 +1,11 @@
 use std::{
   io,
   net::{IpAddr, SocketAddr},
+  sync::Arc,
   time::Duration,
 };
 
+use bridgething_delivery::{seam::SystemClock, transfer::Pacer};
 use bytes::BytesMut;
 use libbridgething::{
   TunnelAck, TunnelClosed, TunnelData, TunnelError,
@@ -20,7 +22,6 @@ use uuid::Uuid;
 use crate::{
   bluetooth::BluetoothMan,
   state::{State, TunnelInbound},
-  transfer::pacer::Pacer,
 };
 
 const PROXY_PERMISSION: &str = "net.proxy";
@@ -101,16 +102,22 @@ async fn handle_session(
     return Ok(());
   }
 
+  let Some(primary) = state.capabilities.primary_addr() else {
+    tracing::debug!(%peer, host = %request.host, port = request.port, "SOCKS request denied: no companion gateway");
+    write_socks_reply(&mut stream, SOCKS_REP_FAILURE).await?;
+    return Ok(());
+  };
+
   let tunnel_id = Uuid::now_v7();
   let (inbound_tx, inbound_rx) = mpsc::channel(TUNNEL_INBOUND_CAPACITY);
-  let consumed_rx = state.tunnel_routes.register(tunnel_id, inbound_tx);
+  let consumed_rx = state.tunnel_routes.register(tunnel_id, inbound_tx, primary);
 
   let open = TunnelOpen {
     tunnel_id,
     host: request.host.clone(),
     port: request.port,
   };
-  let reply_code = match bluetooth.gateway_man.request(None, open).await {
+  let reply_code = match bluetooth.gateway_man.request(Some(primary), open).await {
     Ok(_) => SOCKS_REP_OK,
     Err(err) => {
       state.tunnel_routes.drop_id(tunnel_id);
@@ -270,7 +277,7 @@ async fn bridge(
   let outbound_task = tokio::spawn(async move {
     let mut buf = BytesMut::with_capacity(READ_CHUNK_BYTES);
     let mut sent: u64 = 0;
-    let mut pacer = Pacer::new();
+    let mut pacer = Pacer::new(Arc::new(SystemClock), 0);
     loop {
       loop {
         let consumed = *consumed_rx.borrow();

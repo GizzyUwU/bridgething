@@ -1,0 +1,26 @@
+---
+import { UpdateConsole } from '../../components/device/UpdateConsole';
+import Footer from '../../components/Footer.astro';
+import Header from '../../components/Header.astro';
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="update" description="update a bridgething car thing over the usb cable, straight from your browser.">
+  <Header />
+
+  <main class="container-site w-full flex-1 py-12 md:py-16">
+    <section class="flex flex-col gap-8">
+      <header class="flex flex-col gap-3">
+        <p class="m-0 font-mono text-sm text-white/40">
+          <a href="/install">install</a> / update
+        </p>
+        <h1 class="m-0">update over the cable</h1>
+        <p class="m-0 max-w-[60ch] text-lg text-pretty text-white/70">for a booted device running bridgething</p>
+      </header>
+
+      <UpdateConsole client:only="preact" />
+    </section>
+  </main>
+
+  <Footer />
+</Layout>

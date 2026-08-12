@@ -29,9 +29,6 @@ class WhisperRecognizer(
     lock.withLock { withContext(dispatcher) { ensureLoaded() } }
   }
 
-  suspend fun transcribe(samples: FloatArray, sampleRate: Int): String =
-    transcribeDetailed(samples, sampleRate).text
-
   suspend fun transcribeDetailed(samples: FloatArray, sampleRate: Int): Transcription {
     require(sampleRate == WHISPER_SAMPLE_RATE) {
       "whisper requires ${WHISPER_SAMPLE_RATE} hz mono audio, got $sampleRate hz"

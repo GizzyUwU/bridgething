@@ -1,0 +1,46 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const refdes = 'text-accent m-0 mb-4 font-mono text-sm font-normal tracking-normal';
+
+const items = [
+  {
+    q: 'the installer never sees the device',
+    a: 'use chrome. firefox needs the webserial extension and safari cannot do it at all. failing that, try a different usb-c cable.',
+  },
+  {
+    q: 'the phone will not pair',
+    a: 'on the device, open settings, then bluetooth, then make discoverable. if it paired before and stopped connecting, forget it there and pair again.',
+  },
+  {
+    q: 'an app wants a setting',
+    a: "calendar needs a feed url, home assistant needs your instance and a token, weather needs a location. they live on that app's settings screen in the companion app.",
+  },
+];
+---
+
+<DocsLayout
+  title="troubleshooting"
+  current="troubleshooting"
+  description="fixes for the things that go wrong installing or running bridgething.">
+  <header class="mb-14">
+    <h1>troubleshooting</h1>
+    <p class="text-white/60">
+      if none of these match, the <a href="https://tl.mt/d">thing labs discord</a> is where the rest of us are.
+    </p>
+  </header>
+
+  <section>
+    <h2 class={refdes}>d1 - when things go wrong</h2>
+    <dl class="m-0 border-t border-white/10">
+      {
+        items.map(item => (
+          <div class="border-b border-white/10 py-6">
+            <dt class="font-display mb-2 text-lg font-medium tracking-tight">{item.q}</dt>
+            <dd class="m-0 max-w-[68ch] text-pretty text-white/60">{item.a}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </section>
+</DocsLayout>

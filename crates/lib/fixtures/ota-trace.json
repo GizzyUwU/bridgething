@@ -1,0 +1,2824 @@
+{
+  "version": 1,
+  "component": "OtaRunStore + auto-push scheduling",
+  "phase": "capture",
+  "description": "Cross-language conformance traces for the OTA run-store reducer and the auto-push backoff/wake scheduler. PHASE 1: every implementation EMITS its own trace to ota-trace.<impl>.json and nothing is asserted. Diff those files; each difference is a spec question nobody has answered. Once reconciled, freeze the agreed answers and flip every runner to assert. Cases carry a `component` tag; an emitter drives the run store for `run_store` cases and evaluates the scheduling expressions for `auto_push` cases.",
+  "arms": {
+    "rust": "crates/delivery/core ota::run_store::OtaRunStore driven directly, and ota::autopush::AutoPushSchedule evaluated directly rather than transcribed. Asserts against ota-trace.expected.json.",
+    "swift": "OtaRunStore in the swift companion package, driven directly; auto-push expressions transcribed from OtaService.",
+    "kotlin": "OtaRunStore in the kotlin companion module, driven directly; auto-push expressions transcribed from OtaService."
+  },
+  "contract": {
+    "clock": "virtual, and the trace epoch is 0. t_ms is non-decreasing within a case. an emitter whose platform clock is a wall-clock date builds it as `epoch + t_ms` and converts every emitted timestamp back to integer milliseconds since that same epoch, rounding to nearest.",
+    "run_store_construction": "a fresh, empty store per case. no state survives a case boundary.",
+    "run_store_step": "each step performs exactly one operation. `ingest` calls ingest(event, now = t_ms). `call` invokes the named method; none of the call-shaped methods take a clock, so t_ms on those steps is bookkeeping only and must not be fed anywhere.",
+    "run_store_emit": "after the operation, record the full field set below. every field is present on every step; fields that do not apply are null. no nested objects -- the differ compares field by field and object key order is not stable across languages.",
+    "run_ids": "runIds are random uuids and never appear in an answer file. keep a per-case list of distinct returned runIds in first-seen order and emit the 0-based index as `ret_run_id_seq`. that is what makes 'a second plan replaces the first' observable without a nondeterministic value crossing the diff.",
+    "map_order": "the store's maps are insertion-ordered on one platform and unordered on another, so store snapshots are emitted sorted by device id and the three parallel store arrays are in that same sorted order. an emitter that leaks native map order is wrong even if its answer file happens to match.",
+    "rates": "rates cross the corpus as `rate_micros`, an integer equal to round(rate_per_sec * 1e6), so float formatting never differs across languages. an emitter reads an input `rate_micros` as `rate_micros / 1e6` and emits `round(rate * 1e6)`. every value here is an exact binary fraction, so the round trip is lossless.",
+    "auto_push_transcription": "the auto-push cases are the ONLY part of this corpus not driven through a shipped object. the backoff and wake-deadline expressions are private to a service that cannot be constructed without a live gateway, so each emitter transcribes its own platform's expression verbatim and evaluates it. that makes this arm a transcription check rather than a behavioural one: reconcile must read the three sources side by side, not merely observe that three answer files agree.",
+    "no_jitter": "neither shipping implementation jitters the backoff. the schedule is fully deterministic, nothing is seeded and nothing is stripped. `backoff_jitter` is carried as a constant so that a jitter term added to one side later shows up as a constants divergence rather than as noise in the schedule."
+  },
+  "constants": {
+    "description": "every emitter reports these from its own source. units are deliberately named so a seconds-vs-milliseconds representation split shows up here rather than being silently normalised away in the steps.",
+    "keys": [
+      "auto_push_backoff_base_ms",
+      "auto_push_backoff_max_ms",
+      "auto_push_backoff_shift_cap",
+      "auto_push_backoff_jitter",
+      "link_stability_ms",
+      "min_resume_delay_ms",
+      "min_poll_interval_seconds",
+      "cancelled_reason"
+    ]
+  },
+  "emitted": {
+    "run_store": [
+      "ret_changes: array of change kinds in emission order, e.g. [] or [\"run\"] or [\"run\",\"available\"] or [\"poll\"]. null on `call` steps.",
+      "ret_present: true when the operation produced a run (the `run` change, or the optional returned by a call).",
+      "ret_device_id, ret_run_id_seq, ret_kind, ret_phase, ret_step_id, ret_step_ids, ret_started_at_ms, ret_phase_started_at_ms, ret_stage_received, ret_stage_total, ret_rate_micros, ret_dwl_percent, ret_outcome, ret_error, ret_release_version, ret_daemon_version, ret_image_version, ret_webapp_id, ret_webapp_name: fields of that run, all null when ret_present is false. ret_step_ids is the plan's step ids in plan order.",
+      "ret_available_device_id, ret_available_release_version, ret_available_daemon_version, ret_available_image_version: fields of the `available` change when one was emitted, else null.",
+      "ret_poll_last_polled_at, ret_poll_error: fields of the `poll` change when one was emitted, else null.",
+      "ret_open_kind: the kind returned by an open_run_kind call, else null.",
+      "store_run_device_ids: device ids of every run held, sorted ascending.",
+      "store_run_phases, store_run_outcomes: parallel to store_run_device_ids, same order.",
+      "store_available_device_ids: device ids of every available entry, sorted ascending.",
+      "store_poll_last_polled_at, store_poll_error: the poll status after the operation."
+    ],
+    "auto_push": [
+      "backoff_failures: the recorded consecutive-failure count for the device after the step.",
+      "backoff_raw_delay_ms: the backoff product BEFORE the ceiling is applied, null on steps that are not a failure. emitted separately from backoff_delay_ms so the shift clamp and the ceiling are distinguishable from a single sweep.",
+      "backoff_delay_ms: the delay after the ceiling, null on steps that are not a failure.",
+      "backoff_next_at_ms: the absolute next-attempt time in trace milliseconds, null when no backoff is armed.",
+      "link_stable: whether the link has been open long enough to count as stable at t_ms.",
+      "auto_push_ready: whether an auto push would be allowed at t_ms.",
+      "wake_deadline_ms: the computed next-wake deadline in trace milliseconds, null on cases that do not carry an interval_seconds.",
+      "wake_sleep_ms: wake_deadline_ms - t_ms after the zero floor, null likewise."
+    ]
+  },
+  "cases": [
+    {
+      "component": "run_store",
+      "name": "planned-opens-a-run-carrying-its-plan",
+      "description": "a plan is the only thing that opens a run. it starts idle, parked on the first step of its plan, with no outcome.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "planned-with-no-versions-leaves-them-unset-rather-than-empty",
+      "description": "a webapp install targets no daemon or image version. the empty strings the event carries must land as absent, not as empty strings, because absent is what noteMeta later reads as untargeted.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-second-plan-replaces-the-first-for-the-same-device",
+      "description": "the store keys one run per device. the replacement carries a new run id and the new kind, and the old run is gone rather than archived.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-plan-replacing-a-finished-run-reopens-the-device",
+      "description": "the replacement path is not guarded on the previous outcome, so a plan landing on a completed run wipes the outcome and the error rather than being refused. that is what makes a device re-updatable without a dismiss, and it is also what makes interrupt work again afterwards.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "write failed"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.1+image.2026.07.0",
+            "daemon_version": "0.9.1",
+            "image_version": "2026.07.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 3000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "progress-without-a-plan-is-ignored",
+      "description": "progress cannot conjure a run nobody planned. the event produces no changes at all, which is different from producing a change describing nothing.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "download-progress-carries-bytes-and-rate",
+      "description": "the download snapshot is the only one that fills received, total and rate together.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-fractional-rate-survives-the-round-trip",
+      "description": "rates arrive from the daemon as doubles and are stored unchanged. a rate with a genuine fractional part is what proves the store is not quietly truncating on one platform. 0.5 and 0.25 are exact in binary, so any difference here is a real one.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 1,
+              "total": 100,
+              "rate_micros": 1250500
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 2,
+              "total": 100,
+              "rate_micros": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "phase-started-at-moves-only-when-the-phase-does",
+      "description": "more of the same phase is not a new phase. the timestamp is what a stall watchdog reads, so a phase-start that ticks on every progress event would make a stall unmeasurable.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 10000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "a",
+              "received": 1,
+              "total": 100,
+              "rate_micros": null
+            }
+          }
+        },
+        {
+          "t_ms": 20000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "a",
+              "received": 2,
+              "total": 100,
+              "rate_micros": null
+            }
+          }
+        },
+        {
+          "t_ms": 30000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "applying-reports-delta-bytes-only-while-the-delta-pull-is-measurable",
+      "description": "past the delta pull there are no reported bytes, and a frozen number reads as a stall. the guard is percent-below-one-hundred AND bytes-above-zero, so this walks 50/4096, 99/4096, 99/0 and 100/8192 to pin both halves of it independently.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 10,
+              "dwl_percent": 50,
+              "dwl_bytes": 4096
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 50,
+              "dwl_percent": 99,
+              "dwl_bytes": 4096
+            }
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 55,
+              "dwl_percent": 99,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 4000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 60,
+              "dwl_percent": 100,
+              "dwl_bytes": 8192
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "an-applying-tick-does-not-clear-a-stale-rate",
+      "description": "the applying branch writes dwl percent, stage received and stage total, and leaves rate alone. so a rate measured during the download keeps rendering behind a write bar it no longer describes. both platforms do this identically; the case exists so the reconcile has to answer whether the port keeps it.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 90,
+              "total": 100,
+              "rate_micros": 250000000
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 20,
+              "dwl_percent": 100,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "the-idle-snapshot-rewinds-the-phase-without-clearing-the-numbers",
+      "description": "the idle branch sets the phase and touches nothing else, so a run that reports idle mid-download keeps its received, total and rate. the phase timestamp does move, because the phase changed. same on both platforms; a reconcile decision, not a discovered divergence.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "idle"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-streaming-snapshot-replaces-the-download-numbers",
+      "description": "streaming reuses stage received for its sent count and drops the eta on the floor -- the store has no eta field. this is the only snapshot whose input carries a value the reducer discards, which is worth pinning before a port invents a field for it.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "stream",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 100,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "streaming",
+              "asset": "update.swu",
+              "sent": 30,
+              "total": 100,
+              "rate_micros": 8000000,
+              "eta_micros": 8750000
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "progress-for-a-step-outside-the-plan-keeps-the-last-understood-position",
+      "description": "a step id that does not index this plan must not rewind the run to its start. the guard is membership in the plan, so an id past the end is refused the same way an id that was never issued is.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 50,
+              "dwl_percent": 50,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 99,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 60,
+              "dwl_percent": 60,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 70,
+              "dwl_percent": 70,
+              "dwl_bytes": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "an-empty-plan-accepts-any-step-id",
+      "description": "a run opened by a failure carries no plan, and the membership guard has an empty-plan escape hatch so the position is still tracked. a replanned run then re-arms the guard.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "daemon",
+            "reason": "gateway not attached"
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "daemon",
+            "step_id": 7,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "progress-overwrites-the-run-kind",
+      "description": "the kind on the progress event was assigned unconditionally in both platform captures, so a tick carrying a different kind than the plan relabeled the run. overruled 2026-08-05: the shared reducer never overwrites the run's kind; the expectation carries the guarded answer and the frozen platform arms remain the record of the relabel.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-failed-snapshot-is-not-a-failed-outcome",
+      "description": "the sharpest edge in the reducer. the failed PHASE snapshot writes the phase and the error and leaves the outcome unset, so the run is still open: openRunKind still answers, dismiss still refuses, and interrupt still fires. only the failed EVENT ends a run. both platforms agree, and nothing in either test suite covers it.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "failed",
+              "reason": "verify failed"
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 3000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 4000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-completed-snapshot-is-not-a-succeeded-outcome",
+      "description": "the mirror of the failed-snapshot edge. a completed phase leaves the outcome unset, so the run stays open and undismissable until the updated event arrives. this is the state a card sits in between the daemon saying it finished and the daemon saying it landed.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "completed"
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 3000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "progress-after-a-terminal-outcome-still-moves-the-phase",
+      "description": "neither implementation guards progress on the outcome, so a late tick from a daemon that has not noticed the run ended rewinds a completed run's phase to downloading while leaving outcome succeeded. the resulting state is internally contradictory and reachable in the field, since a device emits its last progress and its updated event over the same link. the corpus pins it so it is decided rather than inherited.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 3000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "updated-ends-the-run-and-clears-the-available-update",
+      "description": "leftover progress would render behind a finished bar, so the byte and rate fields are wiped. listeners are told the offer is gone by an available change carrying an otherwise empty entry, not left holding the old one.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "release": "r",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "a",
+              "received": 5,
+              "total": 100,
+              "rate_micros": 3000000
+            }
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "updated-with-no-version-keeps-the-planned-release",
+      "description": "the release version is filled from the event only when the plan did not already carry one and the event's version is non-empty. an empty version must not blank a release the plan knew.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": ""
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "9.9.9"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "updated-without-a-plan-is-ignored",
+      "description": "the terminal success path bails when no run exists, so it emits nothing at all -- including no available change. a device that was never planned against therefore keeps any offer it had.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "release": "r",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "failed-records-the-reason-and-clears-the-numbers",
+      "description": "a failure wipes received, total and rate but deliberately leaves the dwl percent, which is the one progress field that survives a terminal failure on both platforms.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 1,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 40,
+              "dwl_percent": 60,
+              "dwl_bytes": 2048
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "write failed"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "cancellation-is-its-own-outcome",
+      "description": "a user stopping an update is not a failure to report. the discriminator is an exact string match on the cancelled reason, which is why that string is a corpus constant.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "cancelled"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-reason-that-merely-contains-cancelled-is-a-failure",
+      "description": "the cancelled check is equality, not a substring or a case-insensitive compare. a reason like Cancelled by peer is an ordinary failure. worth pinning because a port reaching for a contains() would pass every other case in this file.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "Cancelled by peer"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-failure-with-no-plan-still-opens-a-run-to-report-it",
+      "description": "a failure that never reached a plan still has to be visible, so the reducer synthesises a run with an empty plan. its start and phase-start both come from the failure's clock reading.",
+      "steps": [
+        {
+          "t_ms": 5000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "daemon",
+            "reason": "gateway not attached"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-second-failure-overwrites-the-first-reason",
+      "description": "terminal events are not latched. a second failure replaces the reason and the outcome, so a cancelled run that then reports a real error ends as a failure. the run id does not change, because the run was not reopened.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "cancelled"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "write failed"
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-link-that-dies-mid-download-ends-the-run",
+      "description": "interrupt is what the link-closed path calls. mid-download it converts the run to a failure with the disconnect reason, and the card becomes dismissable.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 1,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              },
+              {
+                "id": 2,
+                "kind": "reboot",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 3000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "link-loss-at-every-phase",
+      "description": "the whole interrupt policy in one case. the run is walked into each phase in turn and interrupt is attempted from it, replanning between attempts so every probe starts from a live run. reboot and confirming are the two phases where the run is what asked the device to go away, so its disconnect is not a failure; every other phase, including a run still idle from its plan, ends. the interrupt guard also does NOT clear the run's byte fields, unlike the failed event, which is a divergence between two paths that both produce a failed outcome.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 100,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 200,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 300,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 400,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 500,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "stream",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 600,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "streaming",
+              "asset": "update.swu",
+              "sent": 60,
+              "total": 100,
+              "rate_micros": 20000000,
+              "eta_micros": 2000000
+            }
+          }
+        },
+        {
+          "t_ms": 700,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 800,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 900,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "verifying",
+              "write_percent": 0,
+              "dwl_percent": 100,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 1100,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1200,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "writing",
+              "write_percent": 30,
+              "dwl_percent": 100,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 1300,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 1400,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1500,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "confirming",
+              "write_percent": 100,
+              "dwl_percent": 100,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 1600,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 1700,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "applying",
+              "ota_phase": "reboot",
+              "write_percent": 100,
+              "dwl_percent": 100,
+              "dwl_bytes": 0
+            }
+          }
+        },
+        {
+          "t_ms": 1800,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 1900,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "staged"
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 2100,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "apply",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 2200,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "completed"
+            }
+          }
+        },
+        {
+          "t_ms": 2300,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 2400,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "failed",
+              "reason": "verify failed"
+            }
+          }
+        },
+        {
+          "t_ms": 2500,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "interrupt-leaves-a-finished-run-alone",
+      "description": "a run that already reported an outcome is not re-terminated by a disconnect, so a successful update whose device reboots away keeps saying it succeeded.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "interrupt-and-dismiss-and-annotate-on-an-unknown-device-are-no-ops",
+      "description": "all three lookups bail on a missing run rather than synthesising one. nothing is added to the store as a side effect of asking about a device that has none.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "call": "interrupt",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 1000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 2000,
+          "call": "annotate_webapp",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "webapp_id": "abc",
+          "webapp_name": "Weather"
+        },
+        {
+          "t_ms": 3000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 4000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "dismiss-clears-a-finished-run-and-refuses-one-in-flight",
+      "description": "dismissing a card must not make the update it describes invisible, so dismiss is gated on an outcome. the run it hands back is phase-idle so a listener renders the cleared state, and it is already gone from the store.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 2000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "abandoned"
+          }
+        },
+        {
+          "t_ms": 4000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 5000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        },
+        {
+          "t_ms": 6000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "dismiss-does-not-clear-the-available-offer",
+      "description": "only the updated event removes an available entry. dismissing a failed run leaves the offer standing, which is what lets the user retry from the same card.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "release": "r",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "write failed"
+          }
+        },
+        {
+          "t_ms": 3000,
+          "call": "dismiss",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-later-offer-replaces-an-earlier-one-for-the-same-device",
+      "description": "available entries are keyed per device and overwritten wholesale, so a manifest poll that now advertises a different release replaces rather than merges.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "release": "r1",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "release": "r2",
+            "daemon_version": "0.9.1",
+            "image_version": ""
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-on-the-target-version-clears-the-run",
+      "description": "the device coming back on the versions the run targeted is the confirmation the run landed. the run is removed and handed back phase-idle and succeeded.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-on-the-wrong-version-leaves-the-run-alone",
+      "description": "the device came back on the old image, so the run did not land and stays on the card.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "version": "2026.06.0"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.05.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-on-the-target-version-rescues-a-run-that-timed-out-rebooting",
+      "description": "the version the device came back on outranks the guess. a run that gave up waiting is converted to a success and its error is dropped.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 90000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "ota stalled: no progress within 60s"
+          }
+        },
+        {
+          "t_ms": 91000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-does-not-rescue-a-run-that-failed-before-reaching-the-device",
+      "description": "the device is still on the old versions, so nothing confirms this run.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "reason": "bundle download failed"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.8.0",
+          "image_version": "2026.05.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-clears-a-targeted-run-that-is-still-in-flight",
+      "description": "the version match is not gated on the run having ended. a run mid-download whose device reports the target versions is removed and reported succeeded on the spot, which is how a device that updated out from under the companion gets reconciled -- and is also how a genuinely in-flight run disappears if the versions coincide. shared behaviour, nothing in either suite covers it.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "progress",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "step_id": 0,
+            "snapshot": {
+              "phase": "downloading",
+              "asset": "update.swu",
+              "received": 40,
+              "total": 100,
+              "rate_micros": 20000000
+            }
+          }
+        },
+        {
+          "t_ms": 2000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-daemon-only-run-is-confirmed-by-the-daemon-version-alone",
+      "description": "a daemon update targets no image version, so the image half of the match is vacuously satisfied and the daemon half decides. the half-targeted run is the case that separates the two guards.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "daemon",
+            "release": "0.9.1",
+            "daemon_version": "0.9.1",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        },
+        {
+          "t_ms": 2000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.1",
+          "image_version": "2026.99.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "meta-leaves-a-webapp-run-alone-until-it-says-it-succeeded",
+      "description": "a webapp install targets no version, so device meta confirms nothing about it -- until the run has already reported success, at which point any meta at all clears it. the untargeted branch is the only place the outcome is read.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "reason": "nope"
+          }
+        },
+        {
+          "t_ms": 3000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        },
+        {
+          "t_ms": 4000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "version": "1.4.0"
+          }
+        },
+        {
+          "t_ms": 5000,
+          "call": "note_meta",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "daemon_version": "0.9.0",
+          "image_version": "2026.06.0"
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "annotate-names-the-app-being-installed",
+      "description": "annotation is unconditional on the run's state and returns the whole run, so it is also the only mutator that touches a finished run without ending or clearing it. nulls overwrite: annotating with nothing erases a name that was there.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "annotate_webapp",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "webapp_id": "abc",
+          "webapp_name": "Weather"
+        },
+        {
+          "t_ms": 2000,
+          "call": "annotate_webapp",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "webapp_id": null,
+          "webapp_name": null
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "a-webapp-run-carries-its-name-and-its-installed-version-separately",
+      "description": "the app's name identifies it and the version field holds a version, not the name again. the annotation survives the terminal event.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "release": "",
+            "daemon_version": "",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "call": "annotate_webapp",
+          "device_id": "AA:BB:CC:DD:EE:FF",
+          "webapp_id": "abc",
+          "webapp_name": "Weather"
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "updated",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "installedWebapp",
+            "version": "1.4.0"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "poll-status-is-independent-of-every-run",
+      "description": "a poll failure keeps the last good timestamp and a successful poll clears the previous error. neither touches a run, and a poll change is the only change either event emits.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "manifest_poll_failed",
+            "reason": "offline"
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "manifest_polled",
+            "updated_at": "2026-06-01T00:00:00Z"
+          }
+        },
+        {
+          "t_ms": 3000,
+          "ingest": {
+            "event": "manifest_poll_failed",
+            "reason": "offline"
+          }
+        },
+        {
+          "t_ms": 4000,
+          "ingest": {
+            "event": "manifest_polled",
+            "updated_at": "2026-06-02T00:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "component": "run_store",
+      "name": "runs-on-different-devices-do-not-interfere",
+      "description": "every mutator is keyed by device. a terminal event on one device must not touch the other's run, its offer or the shared poll status. this is also the case that proves the store snapshot is sorted rather than in native map order.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "ingest": {
+            "event": "planned",
+            "device_id": "AA:BB:CC:DD:EE:FF",
+            "kind": "image",
+            "release": "0.9.0+image.2026.06.0",
+            "daemon_version": "0.9.0",
+            "image_version": "2026.06.0",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1000,
+          "ingest": {
+            "event": "planned",
+            "device_id": "11:22:33:44:55:66",
+            "kind": "daemon",
+            "release": "0.9.1",
+            "daemon_version": "0.9.1",
+            "image_version": "",
+            "steps": [
+              {
+                "id": 0,
+                "kind": "download",
+                "label": "step",
+                "bytes": 100
+              }
+            ]
+          }
+        },
+        {
+          "t_ms": 1500,
+          "ingest": {
+            "event": "update_available",
+            "device_id": "11:22:33:44:55:66",
+            "release": "r",
+            "daemon_version": "0.9.1",
+            "image_version": ""
+          }
+        },
+        {
+          "t_ms": 2000,
+          "ingest": {
+            "event": "failed",
+            "device_id": "11:22:33:44:55:66",
+            "kind": "daemon",
+            "reason": "nope"
+          }
+        },
+        {
+          "t_ms": 3000,
+          "call": "interrupt",
+          "device_id": "11:22:33:44:55:66"
+        },
+        {
+          "t_ms": 4000,
+          "call": "note_meta",
+          "device_id": "11:22:33:44:55:66",
+          "daemon_version": "0.9.1",
+          "image_version": ""
+        },
+        {
+          "t_ms": 5000,
+          "call": "open_run_kind",
+          "device_id": "AA:BB:CC:DD:EE:FF"
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "the-backoff-doubles-then-the-shift-stops-then-the-ceiling-holds",
+      "description": "twelve consecutive auto-push failures. this is the case the whole section exists for: swift raises two to a power as a double and multiplies a seconds base, kotlin left-shifts a millisecond base as a long, and the exponent is clamped at five on both sides before the ceiling is applied. emitting the uncapped product alongside the capped delay separates the two limiters -- the exponent reaches its clamp at attempt six so the uncapped product stops growing from attempt seven onward, while the ceiling has already been holding since attempt four. if the two implementations ever disagree, they disagree in backoff_raw_delay_ms while backoff_delay_ms stays identical, which is exactly the failure mode that reads as equivalence from the outside. all failures land at the same clock reading so the next-attempt time moves by the delay alone.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 0,
+          "note": "failure"
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "the-schedule-arms-from-the-clock-reading-of-each-failure",
+      "description": "the next-attempt time is the failure's own clock reading plus the delay, not the previous deadline plus the delay, so a failure arriving late does not compound. walked over four failures at spread-out times.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "note": "failure"
+        },
+        {
+          "t_ms": 500000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 900000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 2000000,
+          "note": "failure"
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "success-resets-the-schedule",
+      "description": "a success drops both the failure count and the armed deadline, so the next failure starts again at the base delay rather than continuing the ladder. a success with no failures behind it is a no-op that must not synthesise an entry.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "note": "success"
+        },
+        {
+          "t_ms": 1000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 2000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 3000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 4000,
+          "note": "success"
+        },
+        {
+          "t_ms": 5000,
+          "note": "failure"
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "readiness-is-the-deadline-and-the-link-together",
+      "description": "an auto push needs a stable link AND a clock past the armed deadline. the link is opened first, probed before and exactly at the stability boundary to pin whether the comparison is inclusive, then a failure arms a deadline and readiness is probed on either side of it. a link that closes and reopens restarts the stability clock while leaving the backoff deadline armed, which is the state a flapping device sits in.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "probe": true
+        },
+        {
+          "t_ms": 1000,
+          "link": "open"
+        },
+        {
+          "t_ms": 1000,
+          "probe": true
+        },
+        {
+          "t_ms": 120999,
+          "probe": true
+        },
+        {
+          "t_ms": 121000,
+          "probe": true
+        },
+        {
+          "t_ms": 121001,
+          "probe": true
+        },
+        {
+          "t_ms": 122000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 241999,
+          "probe": true
+        },
+        {
+          "t_ms": 242000,
+          "probe": true
+        },
+        {
+          "t_ms": 242001,
+          "probe": true
+        },
+        {
+          "t_ms": 243000,
+          "link": "close"
+        },
+        {
+          "t_ms": 243000,
+          "probe": true
+        },
+        {
+          "t_ms": 244000,
+          "link": "open"
+        },
+        {
+          "t_ms": 300000,
+          "probe": true
+        },
+        {
+          "t_ms": 364000,
+          "probe": true
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "readiness-with-nothing-armed-is-decided-by-the-link-alone",
+      "description": "a device with no recorded backoff is ready the moment its link is stable. the two implementations reach that answer differently -- one treats a missing entry as an early return, the other as a zero deadline -- and the answers must still match.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "link": "open"
+        },
+        {
+          "t_ms": 119999,
+          "probe": true
+        },
+        {
+          "t_ms": 120000,
+          "probe": true
+        },
+        {
+          "t_ms": 500000,
+          "probe": true
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "the-wake-deadline-is-pulled-in-by-the-soonest-backoff",
+      "description": "the poll loop sleeps until the configured interval unless something wants attention sooner: an armed backoff pulls the deadline in, floored at the minimum resume delay so a deadline already in the past cannot spin the loop. this is the consumer of the backoff schedule, and it is where a seconds-versus-milliseconds representation split would actually change behaviour rather than just change a constant. interval_seconds is a whole number here so only the pull-in logic is under test.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "interval_seconds": 3600,
+          "probe": true
+        },
+        {
+          "t_ms": 1000,
+          "link": "open"
+        },
+        {
+          "t_ms": 1000,
+          "interval_seconds": 3600,
+          "probe": true
+        },
+        {
+          "t_ms": 2000,
+          "note": "failure"
+        },
+        {
+          "t_ms": 2000,
+          "interval_seconds": 3600,
+          "probe": true
+        },
+        {
+          "t_ms": 121000,
+          "interval_seconds": 3600,
+          "probe": true
+        },
+        {
+          "t_ms": 122500,
+          "interval_seconds": 3600,
+          "probe": true
+        },
+        {
+          "t_ms": 200000,
+          "interval_seconds": 3600,
+          "probe": true
+        }
+      ]
+    },
+    {
+      "component": "auto_push",
+      "name": "the-wake-deadline-floors-the-interval-at-one-minute",
+      "description": "a configured interval below the minimum is raised, and a fractional interval is the divergence this case is really for: one implementation carries the interval as a floating-point number of seconds and the other as a whole number, so ninety and a half seconds is representable on one side and not the other. an emitter records what its own config type can actually hold; the differ is what says whether that matters.",
+      "steps": [
+        {
+          "t_ms": 0,
+          "interval_seconds": 0,
+          "probe": true
+        },
+        {
+          "t_ms": 0,
+          "interval_seconds": 59,
+          "probe": true
+        },
+        {
+          "t_ms": 0,
+          "interval_seconds": 60,
+          "probe": true
+        },
+        {
+          "t_ms": 0,
+          "interval_seconds": 90.5,
+          "probe": true
+        },
+        {
+          "t_ms": 0,
+          "interval_seconds": 3600,
+          "probe": true
+        }
+      ]
+    }
+  ],
+  "skipped_arms": {
+    "rust": "does not exist yet. the run store is a phase-4 port target, so the rust arm is emitted by the port and the corpus is captured with two arms until then. the differ refuses a missing arm, so it is run over the pair before the port lands."
+  }
+}

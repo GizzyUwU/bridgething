@@ -3,12 +3,29 @@
 # --- Path config ---
 
 cross_target := 'aarch64-unknown-linux-gnu'
+wasm_target := 'wasm32-unknown-unknown'
+wasm_crates := '-p libbridgething -p bridgething-sdk-runtime -p bridgething-gateway -p bridgething-delivery -p bridgething-delivery-wasm'
+napi_dir := justfile_directory() / 'crates/delivery/napi'
+wasm_dir := justfile_directory() / 'crates/delivery/wasm'
 cross_target_dir := justfile_directory() / 'target-cross'
 cross_release_dir := justfile_directory() / 'target-cross-release'
 device_features := 'superbird'
 dev_profile := '--config profile.release.lto=false --config profile.release.codegen-units=32'
 release_build := 'cargo build --release --locked -p bridgething --target ' + cross_target + ' --no-default-features --features ' + device_features
 device_bt_mac := env_var_or_default('SUPERBIRD_BT_MAC', '30:E3:D6:03:96:1E')
+dev_dir := justfile_directory() / '.dev'
+dev_gateway_url := 'ws://127.0.0.1:8892/'
+swupdate_vendor := justfile_directory() / 'crates/swupdate-sys/vendor/swupdate'
+swupdate_libdir := justfile_directory() / 'target/libswupdate'
+
+# --- Build image ---
+
+# The image mounts the repo at /work, so container recipes need the container's view of a path.
+container_vendor := '/work/crates/swupdate-sys/vendor/swupdate'
+# Registry and target live in named volumes: virtiofs drops writes between rapid container runs
+container_run := 'docker run --rm -v ' + justfile_directory() + ':/work -w /work -v bridgething-cargo-registry:/usr/local/cargo/registry -v bridgething-target-cross:/target -e CARGO_TARGET_DIR=/target -e CARGO_INCREMENTAL=0 bridgething-build'
+# mic-debug binds alsa + evdev, which a mac host has no toolchain for; test-shipping covers it there.
+host_test_excludes := if os() == 'macos' { '--exclude bridgething-mic-debug' } else { '' }
 
 # --- Local dev ---
 
@@ -24,21 +41,34 @@ fmt:
   cargo +nightly fmt --all
   bun run format
 
-gateway:
-  bun run build -- --filter=@bridgething/gateway
-  bun run gateway:example:dev
+# --- Host dev daemon ---
+
+# Run the daemon here with the radio untouched (no bluez session, no adapter), loopback binds, state under .dev/.
+dev-daemon:
+  mkdir -p {{dev_dir}}/state {{dev_dir}}/webapps {{dev_dir}}/examples
+  BRIDGETHING_STATE_DIR={{dev_dir}}/state BRIDGETHING_WEBAPPS_DIR={{dev_dir}}/webapps BRIDGETHING_EXAMPLES_DIR={{dev_dir}}/examples RUST_LOG="${RUST_LOG:-bridgething=debug,bridgething::chrome=info,libbridgething=info}" cargo run -p bridgething --features test-tap -- --dev
+
+# Build and launch the dev daemon in the background; pidfile + log under .dev/.
+dev-daemon-start:
+  scripts/dev-daemon.sh start
+
+# SIGTERM the backgrounded dev daemon via its pidfile and wait for exit.
+dev-daemon-stop:
+  scripts/dev-daemon.sh stop
+
+# Report the backgrounded dev daemon's pid and whether the gateway port is reachable.
+dev-daemon-status:
+  scripts/dev-daemon.sh status
+
+# Dial the dev daemon with the reference companion gateway: `just dev-gateway connect`, or any host-gateway subcommand.
+dev-gateway *args:
+  cargo run -p bridgething-host-gateway -- --url {{dev_gateway_url}} {{args}}
 
 # --- Codegen ---
 
 typescript:
   cargo run -q -p bridgething-codegen -- ts
   bun run format
-
-swift:
-  cargo run -q -p bridgething-codegen -- swift
-
-kotlin:
-  cargo run -q -p bridgething-codegen -- kotlin
 
 rust:
   cargo run -q -p bridgething-codegen -- rust
@@ -48,44 +78,132 @@ codegen:
   cargo run -q -p bridgething-codegen -- all
   just fmt
 
-spotify-codegen:
-  swift build --package-path tools/spotify-codegen
-  bash tools/spotify-codegen/scripts/generate-kotlin.sh
+# --- Uniffi mobile packaging ---
 
-# --- Spotify client (uniffi) mobile packaging ---
+# Regenerate the shared-core kotlin + swift bindings from the host-arch cdylib.
+companion-bindings:
+  bash scripts/generate-companion-bindings.sh
 
-# Build the spotify rust client as an ios xcframework + swift wrapper.
-spotify-ios:
-  bash scripts/build-uniffi-xcframework.sh spotify Spotify
-
-# Build the spotify rust client as android jniLibs + kotlin bindings.
-spotify-android:
-  bash scripts/build-uniffi-jnilibs.sh spotify
-
-# Build the nlu tokenize+decode crate as an ios xcframework + swift wrapper.
-nlu-ios:
-  bash scripts/build-uniffi-xcframework.sh nlu Nlu
-
-# Build the nlu tokenize+decode crate as android jniLibs + kotlin bindings.
-nlu-android:
-  bash scripts/build-uniffi-jnilibs.sh nlu
+# Build the shared core as an ios xcframework + swift wrapper
+companion-ios:
+  bash scripts/build-uniffi-xcframework.sh companion BridgethingCompanionCore
 
 # --- Mobile app artifacts ---
 
 # Build a release apk (debug-signed for sideload). Runs on mac and linux.
-apk: spotify-android
+apk:
   bash mobile/scripts/build-apk.sh
 
+apk-emulator:
+  bash mobile/scripts/build-apk.sh emulator
+
 # Build an unsigned ipa for sideloading. Requires macos.
-ipa: spotify-ios
+ipa: companion-ios
   bash mobile/scripts/build-ipa.sh
 
 # Build a signed app-store ipa for TestFlight. Requires macos + a configured asc profile.
-testflight: spotify-ios
+testflight: companion-ios
   bash mobile/scripts/build-testflight.sh
 
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
+
+# --- Test suites ---
+
+# FORCE=1 makes the cache-backed suites ignore what they think is already green.
+gradle_force := if env_var_or_default('FORCE', '') == '1' { '--rerun-tasks' } else { '' }
+turbo_force := if env_var_or_default('FORCE', '') == '1' { '--force' } else { '' }
+
+# Everything CI gates on
+test-all:
+  #!/usr/bin/env bash
+  set -uo pipefail
+  # cheapest signal first; nothing short-circuits, so this only changes what you see soonest
+  recipes=(typecheck-ts test-rust test-kotlin test-swift test-ts test-napi test-wasm)
+  declare -A result
+  failed=0
+
+  for recipe in "${recipes[@]}"; do
+    printf '\n===> %s\n' "$recipe"
+    if {{just_executable()}} --justfile {{justfile()}} "$recipe"; then
+      result[$recipe]=pass
+    else
+      result[$recipe]=FAIL
+      failed=1
+    fi
+  done
+
+  printf '\n%-13s %s\n' recipe result
+  printf '%-13s %s\n' ------------- ------
+  for recipe in "${recipes[@]}"; do
+    printf '%-13s %s\n' "$recipe" "${result[$recipe]}"
+  done
+
+  exit "$failed"
+
+# daemon unit tests plus the full harness, host-native, proptest dialed down
+test-fast:
+  cargo test -p bridgething --lib
+  PROPTEST_CASES=8 cargo test -p bridgething-test-harness
+
+# rust workspace plus the shipping feature set
+test-rust: test-shipping
+  cargo test --workspace {{host_test_excludes}} --locked --no-fail-fast
+
+# whatever this host cannot build natively
+test-shipping:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ '{{os()}}' = 'macos' ]; then
+    {{just_executable()}} --justfile {{justfile()}} build-image
+    {{container_run}} bash -c "scripts/libswupdate-stub.sh {{container_vendor}} cc /usr/lib \
+      && cargo test -p bridgething --locked --no-default-features --features {{device_features}} -j 2 -- --test-threads 2 \
+      && cargo test -p bridgething-mic-debug --locked -j 2 -- --test-threads 2"
+  else
+    scripts/libswupdate-stub.sh {{swupdate_vendor}} cc {{swupdate_libdir}}
+    RUSTFLAGS='-L {{swupdate_libdir}}' LD_LIBRARY_PATH={{swupdate_libdir}} cargo test -p bridgething --locked --no-default-features --features {{device_features}}
+  fi
+
+# The workspace suite against the device target inside the build image
+test-cross: build-image
+  {{container_run}} cargo test --workspace --exclude bridgething-desktop --target {{cross_target}} --locked --no-fail-fast -j 2 -- --test-threads 2
+
+# The desktop shell's headless suite
+test-desktop:
+  cargo test -p bridgething-desktop --locked
+
+# Tray app against the vite dev server
+desktop-dev:
+  cd desktop && bun run tauri dev
+
+# Release bundle for the host platform
+desktop-build:
+  cd desktop && bun run tauri build
+
+# JVM suites for every gradle subproject
+test-kotlin:
+  @bash -c 'source scripts/gradle-jdk.sh && gradle_jdk_env && JAVA_HOME="$GRADLE_JAVA" ./gradlew test :packages:companion:kotlin:companion:compileDebugAndroidTestSources {{gradle_force}} --no-daemon --console=plain --stacktrace -Porg.gradle.java.installations.paths="$GRADLE_INSTALLS" -Porg.gradle.java.installations.auto-download=false </dev/null'
+
+# Swift package suite
+test-swift:
+  cargo build -p bridgething-companion --lib
+  BRIDGETHING_COMPANION_CDYLIB=1 swift test
+
+# Every bun workspace member that declares a test script
+test-ts:
+  bun run test -- {{turbo_force}}
+
+# Every bun workspace member that declares a typecheck script
+typecheck-ts:
+  bun run typecheck -- {{turbo_force}}
+
+# The node addon's own suite
+test-napi: build-napi
+  cd {{napi_dir}} && bun test
+
+# The browser artifact's suite, run headlessly under node.
+test-wasm:
+  cd {{wasm_dir}} && wasm-pack test --node
 
 # --- Test harness ---
 
@@ -96,6 +214,10 @@ test-host:
 # Over-air tier (T3): needs a booted Car Thing with the test-tap daemon + a host BT radio
 test-device:
   SUPERBIRD_BT_MAC={{device_bt_mac}} cargo test -p bridgething-test-harness --test seam --test t3_infra -- --ignored --test-threads=1 --nocapture
+
+# Browse for a real Car Thing advertising itself
+test-discovery-live:
+  cargo test -p bridgething-delivery --lib discovery -- --ignored --nocapture
 
 # --- Device iteration ---
 
@@ -188,6 +310,22 @@ mfi-proxy-down:
 # Tail the proxy's journal.
 mfi-proxy-logs:
   @bash -c 'source scripts/device.sh && device_ssh journalctl -fu bridgething-mfi-proxy.service'
+
+# --- wasm ---
+
+# Build the browser-targeted core crates
+build-wasm *args:
+  cargo build --target {{wasm_target}} {{wasm_crates}} {{args}}
+
+# Compile the core into packages/browser, which is what @bridgething/browser ships
+pack-wasm:
+  cd {{justfile_directory()}}/packages/browser && bun run wasm
+
+# --- node addon ---
+
+# Build the n-api addon in place
+build-napi variant="debug":
+  cd {{napi_dir}} && bun run {{ if variant == "release" { "napi:build" } else { "napi:build:debug" } }}
 
 # --- Misc ---
 

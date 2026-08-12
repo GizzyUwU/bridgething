@@ -2,67 +2,59 @@ import {
   type BridgethingConfigEntry,
   type BridgethingConfigField,
 } from '@bridgething/session-react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  ArrowUpCircle,
-  Bell,
-  Cable,
-  ChevronRight,
-  Globe,
-  LayoutGrid,
-  type LucideIcon,
-  MapPin,
-  Mic,
-  Play,
-  RotateCcw,
-  Shield,
-  SlidersHorizontal,
-  Speaker,
-  Trash2,
-  Wifi,
-} from 'lucide-react-native';
+import { describeError } from '@bridgething/ui/errors';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
+import { ConfirmSheet } from '../components/ConfirmSheet';
+import { Field } from '../components/Field';
+import { Icon } from '../components/Icon';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
+import { Note } from '../components/Note';
 import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { Segmented } from '../components/Segmented';
+import { Spinner } from '../components/Spinner';
+import { Switch } from '../components/ui/switch';
 import { WebappIcon } from '../components/WebappIcon';
 import { useUpdates } from '../lib/catalog';
-import { getSession, peerDisplayName, useSession } from '../lib/session';
+import {
+  getSession,
+  peerDisplayName,
+  usePeer,
+  useSession,
+} from '../lib/session';
+import { TEXT } from '../lib/theme';
+import { humanizePermission } from '../lib/webapp-permissions';
 import { useWebapps } from '../lib/webapps';
-import type { RootStackParamList } from '../navigation';
+import type { AppsScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'WebappDetail'>;
+type Props = AppsScreenProps<'WebappDetail'>;
 
 export function WebappDetailScreen({ navigation, route }: Props) {
   const session = getSession();
   const { deviceId, id } = route.params;
 
-  const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
+  const peer = usePeer(deviceId);
   const ledger = useSession(s => s.ledger);
 
-  const { list } = useWebapps(deviceId);
+  const { list, active } = useWebapps(deviceId);
   const info = list.find(w => w.id === id) ?? null;
   const update =
     useUpdates(deviceId).find(
       u => u.appId.toLowerCase() === id.toLowerCase(),
     ) ?? null;
+
   const [entries, setEntries] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<'switch' | 'uninstall' | null>(null);
+  const [askUninstall, setAskUninstall] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
     setLoadError(null);
@@ -70,7 +62,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
       const config = await session.listWebappConfig(deviceId, id);
       setEntries(toMap(config));
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
+      setLoadError(describeError(err));
     }
   }, [deviceId, id, session]);
 
@@ -79,135 +71,123 @@ export function WebappDetailScreen({ navigation, route }: Props) {
   }, [loadConfig]);
 
   const writeField = async (key: string, value: string) => {
+    setConfigError(null);
     try {
       await session.setWebappConfigField(deviceId, id, key, value);
       setEntries(prev => ({ ...prev, [key]: value }));
     } catch (err) {
-      Alert.alert(
-        'Save failed',
-        err instanceof Error ? err.message : String(err),
-      );
+      setConfigError(describeError(err));
     }
   };
 
   const resetField = async (key: string) => {
+    setConfigError(null);
     try {
       await session.deleteWebappConfigField(deviceId, id, key);
       const fresh = await session.listWebappConfig(deviceId, id);
       setEntries(toMap(fresh));
     } catch (err) {
-      Alert.alert(
-        'Reset failed',
-        err instanceof Error ? err.message : String(err),
-      );
+      setConfigError(describeError(err));
     }
   };
 
   const switchActive = async () => {
     setBusy('switch');
+    setActionError(null);
     try {
       await session.switchWebapp(deviceId, id);
     } catch (err) {
-      Alert.alert(
-        'Switch failed',
-        err instanceof Error ? err.message : String(err),
-      );
+      setActionError(describeError(err));
     } finally {
       setBusy(null);
     }
   };
 
-  const uninstall = () => {
-    if (!info || info.source === 'builtin') return;
-    Alert.alert('Uninstall?', `${info.name} ${info.version}`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Uninstall',
-        style: 'destructive',
-        onPress: async () => {
-          setBusy('uninstall');
-          try {
-            await session.uninstallWebapp(deviceId, id);
-            navigation.goBack();
-          } catch (err) {
-            Alert.alert(
-              'Uninstall failed',
-              err instanceof Error ? err.message : String(err),
-            );
-          } finally {
-            setBusy(null);
-          }
-        },
-      },
-    ]);
+  const uninstall = async () => {
+    setAskUninstall(false);
+    setBusy('uninstall');
+    setActionError(null);
+    try {
+      await session.uninstallWebapp(deviceId, id);
+      navigation.goBack();
+    } catch (err) {
+      setActionError(describeError(err));
+    } finally {
+      setBusy(null);
+    }
   };
 
   if (!info) {
     return (
-      <View className="flex-1 items-center justify-center bg-background">
-        {loadError ? (
-          <View className="px-6">
-            <Text className="text-center text-[14px] text-destructive">
-              {loadError}
-            </Text>
+      <ScrollScreen contentContainerStyle={{ paddingTop: 12 }}>
+        <View className="mb-6 flex-row items-center gap-4 border border-rule bg-screen p-4">
+          <View className="h-16 w-16 items-center justify-center border border-rule bg-neutral-soft">
+            <Spinner />
           </View>
-        ) : (
-          <ActivityIndicator size="small" color="hsl(199 100% 44%)" />
-        )}
-      </View>
+          <Text className="font-mono text-dim" style={TEXT.hint}>
+            {id}
+          </Text>
+        </View>
+        {loadError ? (
+          <Note tone="err" action="retry" onAction={() => void loadConfig()}>
+            {loadError}
+          </Note>
+        ) : null}
+      </ScrollScreen>
     );
   }
 
   const builtin = info.source === 'builtin';
+  const isActive = active?.id.toLowerCase() === info.id.toLowerCase();
 
   return (
     <ScrollScreen contentContainerStyle={{ paddingTop: 12 }}>
-      <View
-        className="mb-6 flex-row items-center gap-4 rounded-2xl border border-border bg-surface p-4"
-        style={{
-          shadowColor: '#000',
-          shadowOpacity: 0.06,
-          shadowRadius: 14,
-          shadowOffset: { width: 0, height: 6 },
-        }}
-      >
+      <ConfirmSheet
+        visible={askUninstall}
+        title={`uninstall ${info.name}?`}
+        body="it leaves your car thing now. you can install it again obv."
+        detail={`detail: ${info.id} ${info.version}`}
+        confirmLabel="uninstall"
+        destructive
+        busy={busy === 'uninstall'}
+        onConfirm={() => void uninstall()}
+        onClose={() => setAskUninstall(false)}
+      />
+
+      <View className="mb-6 flex-row items-center gap-4 border border-rule bg-screen p-4">
         <WebappIcon
           deviceId={deviceId}
           id={info.id}
           iconHash={info.iconHash}
           name={info.name}
           size={64}
-          radiusClass="rounded-2xl"
-          fallbackTextClass="text-[24px] font-extrabold text-foreground"
         />
-        <View className="flex-1">
+        <View className="min-w-0 flex-1">
           <Text
-            className="text-[20px] font-extrabold leading-[24px] text-foreground"
+            className="font-display text-fg"
+            style={TEXT.title}
             numberOfLines={2}
-            style={{ letterSpacing: -0.4 }}
           >
             {info.name}
           </Text>
-          <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+          <Text className="mt-0.5 font-mono text-muted" style={TEXT.hint}>
             v{info.version}
           </Text>
           <View className="mt-2 flex-row flex-wrap gap-1.5">
             {builtin ? (
               <Pill tone="neutral">built-in</Pill>
             ) : (
-              <Pill tone="primary">installed</Pill>
+              <Pill tone="accent">installed</Pill>
             )}
             {peer ? (
-              <Pill tone="neutral" dot={false}>
-                {peerDisplayName(peer, ledger)}
-              </Pill>
+              <Pill tone="neutral">{peerDisplayName(peer, ledger)}</Pill>
             ) : null}
           </View>
         </View>
       </View>
 
       {info.description ? (
-        <Text className="mb-6 px-1 text-[14px] leading-[20px] text-muted-foreground">
+        <Text className="mb-6 px-1 font-sans text-muted" style={TEXT.body}>
           {info.description}
         </Text>
       ) : null}
@@ -215,61 +195,69 @@ export function WebappDetailScreen({ navigation, route }: Props) {
       {update ? (
         <Press
           onPress={() =>
-            navigation.navigate('StoreApp', {
-              deviceId,
-              appId: update.appId,
-              sourceUrl: update.sourceUrl,
+            navigation.navigate('store', {
+              screen: 'StoreApp',
+              params: {
+                deviceId,
+                appId: update.appId,
+                sourceUrl: update.sourceUrl,
+              },
             })
           }
           className="mb-6"
-          scaleTo={0.98}
         >
-          <View className="flex-row items-center gap-3 rounded-2xl border border-primary/30 bg-primary-soft px-4 py-3">
-            <ArrowUpCircle
-              size={18}
-              color="hsl(199 100% 44%)"
-              strokeWidth={2.2}
-            />
+          <View className="flex-row items-center gap-3 border border-accent bg-accent-soft px-4 py-3">
+            <Icon name="ArrowUpCircle" tone="accent" size={18} />
             <View className="flex-1">
-              <Text className="text-[13px] font-semibold text-foreground">
+              <Text className="font-sans text-fg" style={TEXT.hint}>
                 update available
               </Text>
-              <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+              <Text className="mt-0.5 font-mono text-muted" style={TEXT.hint}>
                 v{update.installedVersion} → v{update.target.version}
               </Text>
             </View>
-            <ChevronRight
-              size={16}
-              color="hsl(215 14% 50%)"
-              strokeWidth={2.4}
-            />
+            <Text className="font-mono text-dim" style={TEXT.body}>
+              ›
+            </Text>
           </View>
         </Press>
       ) : null}
 
-      <View className="mb-8 flex-row gap-2">
-        <View className="flex-1">
-          <Button
-            onPress={switchActive}
-            loading={busy === 'switch'}
-            variant="primary"
-            icon={Play}
-          >
-            switch to this
-          </Button>
-        </View>
-        {!builtin ? (
+      <View className="mb-8 gap-2">
+        <View className="flex-row gap-2">
           <View className="flex-1">
-            <Button
-              onPress={uninstall}
-              loading={busy === 'uninstall'}
-              variant="destructive"
-              icon={Trash2}
-            >
-              uninstall
-            </Button>
+            {isActive ? (
+              <View className="flex-row items-center justify-center gap-2 border border-ok bg-ok-soft px-5 py-2.5">
+                <Icon name="Check" tone="ok" size={17} />
+                <Text className="font-mono text-ok" style={TEXT.body}>
+                  active
+                </Text>
+              </View>
+            ) : (
+              <Button
+                onPress={switchActive}
+                loading={busy === 'switch'}
+                variant="primary"
+                icon="Play"
+              >
+                switch to this
+              </Button>
+            )}
           </View>
-        ) : null}
+          {!builtin ? (
+            <View className="flex-1">
+              <Button
+                onPress={() => setAskUninstall(true)}
+                loading={busy === 'uninstall'}
+                variant="destructive"
+                icon="Trash2"
+              >
+                uninstall
+              </Button>
+            </View>
+          ) : null}
+        </View>
+        {actionError ? <Note tone="err">{actionError}</Note> : null}
       </View>
 
       {info.role === 'launcher' || info.overlayHash ? (
@@ -277,7 +265,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
           <Button
             onPress={() => navigation.navigate('WebappSlots', { deviceId })}
             variant="secondary"
-            icon={LayoutGrid}
+            icon="LayoutGrid"
           >
             {info.role === 'launcher' && info.overlayHash
               ? 'use as home screen or overlay'
@@ -299,16 +287,19 @@ export function WebappDetailScreen({ navigation, route }: Props) {
               })
             }
             variant="secondary"
-            icon={SlidersHorizontal}
+            icon="SlidersHorizontal"
           >
             open {info.name} settings
           </Button>
         </View>
       ) : null}
 
-      {info.config.length > 0 ? (
-        <View className="mb-8">
-          <SectionHeader title="settings" hint="changes save on commit" />
+      <View className="mb-8">
+        <SectionHeader
+          title="settings"
+          hint={info.config.length > 0 ? 'changes save on commit' : undefined}
+        />
+        {info.config.length > 0 ? (
           <View className="gap-3">
             {info.config.map(field => (
               <ConfigEditor
@@ -320,19 +311,31 @@ export function WebappDetailScreen({ navigation, route }: Props) {
               />
             ))}
           </View>
-        </View>
-      ) : (
-        <View className="mb-8">
-          <SectionHeader title="settings" />
-          <SectionEmpty>this app has no user-tunable settings</SectionEmpty>
-        </View>
-      )}
+        ) : (
+          <SectionEmpty>this app has no settings</SectionEmpty>
+        )}
+        {loadError ? (
+          <Note
+            className="mt-2"
+            tone="err"
+            action="retry"
+            onAction={() => void loadConfig()}
+          >
+            {loadError}
+          </Note>
+        ) : null}
+        {configError ? (
+          <Note className="mt-2" tone="err">
+            {configError}
+          </Note>
+        ) : null}
+      </View>
 
       {info.permissions.length > 0 ? (
         <View>
           <SectionHeader
-            title="what this webapp can do"
-            hint="granted automatically; capabilities your phone offers are in Settings → Advanced"
+            title="what this app can do"
+            hint="granted by installation"
           />
           <ListGroup>
             {info.permissions.map(p => {
@@ -341,7 +344,6 @@ export function WebappDetailScreen({ navigation, route }: Props) {
                 <ListRow
                   key={p}
                   icon={meta.icon}
-                  iconTint="default"
                   title={meta.title}
                   subtitle={meta.subtitle}
                 />
@@ -366,30 +368,28 @@ function ConfigEditor({
   onReset: () => void;
 }) {
   return (
-    <View
-      className="rounded-2xl border border-border bg-surface p-4"
-      style={{
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 3 },
-      }}
-    >
+    <View className="border border-rule bg-screen p-4">
       <View className="mb-2 flex-row items-center justify-between">
-        <Text className="flex-1 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+        <Text
+          className="flex-1 font-mono uppercase text-muted"
+          style={TEXT.eyebrow}
+        >
           {field.label}
         </Text>
         {field.defaultValue !== undefined ? (
-          <Pressable
+          <Press
             onPress={onReset}
             hitSlop={10}
             className="flex-row items-center gap-1"
           >
-            <RotateCcw size={11} color="hsl(199 100% 44%)" strokeWidth={2.4} />
-            <Text className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
+            <Icon name="RotateCcw" tone="accent" size={11} />
+            <Text
+              className="font-mono uppercase text-accent"
+              style={TEXT.eyebrow}
+            >
               reset
             </Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
       <ConfigInput field={field} value={value} onCommit={onCommit} />
@@ -414,7 +414,7 @@ function ConfigInput({
       const on = value === 'true';
       return (
         <View className="flex-row items-center justify-between">
-          <Text className="text-[14px] text-foreground">
+          <Text className="font-sans text-fg" style={TEXT.body}>
             {on ? 'enabled' : 'disabled'}
           </Text>
           <Switch
@@ -424,56 +424,37 @@ function ConfigInput({
         </View>
       );
     }
-    case 'enum': {
+    case 'enum':
       return (
-        <View className="-m-1 flex-row flex-wrap">
-          {(field.choices ?? []).map(choice => {
-            const selected = choice === value;
-            return (
-              <Pressable
-                key={choice}
-                onPress={() => onCommit(choice)}
-                className={`m-1 rounded-full px-3 py-1.5 ${selected ? 'bg-primary' : 'bg-secondary'}`}
-              >
-                <Text
-                  className={`text-[13px] font-semibold ${selected ? 'text-primary-foreground' : 'text-secondary-foreground'}`}
-                >
-                  {choice}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      );
-    }
-    case 'number': {
-      return (
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          onEndEditing={() => onCommit(draft)}
-          keyboardType="numeric"
-          placeholderTextColor="hsl(215 14% 55%)"
-          className="rounded-xl bg-surface-subtle px-3 py-3 text-[15px] text-foreground"
+        <Segmented
+          options={field.choices ?? []}
+          value={value}
+          onChange={onCommit}
+          size="sm"
         />
       );
-    }
-    case 'secret':
-    case 'string':
-    default: {
+    case 'number':
       return (
-        <TextInput
+        <Field
           value={draft}
           onChangeText={setDraft}
-          onEndEditing={() => onCommit(draft)}
+          onCommit={onCommit}
+          keyboardType="numeric"
+        />
+      );
+    case 'secret':
+    case 'string':
+    default:
+      return (
+        <Field
+          value={draft}
+          onChangeText={setDraft}
+          onCommit={onCommit}
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={field.kind === 'secret'}
-          placeholderTextColor="hsl(215 14% 55%)"
-          className="rounded-xl bg-surface-subtle px-3 py-3 text-[15px] text-foreground"
         />
       );
-    }
   }
 }
 
@@ -481,56 +462,4 @@ function toMap(entries: BridgethingConfigEntry[]): Record<string, string> {
   const map: Record<string, string> = {};
   for (const e of entries) map[e.key] = e.value;
   return map;
-}
-
-function humanizePermission(perm: string): {
-  icon: LucideIcon;
-  title: string;
-  subtitle?: string;
-} {
-  switch (perm) {
-    case 'net.fetch':
-      return {
-        icon: Globe,
-        title: 'use the internet',
-        subtitle: 'data fetched via your phone',
-      };
-    case 'net.ws':
-      return {
-        icon: Wifi,
-        title: 'real-time data',
-        subtitle: 'websockets via your phone',
-      };
-    case 'net.proxy':
-      return {
-        icon: Cable,
-        title: 'tunnel TCP traffic',
-        subtitle: 'general TCP via your phone',
-      };
-    case 'geo':
-      return {
-        icon: MapPin,
-        title: 'see your location',
-        subtitle: 'forwarded from your phone',
-      };
-    case 'notifications':
-      return {
-        icon: Bell,
-        title: 'show iPhone notifications',
-      };
-    case 'audio.tts':
-    case 'audio':
-      return {
-        icon: Speaker,
-        title: 'play sound',
-        subtitle: 'plays through your phone',
-      };
-    case 'mic':
-      return {
-        icon: Mic,
-        title: 'use the Car Thing microphone',
-      };
-    default:
-      return { icon: Shield, title: perm };
-  }
 }

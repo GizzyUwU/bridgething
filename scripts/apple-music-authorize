@@ -1,13 +1,4 @@
 #!/bin/sh
-# grants the current terminal app media & apple music access so the live musickit tests
-# (BRIDGETHING_APPLEMUSIC_LIVE=1 swift test --filter AppleMusicLive) can run.
-#
-# macos kills any process that PROMPTS for this service while a gui terminal is the
-# responsible process (the terminal's Info.plist lacks NSAppleMusicUsageDescription and
-# an embedded __info_plist section on the requesting binary is ignored), so the prompt
-# path can never mint this grant. instead this writes the allow row into the user tcc
-# database directly, which needs the terminal to have full disk access.
-# undo with: tccutil reset MediaLibrary <terminal-bundle-id>
 set -eu
 
 client=${__CFBundleIdentifier:-}

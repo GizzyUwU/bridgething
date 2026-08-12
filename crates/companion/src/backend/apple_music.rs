@@ -1,0 +1,223 @@
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, oneshot};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AmAuthStatus {
+  NotDetermined,
+  Authorized,
+  Denied,
+  Restricted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AmRepeatMode {
+  Off,
+  All,
+  One,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmEntry {
+  pub uri: Option<String>,
+  pub title: String,
+  pub artist_name: Option<String>,
+  pub album_name: Option<String>,
+  pub artwork_url: Option<String>,
+  pub duration_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmPlayerSnapshot {
+  pub entry: Option<AmEntry>,
+  pub playing: bool,
+  pub position_ms: u32,
+  pub shuffle: bool,
+  pub repeat: AmRepeatMode,
+  pub can_seek: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AmKind {
+  Song,
+  Album,
+  Playlist,
+  Artist,
+  Station,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmItem {
+  pub uri: String,
+  pub kind: AmKind,
+  pub title: String,
+  pub subtitle: Option<String>,
+  pub artist_name: Option<String>,
+  pub artist_uri: Option<String>,
+  pub album_name: Option<String>,
+  pub album_uri: Option<String>,
+  pub artwork_url: Option<String>,
+  pub duration_ms: Option<u32>,
+  pub track_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmPage {
+  pub items: Vec<AmItem>,
+  pub total: Option<u32>,
+  pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmShelf {
+  pub id: String,
+  pub title: String,
+  pub items: Vec<AmItem>,
+  pub total: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AmSearchResults {
+  pub songs: Vec<AmItem>,
+  pub albums: Vec<AmItem>,
+  pub artists: Vec<AmItem>,
+  pub playlists: Vec<AmItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Enum)]
+pub enum AmPlayerCommand {
+  Play,
+  Pause,
+  SkipNext,
+  SkipPrev,
+  SeekTo { position_ms: u32 },
+  SetShuffle { on: bool },
+  SetRepeat { mode: AmRepeatMode },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum AmLibraryScope {
+  Playlists,
+  Albums,
+  Artists,
+  Songs,
+  RecentlyPlayed,
+  Children { uri: String },
+}
+
+#[uniffi::export(with_foreign)]
+pub trait AppleMusicBackend: Send + Sync {
+  fn start(&self, inbox: Arc<AmPlayerInbox>);
+  fn stop(&self);
+  fn snapshot(&self, sink: Arc<AmSnapshotSink>);
+  fn auth_status(&self, sink: Arc<AmAuthSink>);
+  fn request_authorization(&self, sink: Arc<AmAuthSink>);
+  fn can_play_catalog_content(&self, sink: Arc<AmCatalogSink>);
+  fn is_other_audio_playing(&self, sink: Arc<AmFlagSink>);
+  fn play_context(&self, context_uri: String, start_at_uri: Option<String>, sink: Arc<AmActionSink>);
+  fn queue_insert(&self, uri: String, next: bool, sink: Arc<AmActionSink>);
+  fn command(&self, cmd: AmPlayerCommand, sink: Arc<AmActionSink>);
+  fn library(&self, scope: AmLibraryScope, limit: u32, offset: u32, sink: Arc<AmPageSink>);
+  fn recommendations(&self, sink: Arc<AmShelvesSink>);
+  fn resolve(&self, uri: String, sink: Arc<AmItemSink>);
+  fn search(&self, query: String, limit: u32, sink: Arc<AmSearchSink>);
+  fn is_favorite(&self, uris: Vec<String>, sink: Arc<AmFavoritesSink>);
+  fn add_favorite(&self, uri: String, sink: Arc<AmActionSink>);
+}
+
+#[derive(uniffi::Object)]
+pub struct AmPlayerInbox {
+  tx: mpsc::UnboundedSender<()>,
+}
+
+impl AmPlayerInbox {
+  pub fn channel() -> (Arc<Self>, mpsc::UnboundedReceiver<()>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Arc::new(Self { tx }), rx)
+  }
+}
+
+#[uniffi::export]
+impl AmPlayerInbox {
+  pub fn on_changed(&self) {
+    let _ = self.tx.send(());
+  }
+}
+
+macro_rules! am_sink {
+  ($name:ident, $out:ty) => {
+    #[derive(uniffi::Object)]
+    pub struct $name {
+      tx: std::sync::Mutex<Option<oneshot::Sender<Result<$out, String>>>>,
+    }
+
+    impl $name {
+      pub fn channel() -> (Arc<Self>, oneshot::Receiver<Result<$out, String>>) {
+        let (tx, rx) = oneshot::channel();
+        (
+          Arc::new(Self {
+            tx: std::sync::Mutex::new(Some(tx)),
+          }),
+          rx,
+        )
+      }
+    }
+
+    #[uniffi::export]
+    impl $name {
+      pub fn complete(&self, value: $out) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+          let _ = tx.send(Ok(value));
+        }
+      }
+
+      pub fn fail(&self, reason: String) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+          let _ = tx.send(Err(reason));
+        }
+      }
+    }
+  };
+}
+
+am_sink!(AmSnapshotSink, AmPlayerSnapshot);
+am_sink!(AmAuthSink, AmAuthStatus);
+am_sink!(AmCatalogSink, Option<bool>);
+am_sink!(AmFlagSink, bool);
+am_sink!(AmPageSink, AmPage);
+am_sink!(AmShelvesSink, Vec<AmShelf>);
+am_sink!(AmItemSink, AmItem);
+am_sink!(AmSearchSink, AmSearchResults);
+am_sink!(AmFavoritesSink, Vec<bool>);
+
+#[derive(uniffi::Object)]
+pub struct AmActionSink {
+  tx: std::sync::Mutex<Option<oneshot::Sender<Result<(), String>>>>,
+}
+
+impl AmActionSink {
+  pub fn channel() -> (Arc<Self>, oneshot::Receiver<Result<(), String>>) {
+    let (tx, rx) = oneshot::channel();
+    (
+      Arc::new(Self {
+        tx: std::sync::Mutex::new(Some(tx)),
+      }),
+      rx,
+    )
+  }
+}
+
+#[uniffi::export]
+impl AmActionSink {
+  pub fn ok(&self) {
+    if let Some(tx) = self.tx.lock().unwrap().take() {
+      let _ = tx.send(Ok(()));
+    }
+  }
+
+  pub fn fail(&self, reason: String) {
+    if let Some(tx) = self.tx.lock().unwrap().take() {
+      let _ = tx.send(Err(reason));
+    }
+  }
+}

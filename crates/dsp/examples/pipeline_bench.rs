@@ -1,9 +1,3 @@
-//! What the always-on front end costs, as a fraction of one core.
-//!
-//! ```text
-//! cargo run --release --example pipeline_bench -- [seconds]
-//! ```
-
 use std::{env, time::Instant};
 
 use bridgething_dsp::{geometry::CHANNELS, pipeline::Beamformer, scene};

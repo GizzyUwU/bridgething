@@ -1,5 +1,5 @@
 {
-  "version": "0.8.0",
+  "version": "0.9.0",
   "surfaces": [
     {
       "name": "asset",
@@ -1209,7 +1209,7 @@
         },
         {
           "name": "bytes",
-          "type": "number[]",
+          "type": "Uint8Array",
           "description": "Raw asset bytes, already reassembled if the companion sent them as a\nchunked BT transfer."
         },
         {
@@ -1259,7 +1259,6 @@
     },
     "AudioCapabilities": {
       "kind": "struct",
-      "description": "What the gateway-side audio backend supports. `earcons` are short\nnamed sounds the companion can play; `voices` are TTS voices.",
       "fields": [
         {
           "name": "earcons",
@@ -1276,20 +1275,16 @@
       "kind": "enum",
       "variants": [
         {
-          "name": "ActionRejected",
-          "description": "The companion accepted the verb but the platform refused it (no output\nroute, audio session denied, another app holds the channel)."
+          "name": "ActionRejected"
         },
         {
-          "name": "TtsFailed",
-          "description": "Speech synthesis could not start, or the platform cut it short."
+          "name": "TtsFailed"
         },
         {
-          "name": "Unavailable",
-          "description": "The verb needs a capability the connected companion does not advertise."
+          "name": "Unavailable"
         },
         {
-          "name": "NoTarget",
-          "description": "No companion is connected, so there is nowhere to send the verb."
+          "name": "NoTarget"
         }
       ]
     },
@@ -1406,6 +1401,12 @@
           "name": "daemonSha256",
           "type": "string",
           "optional": true
+        },
+        {
+          "name": "wakewordModelVersion",
+          "type": "string",
+          "optional": true,
+          "description": "None when no wake word model resolved, or when the one that did carries no version stamp."
         },
         {
           "name": "osName",
@@ -1605,7 +1606,6 @@
     },
     "Capabilities": {
       "kind": "struct",
-      "description": "What the daemon advertises to webapps. `gateway: None` means no\ncompanion is connected; webapps that depend on companion-routed\nsurfaces (Library, Net, Notifications, etc.) should branch on this.\n`authority` is the live set of scopes the companion currently claims.",
       "fields": [
         {
           "name": "gateway",
@@ -1749,19 +1749,15 @@
     },
     "CompanionAuthorityScope": {
       "kind": "enum",
-      "description": "One axis the companion can declare authority over. Each scope has a\nfallback source the daemon merges with when no claim is active or\nthe claim has gone stale. Unknown scopes arriving at an older daemon\nare stored opaquely and ignored.",
       "variants": [
         {
-          "name": "NowPlayingMetadata",
-          "description": "Track metadata: title, album, artist, persistent_id, artwork_id,\nduration, liked. Excludes playback state. Companion claims when it\nhas rich app-specific data for the currently-playing iOS app;\nreleases when the user switches to a non-tracked app."
+          "name": "NowPlayingMetadata"
         },
         {
-          "name": "NowPlayingPlayback",
-          "description": "Playback state: position, playing/paused, shuffle, repeat,\napp_bundle, app_display_name. On iOS, iAP2 is usually the better\nsource (microsecond-fresh playhead). On Android the companion is\nthe only source and always claims this."
+          "name": "NowPlayingPlayback"
         },
         {
-          "name": "Volume",
-          "description": "Host audio output volume + mute. iAP2 has no inbound volume CSM\n(HID step is one-way only), so without a companion claiming this\nscope the daemon can't see real volume - it broadcasts a fixed\nplaceholder (0.5, unmuted) so the kiosk doesn't render a muted\nstate, and forwards HID Inc/Dec/Mute presses best-effort."
+          "name": "Volume"
         }
       ]
     },
@@ -1796,7 +1792,7 @@
     },
     "ConfigField": {
       "kind": "enum",
-      "description": "One declared user-tunable setting. Adjacent-tagged on the wire to\nstay typeshare-compatible: `{\"type\":\"string\",\"data\":{\"key\":\"zip\",...}}`.",
+      "description": "One declared user-tunable setting. Adjacent-tagged on the wire:\n`{\"type\":\"string\",\"data\":{\"key\":\"zip\",...}}`.",
       "tag": "type",
       "content": "data",
       "variants": [
@@ -1915,7 +1911,6 @@
     },
     "Diagnostics": {
       "kind": "struct",
-      "description": "Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.\n`soc_temp_c` may be `None` on builds where the SoC thermal probe is\nnot exposed by the kernel.",
       "fields": [
         {
           "name": "diskUsedBytes",
@@ -2280,7 +2275,6 @@
     },
     "GatewayInfo": {
       "kind": "struct",
-      "description": "Identity payload describing the companion peer the daemon is talking\nto. Address is the BT MAC the companion advertises; on transports without\na stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it\nis the synthetic address as a string.",
       "fields": [
         {
           "name": "address",
@@ -2845,7 +2839,6 @@
     },
     "LogEntry": {
       "kind": "struct",
-      "description": "One log record. `ts_unix_s` is unix-epoch seconds. `target` is the\ntracing target / unit name; `message` is the rendered single-line\nbody. Pre-filtered at subscription time so wire-bloating trace\nevents don't reach webapps.",
       "fields": [
         {
           "name": "tsUnixS",
@@ -2888,7 +2881,6 @@
     },
     "LogSource": {
       "kind": "enum",
-      "description": "What stream of log records a subscription pulls from. `Daemon` is the\nbridgething tracing subscriber; `System` is the `journald` view; `All`\nmerges both in arrival order.",
       "variants": [
         {
           "name": "Daemon"
@@ -3259,7 +3251,6 @@
     },
     "MusicProvider": {
       "kind": "enum",
-      "description": "Which music service the companion is currently logged into and\ndriving on behalf of the user. `None` when no glue is attached.",
       "variants": [
         {
           "name": "None"
@@ -3339,8 +3330,7 @@
         },
         {
           "name": "body",
-          "type": "number[]",
-          "optional": true
+          "type": "Uint8Array | null"
         },
         {
           "name": "timeoutMs",
@@ -3368,7 +3358,7 @@
         },
         {
           "name": "body",
-          "type": "number[]"
+          "type": "Uint8Array"
         }
       ]
     },
@@ -3519,7 +3509,6 @@
     },
     "NetworkInfo": {
       "kind": "struct",
-      "description": "What kind of network the companion's host is currently using. `metered`\nis the OS-reported metered flag; webapps should treat it as a hint\n(e.g. defer non-essential fetches) rather than a hard ban.",
       "fields": [
         {
           "name": "kind",
@@ -4144,6 +4133,17 @@
         {
           "name": "msg",
           "type": "string"
+        },
+        {
+          "name": "updateId",
+          "type": "string",
+          "optional": true,
+          "description": "which update failed. a resume re-drives the same artifact, so this is NOT unique per attempt."
+        },
+        {
+          "name": "replayed",
+          "type": "boolean",
+          "description": "set only when the bridge is re-delivering a failure whose peer had already gone away"
         }
       ]
     },
@@ -5483,7 +5483,7 @@
         },
         {
           "name": "bytes",
-          "type": "number[]"
+          "type": "Uint8Array"
         }
       ]
     },
@@ -5547,7 +5547,6 @@
     },
     "SurfaceAvailability": {
       "kind": "struct",
-      "description": "Bool feature flags the daemon exposes to webapps. Each is true when the\nsurface has both a backing implementation and (where applicable) a\nconnected companion claiming to provide it. False = the surface will\nrespond `Unsupported` or `Unimplemented` to verbs.",
       "fields": [
         {
           "name": "geo",
@@ -5735,8 +5734,7 @@
         },
         {
           "name": "streamId",
-          "type": "string",
-          "optional": true
+          "type": "string | null"
         },
         {
           "name": "reason",
@@ -5815,7 +5813,6 @@
     },
     "VoiceDescriptor": {
       "kind": "struct",
-      "description": "One TTS voice the companion's audio backend can speak as. `id` is\nplatform-opaque (Apple/Android voice id); `locale` is BCP-47.",
       "fields": [
         {
           "name": "id",
@@ -5995,8 +5992,7 @@
       "fields": [
         {
           "name": "id",
-          "type": "string",
-          "optional": true
+          "type": "string | null"
         },
         {
           "name": "name",
@@ -6016,8 +6012,7 @@
       "fields": [
         {
           "name": "id",
-          "type": "string",
-          "optional": true,
+          "type": "string | null",
           "description": "Id of the webapp that was just activated."
         },
         {
@@ -6032,8 +6027,7 @@
       "fields": [
         {
           "name": "id",
-          "type": "string",
-          "optional": true,
+          "type": "string | null",
           "description": "`None` when no webapp is currently active in the kiosk."
         },
         {
@@ -6126,7 +6120,7 @@
       "fields": [
         {
           "name": "bytes",
-          "type": "number[]"
+          "type": "Uint8Array"
         },
         {
           "name": "mime",

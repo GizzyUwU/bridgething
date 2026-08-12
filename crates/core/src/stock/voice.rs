@@ -66,18 +66,6 @@ pub enum StockWakeWord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum StockLocalCommand {
-  None,
-  Play,
-  Resume,
-  Stop,
-  Next,
-  Previous,
-  Mute,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StockVoiceErrorPayload {
   cause: String,
   domain: String,
@@ -115,10 +103,10 @@ pub fn voice_intent_to_stock(intent: &VoiceIntent) -> StockVoiceSend {
     "connect_action_taken": false,
   });
 
-  if let Some(target_type) = intent.slots.target_type {
-    if let Ok(serde_json::Value::String(name)) = serde_json::to_value(target_type) {
-      custom["slots"] = serde_json::json!({ "requestedEntityType": [name] });
-    }
+  if let Some(target_type) = intent.slots.target_type
+    && let Ok(serde_json::Value::String(name)) = serde_json::to_value(target_type)
+  {
+    custom["slots"] = serde_json::json!({ "requestedEntityType": [name] });
   }
   if let Ok(bridge_slots) = serde_json::to_value(&intent.slots) {
     custom["bridge_slots"] = bridge_slots;

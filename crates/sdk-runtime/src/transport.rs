@@ -1,5 +1,6 @@
 use std::future::Future;
 
+use bytes::Bytes;
 use libbridgething::protocol::PrioritizedFrame;
 
 use crate::{error::TransportError, protocol::Protocol};
@@ -11,7 +12,10 @@ pub trait Connector<P: Protocol>: Send + 'static {
 }
 
 pub trait OutboundHalf<P: Protocol>: Send + 'static {
-  fn send(&mut self, frame: PrioritizedFrame<P::OutMsg>) -> impl Future<Output = Result<(), TransportError>> + Send;
+  fn max_batch_bytes(&self) -> usize;
+  fn encode(frame: PrioritizedFrame<P::OutMsg>) -> Result<Bytes, TransportError>;
+  fn ready(&mut self) -> impl Future<Output = Result<(), TransportError>> + Send;
+  fn send_batch(&mut self, batch: Bytes) -> impl Future<Output = Result<(), TransportError>> + Send;
 }
 
 pub trait InboundHalf<P: Protocol>: Send + 'static {

@@ -3,20 +3,23 @@ use std::{
   time::{Duration, Instant},
 };
 
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use ::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use bridgething_io::{HttpExecutor, HttpMethod, HttpRequest, HttpResponse};
 use tokio::sync::Mutex;
 
 use crate::{
   auth::Auth,
   error::{Error, Result},
-  httpx::{HttpExecutor, HttpMethod, HttpRequest, HttpResponse, headers_to_vec},
+  httpx::headers_to_vec,
   util,
 };
 
 pub const SPCLIENT: &str = "https://guc3-spclient.spotify.com";
 pub const CLIENT_VERSION: &str = "9.1.52.1394";
 
+#[cfg(feature = "native-io")]
 pub(crate) const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(feature = "native-io")]
 pub(crate) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 pub const ANDROID_CLIENT_ID: &str = "9a8d2f0ce77a4e248bb71fefcb557637";
 pub const PROTO_CT: &str = "application/x-protobuf";
@@ -78,6 +81,7 @@ impl SpHttp {
         timeout_ms,
       })
       .await
+      .map_err(Error::other)
   }
 
   pub async fn set_market(&self, country: &str, catalogue: &str) {

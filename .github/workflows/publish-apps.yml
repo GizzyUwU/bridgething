@@ -1,0 +1,140 @@
+name: publish-apps
+
+on:
+  repository_dispatch:
+    types: [webapps-published]
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: 'Publish payload JSON: {"apps":[...]}. Omit to only resync the source directory.'
+        required: false
+        type: string
+
+concurrency:
+  group: release-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    env:
+      R2_BUCKET: bridgething-apps
+      PUBLIC_BASE: https://apps.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: install rclone (R2 client)
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - run: bun install --frozen-lockfile
+
+      - run: bunx turbo run build --filter='@bridgething/site^...'
+
+      - name: fetch the publish state from R2
+        run: scripts/r2-get state/apps-published.yaml apps/apps-published.yaml
+
+      - name: apply the publish payload
+        if: github.event_name == 'repository_dispatch' || inputs.payload != ''
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          MANUAL_PAYLOAD: ${{ inputs.payload }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            printf '%s' "$MANUAL_PAYLOAD" >/tmp/payload.json
+          else
+            printf '%s' "$PAYLOAD" >/tmp/payload.json
+          fi
+          jq -e '.apps | length > 0' /tmp/payload.json >/dev/null
+          bun run scripts/apply-webapp-publish.ts --payload /tmp/payload.json
+
+      - name: sync recommended sources from the directory
+        continue-on-error: true
+        run: bun run scripts/sync-attested-sources.ts
+
+      - name: regenerate catalog.json
+        run: bun run catalog:build
+
+      - name: upload catalog.json to R2
+        run: |
+          set -euo pipefail
+          scripts/r2-put apps/catalog.json catalog.json application/json \
+            "public, max-age=300, must-revalidate"
+
+      - name: upload the catalog schema to R2
+        run: |
+          set -euo pipefail
+          scripts/r2-put ../packages/catalog/schema.v1.json schemas/catalog/v1.json application/json \
+            "public, max-age=86400, must-revalidate"
+
+      - name: publish the app state to R2
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          scripts/r2-put apps/apps-published.yaml state/apps-published.yaml application/yaml "no-store"
+          at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [[ -s /tmp/payload.json ]]; then
+            entry=$(jq -c --arg at "$at" --arg run "$RUN_URL" \
+              '{at: $at, run: $run, apps: [.apps[] | {slug, version}]}' /tmp/payload.json)
+          else
+            entry=$(jq -nc --arg at "$at" --arg run "$RUN_URL" '{at: $at, run: $run, resync: true}')
+          fi
+          scripts/r2-log state/publishes.log "$entry"
+
+      - name: purge the cloudflare edge
+        if: always()
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: scripts/cf-purge
+
+      - name: pull the current manifest + companion + desktop pointers from R2
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ota.bridgething.com/manifest.json -o manifest/fixture.json || \
+            echo "no production manifest yet; site will render the empty state"
+          curl -fsSL https://ota.bridgething.com/companion.json -o manifest/companion.json || \
+            echo "no companion pointer yet; the apk card will render its empty state"
+          curl -fsSL https://ota.bridgething.com/desktop/stable/desktop.json -o manifest/desktop.json || \
+            echo "no desktop pointer yet; the desktop cards will render their empty state"
+
+      - name: redeploy the site so the store stops showing stale rows
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          bun run build
+          bunx wrangler deploy

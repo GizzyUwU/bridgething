@@ -1,7 +1,3 @@
-//! Converts an openWakeWord ONNX graph into the flat model the detector reads.
-//!
-//!     cargo run --release -p bridgething-wakeword --example convert -- <model.onnx> <model.btww>
-
 use std::collections::HashMap;
 
 use bridgething_wakeword::blob::{KIND_CLASSIFIER, KIND_FEATURES, MAGIC, PARAMS, VERSION, tag};

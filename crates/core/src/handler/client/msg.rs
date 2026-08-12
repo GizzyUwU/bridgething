@@ -161,13 +161,23 @@ impl PossibleRecvMsg {
 }
 
 // --- sends ---
-#[derive(Debug, Clone, Serialize, PartialEq, derive_more::From)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum PossibleSendMsg {
-  #[from]
-  Modern(BridgeToClientMsg),
-  #[from]
-  Stock(StockSendMsg),
+  Modern(Box<BridgeToClientMsg>),
+  Stock(Box<StockSendMsg>),
+}
+
+impl From<BridgeToClientMsg> for PossibleSendMsg {
+  fn from(msg: BridgeToClientMsg) -> Self {
+    Self::Modern(Box::new(msg))
+  }
+}
+
+impl From<StockSendMsg> for PossibleSendMsg {
+  fn from(msg: StockSendMsg) -> Self {
+    Self::Stock(Box::new(msg))
+  }
 }
 
 impl PossibleSendMsg {
@@ -179,12 +189,12 @@ impl PossibleSendMsg {
     phone: crate::stock::StockDeviceType,
   ) -> Self {
     match mode {
-      ClientMode::Modern => Self::Modern(msg),
-      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id, call_slot, phone)),
+      ClientMode::Modern => msg.into(),
+      ClientMode::Stock => crate::stock::server_event_to_stock(msg, stock_msg_id, call_slot, phone).into(),
     }
   }
 
   pub fn is_noop(&self) -> bool {
-    matches!(self, Self::Stock(StockSendMsg::Unsupported))
+    matches!(self, Self::Stock(msg) if matches!(**msg, StockSendMsg::Unsupported))
   }
 }

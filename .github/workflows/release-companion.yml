@@ -6,7 +6,6 @@ on:
     paths:
       - "mobile/**"
       - "packages/**"
-      - "crates/spotify/**"
       - ".github/workflows/release-companion.yml"
   workflow_dispatch:
     inputs:
@@ -61,10 +60,6 @@ permissions:
   contents: read
 
 jobs:
-  # mobile/package.json is the companion version for both platforms. android bakes it into the apk
-  # as versionName, but ios cannot: its marketing version is pinned, so there is nothing in a
-  # TestFlight build that says which companion version it is. Both platforms therefore decide by
-  # comparing this version against what R2 says was last published.
   decide:
     runs-on: ubuntu-latest
     outputs:
@@ -80,8 +75,6 @@ jobs:
         id: plan
         env:
           OTA_PUBLIC_BASE: https://ota.bridgething.com
-          # a push carries no inputs, so it means "ship both platforms if the version moved". the
-          # already-published comparison below is what keeps that from rebuilding on every commit.
           WANT_ANDROID: ${{ github.event_name == 'push' && 'true' || inputs.android }}
           WANT_IOS: ${{ github.event_name == 'push' && 'true' || inputs.ios }}
           PUBLISHING: ${{ github.event_name == 'push' && 'true' || inputs.publish }}
@@ -91,9 +84,6 @@ jobs:
           version=$(jq -r '.version' mobile/package.json)
           [[ -n "$version" && "$version" != null ]] || { echo "mobile/package.json has no version" >&2; exit 1; }
 
-          # the bump script keeps these in step; a drift here means the apk would ship under a
-          # different version than the one this run reasons about. only the apk is affected, so an
-          # ios-only run is not held hostage by it.
           if [[ "$WANT_ANDROID" == "true" ]]; then
             gradle=$(grep -m1 'versionName' mobile/android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
             [[ "$gradle" == "$version" ]] || {
@@ -105,8 +95,6 @@ jobs:
           published_ios=$(curl -fsS --max-time 20 "${OTA_PUBLIC_BASE}/companion/ios/published.json" 2>/dev/null \
             | jq -r '.version // empty' || true)
 
-          # a build with nothing to publish is a smoke test, so it always runs; only a real publish
-          # is skipped for being redundant.
           decide() {
             local want="$1" published="$2"
             if [[ "$want" != "true" ]]; then echo false
@@ -129,31 +117,22 @@ jobs:
     needs: decide
     if: needs.decide.outputs.android == 'true'
     runs-on: ubuntu-latest
-    # a gradle cache-write failure wedges the build instead of failing it, so bound the job rather
-    # than letting it sit on the 6 hour default.
     timeout-minutes: 45
     env:
       R2_BUCKET: bridgething-ota
       PUBLIC_BASE: https://ota.bridgething.com
       PURGE_URLS: /tmp/purge-urls.txt
-      # incremental state never outlives a runner, and it doubles the debug tree on the disk gradle needs.
       CARGO_INCREMENTAL: "0"
       PRUNE_HOST_BUILD: "1"
 
     steps:
       - uses: actions/checkout@v4
 
-      # the image leaves ~15g free on a single 72g root volume, and /mnt is part of it rather than a
-      # separate disk, so cargo artifacts, aar transforms and swap all compete for the same space;
-      # running out corrupts gradle's fileHashes.bin mid-write. swap still has to cover the fat-lto
-      # link of the spotify crate spiking past 7.8g of ram, but every gig of it costs build space.
       - name: reclaim runner disk
         run: |
           set -euo pipefail
           df -h /
 
-          # not /usr/local/lib/node_modules: /usr/local/bin/npx symlinks into it and the react
-          # native gradle plugin shells out to npx.
           sudo rm -rf /usr/share/dotnet /usr/share/swift /usr/local/share/powershell \
             /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/miniconda \
             /opt/microsoft /opt/pipx || true
@@ -177,8 +156,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # gradle downloads every dependency and redoes every aar transform on a fresh runner; this is
-      # the only thing that carries GRADLE_USER_HOME across runs.
       - uses: gradle/actions/setup-gradle@v4
 
       - name: install rclone (R2 client)
@@ -186,8 +163,6 @@ jobs:
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone
-          # no_check_bucket: rclone otherwise issues CreateBucket before an upload,
-          # which an R2 object-read-write token denies with a 403.
           cat > ~/.config/rclone/rclone.conf <<EOF
           [r2]
           type = s3
@@ -207,29 +182,21 @@ jobs:
       - name: nitro codegen
         run: bunx turbo run nitro:codegen
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-ndk
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: build the spotify client for android
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: |
-          set -euo pipefail
-          bash crates/spotify/scripts/build-jnilibs.sh
-          sccache --show-stats
-          df -h /
-          free -h
-
       - name: build the release apk
         env:
           BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
         run: |
           set -euo pipefail
-          # gradle dying of ENOSPC also kills the runner's log upload, so leave the disk state behind.
           trap 'df -h /' EXIT
           [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
           bash mobile/scripts/build-apk.sh
@@ -320,8 +287,6 @@ jobs:
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
-          # prepend rather than replace: dropping the runner's existing keychains off the search
-          # list breaks anything else that reads from them.
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           security default-keychain -s "$keychain"
 
@@ -348,14 +313,14 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: build the spotify client for ios
+      - name: build the shared core for ios
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           XCFRAMEWORK_DEVICE_ONLY: "1"
         run: |
           set -euo pipefail
-          bash crates/spotify/scripts/build-xcframework.sh
+          bash scripts/build-uniffi-xcframework.sh companion BridgethingCompanionCore
           sccache --show-stats
 
       - name: nitro codegen
@@ -380,8 +345,6 @@ jobs:
           echo "number=$((highest + 1))" >>"$GITHUB_OUTPUT"
           echo "highest on app store connect: $highest"
 
-      # content-addressed, so a restore onto a different runner is a hash lookup rather than the
-      # path-aliasing gamble that makes deriveddata untravellable.
       - name: restore the xcode compilation cache
         uses: actions/cache@v4
         with:
@@ -420,8 +383,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           IPA: ${{ steps.ipa.outputs.path }}
-          # asc refuses to publish without a group, and an external group needs the review
-          # submission before testers ever see the build, so a push has to supply both.
           GROUPS: ${{ inputs.testflight_groups || 'public' }}
           SUBMIT: ${{ inputs.testflight_submit || github.event_name == 'push' }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.number }}
@@ -433,9 +394,6 @@ jobs:
           [[ "$SUBMIT" == "true" ]] && args+=(--submit --confirm)
           asc "${args[@]}"
 
-      # nothing in a TestFlight build records which companion version it is, so the record lives
-      # here. it is a key of its own rather than a field on companion.json, which the android job
-      # writes concurrently and the site parses to a fixed shape.
       - name: record what was published
         if: needs.decide.outputs.publishing == 'true'
         env:

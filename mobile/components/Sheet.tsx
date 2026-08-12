@@ -10,6 +10,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { usePalette } from '../lib/theme';
+
 export function Sheet({
   visible,
   onClose,
@@ -20,6 +22,7 @@ export function Sheet({
   children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const palette = usePalette();
   const [render, setRender] = useState(visible);
   const progress = useSharedValue(visible ? 1 : 0);
   const keyboard = useAnimatedKeyboard();
@@ -61,11 +64,15 @@ export function Sheet({
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
           <Animated.View
-            style={[StyleSheet.absoluteFill, styles.scrim, backdropStyle]}
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: palette.scrim },
+              backdropStyle,
+            ]}
           />
         </Pressable>
         <Animated.View className="w-full max-w-[440px]" style={cardStyle}>
-          <View className="gap-4 rounded-3xl border border-border bg-background p-6">
+          <View className="gap-4 border border-rule-strong bg-bg p-6">
             {children}
           </View>
         </Animated.View>
@@ -73,7 +80,3 @@ export function Sheet({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  scrim: { backgroundColor: 'rgba(0,0,0,0.55)' },
-});

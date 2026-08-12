@@ -1,0 +1,17 @@
+---
+export type Props = {
+  channel?: string;
+  variant?: 'primary' | 'secondary';
+  size?: 'md' | 'lg';
+  label?: string;
+};
+
+const { channel, variant = 'primary', size = 'md', label } = Astro.props;
+const text = label ?? (channel ? `install ${channel}` : 'install');
+---
+
+<a
+  class:list={['btn', size === 'lg' && 'btn-lg', variant === 'primary' && 'btn-primary']}
+  href={channel ? `/install#${channel}` : '/install'}>
+  {text}
+</a>

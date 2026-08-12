@@ -9,9 +9,11 @@ use bridgething_iap2::{
   },
 };
 use bridgething_test_harness::{
-  CommandDriver, DeviceHarness, DeviceTier, FrameObserve, FrameObserver, GatewayDriver, Harness, Iap2OutboundObserve,
-  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport, WebappProvision,
+  CommandDriver, FrameObserve, FrameObserver, GatewayDriver, Harness, Iap2OutboundObserve, Iap2Source,
+  Iap2SourceDriver, ModernClientDriver, WebappProvision,
 };
+#[cfg(target_os = "linux")]
+use bridgething_test_harness::{DeviceHarness, DeviceTier, OverAirTransport};
 use libbridgething::{
   CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, GeoError, MediaItem, PhoneCall,
   PhoneCallDirection, PhoneCallStatus, PlayerState, Position,
@@ -40,6 +42,7 @@ macro_rules! lift {
     }
   };
   (@tier t3_rfcomm, $scenario:ident) => {
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     #[ignore = "requires a booted Car Thing with the test-tap daemon + a host BT radio"]
     async fn t3_rfcomm() {
@@ -51,6 +54,7 @@ macro_rules! lift {
     }
   };
   (@tier t3_iap2_ea, $scenario:ident) => {
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     #[ignore = "requires a booted Car Thing with the test-tap daemon + a host BT radio"]
     async fn t3_iap2_ea() {
@@ -62,6 +66,7 @@ macro_rules! lift {
     }
   };
   (@tier t3_emulator, $scenario:ident) => {
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     #[ignore = "requires a booted Car Thing with the test-tap daemon + a host BT radio"]
     async fn t3_emulator() {

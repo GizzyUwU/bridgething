@@ -69,10 +69,6 @@ impl Features {
     Ok(features)
   }
 
-  pub fn embeddings_per_call(&self) -> usize {
-    self.embedding.embeddings_per_call()
-  }
-
   pub fn call_samples(&self) -> usize {
     self.frames_per_call * MEL_HOP
   }

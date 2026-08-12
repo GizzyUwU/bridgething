@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+
 use std::time::Duration;
 
 use bridgething::ClientMode;

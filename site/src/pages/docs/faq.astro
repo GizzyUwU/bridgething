@@ -1,0 +1,41 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const refdes = 'text-accent m-0 mb-4 font-mono text-sm font-normal tracking-normal';
+
+const faqs = [
+  {
+    q: 'does spotify still work?',
+    a: "yes. spotify's interface is one of the apps.",
+  },
+  {
+    q: "can i put spotify's software back?",
+    a: 'yes, by flashing a stock dump over usb with <a href="https://github.com/JoeyEamigh/flashthing">flashthing</a>.',
+  },
+  {
+    q: 'do i need a computer?',
+    a: 'only to install it. updates and everything else go through your phone.',
+  },
+];
+---
+
+<DocsLayout title="faq" current="faq" description="common questions about running bridgething on a spotify car thing.">
+  <header class="mb-14">
+    <h1>faq</h1>
+    <p class="text-white/60">what people ask before flashing anything.</p>
+  </header>
+
+  <section>
+    <h2 class={refdes}>d1 - questions</h2>
+    <dl class="m-0 border-t border-white/10">
+      {
+        faqs.map(f => (
+          <div class="border-b border-white/10 py-6">
+            <dt class="font-display mb-2 text-lg font-medium tracking-tight">{f.q}</dt>
+            <dd class="m-0 max-w-[68ch] text-pretty text-white/60" set:html={f.a} />
+          </div>
+        ))
+      }
+    </dl>
+  </section>
+</DocsLayout>

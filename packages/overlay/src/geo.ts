@@ -10,8 +10,6 @@ declare global {
   }
 }
 
-// the web api has no interval knob, so pick something a map can animate against without asking the
-// phone for a fix every frame; the daemon aggregates this across watchers anyway
 const WATCH_INTERVAL_MS = 1000;
 const PERMISSION_DENIED = 1;
 const POSITION_UNAVAILABLE = 2;
@@ -42,7 +40,6 @@ function positionError(code: number, message: string): GeolocationPositionError 
   return { code, message, PERMISSION_DENIED, POSITION_UNAVAILABLE, TIMEOUT } as GeolocationPositionError;
 }
 
-/** A refusal the page can act on: a denied grant is terminal, everything else is worth retrying. */
 function fromGeoError(error: GeoError): GeolocationPositionError {
   switch (error) {
     case 'permissionDenied':
@@ -58,7 +55,6 @@ function accuracyOf(options?: PositionOptions): GeoAccuracy {
   return options?.enableHighAccuracy ? 'fine' : 'coarse';
 }
 
-/** `maximumAge` is milliseconds and the wire carries seconds; floor so we never over-report freshness. */
 function maxAgeSecondsOf(options?: PositionOptions): number | null {
   const ms = options?.maximumAge;
   if (ms === undefined || !Number.isFinite(ms) || ms <= 0) return null;
@@ -72,7 +68,6 @@ class GeolocationBridge implements Geolocation {
 
   constructor(cfg: GeoShimConfig) {
     const host = cfg.origin.replace(/^https?:\/\//, '');
-    // the frame's own host is wrong for embedded third-party content, so address the daemon explicitly
     this.client = new BridgethingClient({ url: `ws://${host}/` });
   }
 
@@ -130,7 +125,6 @@ class GeolocationBridge implements Geolocation {
           else error?.(positionError(POSITION_UNAVAILABLE, 'the bridgething daemon refused the watch'));
           return;
         }
-        // clearWatch can land before the token does, so honour a release that already happened
         if (entry.released) {
           void this.client.geo.unwatch({ token: result.response.token });
           return;
@@ -158,8 +152,6 @@ class GeolocationBridge implements Geolocation {
 
 export function installGeolocationBridge(cfg: GeoShimConfig): void {
   const bridge = new GeolocationBridge(cfg);
-  // shadows the readonly Navigator.prototype getter; runs at document-create so page scripts that
-  // capture navigator.geolocation only ever see this one
   Object.defineProperty(navigator, 'geolocation', {
     value: bridge,
     configurable: true,
@@ -169,7 +161,6 @@ export function installGeolocationBridge(cfg: GeoShimConfig): void {
 
 function boot(): void {
   const cfg = window.__bridgethingGeo;
-  // deliberately no origin check: embedded third-party frames are the reason this exists
   if (!cfg || window.__bridgethingGeoInstalled) return;
   window.__bridgethingGeoInstalled = true;
   installGeolocationBridge(cfg);

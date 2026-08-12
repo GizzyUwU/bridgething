@@ -1,12 +1,12 @@
 #![cfg(feature = "emulator")]
 
-mod emu;
-
 use std::time::Duration;
 
-use bridgething_iap2::SessionEvent;
+use bridgething_iap2::{
+  SessionEvent,
+  emulator::harness::{self as emu, recv_with_timeout},
+};
 use bytes::Bytes;
-use emu::recv_with_timeout;
 
 #[tokio::test]
 async fn emulator_pushes_now_playing_and_artwork() {

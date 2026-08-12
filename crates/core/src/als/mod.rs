@@ -163,8 +163,8 @@ fn ease_step(current: u32, target: u32, ease_pct: f32) -> u32 {
 
 #[derive(Debug)]
 enum Cmd {
-  SetMode(BrightnessMode, oneshot::Sender<()>),
-  SetLevel(f32, oneshot::Sender<Result<(), HardwareError>>),
+  SetMode(BrightnessMode, oneshot::Sender<Result<(), AlsError>>),
+  SetLevel(f32, oneshot::Sender<Result<Result<(), HardwareError>, AlsError>>),
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +231,7 @@ impl AlsManager {
       .send(Cmd::SetMode(mode, reply_tx))
       .await
       .map_err(|_| AlsError::Closed)?;
-    reply_rx.await.map_err(|_| AlsError::Closed)
+    reply_rx.await.map_err(|_| AlsError::Closed)?
   }
 
   pub async fn set_level(&self, level: f32) -> Result<Result<(), HardwareError>, AlsError> {
@@ -241,7 +241,7 @@ impl AlsManager {
       .send(Cmd::SetLevel(level, reply_tx))
       .await
       .map_err(|_| AlsError::Closed)?;
-    reply_rx.await.map_err(|_| AlsError::Closed)
+    reply_rx.await.map_err(|_| AlsError::Closed)?
   }
 }
 
@@ -286,13 +286,12 @@ async fn run_loop(mut rx: mpsc::Receiver<Cmd>, inner: Arc<RwLock<Inner>>, bus: W
 async fn handle_cmd(cmd: Cmd, inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) {
   match cmd {
     Cmd::SetMode(mode, reply) => {
-      let (write_ticks, dir, brightness) = {
-        let mut guard = inner.write().await;
+      let (write_ticks, dir) = {
+        let guard = inner.read().await;
         if guard.mode == mode {
-          let _ = reply.send(());
+          let _ = reply.send(Ok(()));
           return;
         }
-        guard.mode = mode;
         let ticks = if mode == BrightnessMode::Manual {
           guard.level_to_ticks(guard.manual_level)
         } else {
@@ -301,43 +300,54 @@ async fn handle_cmd(cmd: Cmd, inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) {
             .map(|m| guard.target_for_raw(m))
             .unwrap_or(guard.current_ticks)
         };
-        guard.current_ticks = ticks;
-        let dir = guard.config.backlight_dir.clone();
-        let brightness = guard.snapshot().brightness;
-        (ticks, dir, brightness)
+        (ticks, guard.config.backlight_dir.clone())
       };
-      write_brightness(&dir, write_ticks).await.ok();
-      let _ = reply.send(());
+      if let Err(err) = write_brightness(&dir, write_ticks).await {
+        tracing::error!(dir = %dir.display(), ticks = write_ticks, "als: backlight write failed: {err}");
+        let _ = reply.send(Err(err));
+        return;
+      }
+      let brightness = {
+        let mut guard = inner.write().await;
+        guard.mode = mode;
+        guard.current_ticks = write_ticks;
+        guard.snapshot().brightness
+      };
+      let _ = reply.send(Ok(()));
       broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness)).await;
     }
     Cmd::SetLevel(level, reply) => {
       if !(0.0..=1.0).contains(&level) {
-        let _ = reply.send(Err(HardwareError::LevelOutOfRange));
+        let _ = reply.send(Ok(Err(HardwareError::LevelOutOfRange)));
         return;
       }
-      let (mismatch, write_ticks, dir, brightness) = {
+      let (mismatch, write_ticks, dir) = {
+        let guard = inner.read().await;
+        let mismatch = guard.mode != BrightnessMode::Manual;
+        let ticks = (!mismatch).then(|| guard.level_to_ticks(level));
+        (mismatch, ticks, guard.config.backlight_dir.clone())
+      };
+      if let Some(ticks) = write_ticks
+        && let Err(err) = write_brightness(&dir, ticks).await
+      {
+        tracing::error!(dir = %dir.display(), ticks, "als: backlight write failed: {err}");
+        let _ = reply.send(Err(err));
+        return;
+      }
+      let brightness = {
         let mut guard = inner.write().await;
         guard.manual_level = level;
-        if guard.mode != BrightnessMode::Manual {
-          let brightness = guard.snapshot().brightness;
-          (true, None, guard.config.backlight_dir.clone(), brightness)
-        } else {
-          let ticks = guard.level_to_ticks(level);
+        if let Some(ticks) = write_ticks {
           guard.current_ticks = ticks;
-          let dir = guard.config.backlight_dir.clone();
-          let brightness = guard.snapshot().brightness;
-          (false, Some(ticks), dir, brightness)
         }
+        guard.snapshot().brightness
       };
-      if let Some(ticks) = write_ticks {
-        write_brightness(&dir, ticks).await.ok();
-      }
       let outcome = if mismatch {
         Err(HardwareError::ModeMismatch)
       } else {
         Ok(())
       };
-      let _ = reply.send(outcome);
+      let _ = reply.send(Ok(outcome));
       broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness)).await;
     }
   }
@@ -358,46 +368,46 @@ async fn poll_once(inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) -> Result<(),
     guard.current_ticks = actual;
   }
 
-  let (ticks_to_write, dir, brightness_state, ambient_event, brightness_changed) = {
+  let (ticks_to_write, dir, prev_level) = {
     let mut guard = inner.write().await;
-    let prev_level = guard.ambient_level();
     guard.push_sample(sample);
+    let prev_level = guard.ambient_level();
 
     let mut ticks_to_write: Option<u32> = None;
-    let mut brightness_changed = false;
     if guard.mode == BrightnessMode::Auto
       && let Some(m) = guard.median()
     {
       let target = guard.target_for_raw(m);
-      let prev_ticks = guard.current_ticks;
-      let next = ease_step(prev_ticks, target, guard.config.ease_pct);
-      if next != prev_ticks {
-        guard.current_ticks = next;
+      let next = ease_step(guard.current_ticks, target, guard.config.ease_pct);
+      if next != guard.current_ticks {
         ticks_to_write = Some(next);
-        brightness_changed = true;
       }
     }
 
-    let dir = guard.config.backlight_dir.clone();
-    let brightness = guard.snapshot().brightness;
-    let level = guard.ambient_level();
-    let ambient_event = if level != prev_level {
-      Some(AmbientLightUpdate { ambient_level: level })
-    } else {
-      None
-    };
-    (ticks_to_write, dir, brightness, ambient_event, brightness_changed)
+    (ticks_to_write, guard.config.backlight_dir.clone(), prev_level)
   };
 
-  if let Some(ticks) = ticks_to_write {
-    write_brightness(&dir, ticks).await.ok();
+  let Some(ticks) = ticks_to_write else {
+    return Ok(());
+  };
+  if let Err(err) = write_brightness(&dir, ticks).await {
+    tracing::error!(dir = %dir.display(), ticks, "als: backlight write failed: {err}");
+    return Ok(());
   }
-  if let Some(event) = ambient_event {
-    broadcast(bus, BridgeToClientHardwareMsg::AmbientLightUpdate(event)).await;
+
+  let (brightness, level) = {
+    let mut guard = inner.write().await;
+    guard.current_ticks = ticks;
+    (guard.snapshot().brightness, guard.ambient_level())
+  };
+  if level != prev_level {
+    broadcast(
+      bus,
+      BridgeToClientHardwareMsg::AmbientLightUpdate(AmbientLightUpdate { ambient_level: level }),
+    )
+    .await;
   }
-  if brightness_changed {
-    broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness_state)).await;
-  }
+  broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness)).await;
   Ok(())
 }
 
@@ -453,5 +463,84 @@ fn parse_uint(bytes: &[u8]) -> u32 {
 async fn broadcast(bus: &WireEventBus, event: BridgeToClientHardwareMsg) {
   if let Err(errors) = bus.broadcast(event, MsgMeta::Event).await {
     tracing::trace!("als broadcast had {} ws error(s)", errors.len());
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn scratch(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(name);
+    let _ = std::fs::remove_dir_all(&root);
+    root
+  }
+
+  async fn manager_at(root: &Path) -> (AlsManager, impl Sized) {
+    let (client_man, listener) = crate::net::create_client_manager();
+    let config = AlsConfig {
+      als_path: root.join("in_intensity0_raw"),
+      backlight_dir: root.join("backlight"),
+      ..Default::default()
+    };
+    let (manager, loop_handle) = AlsManager::init(WireEventBus::new(client_man), config)
+      .await
+      .expect("als init tolerates absent sysfs")
+      .spawn();
+    (manager, (listener, loop_handle))
+  }
+
+  #[tokio::test]
+  async fn a_backlight_write_that_never_landed_is_reported_rather_than_announced() {
+    let root = scratch("als-test-absent-backlight");
+    let (manager, _rig) = manager_at(&root).await;
+
+    let mode = manager.set_mode(BrightnessMode::Manual).await;
+    assert!(
+      matches!(mode, Err(AlsError::Io(_))),
+      "a mode switch whose backlight write failed cannot report success: {mode:?}"
+    );
+    assert_eq!(
+      manager.snapshot().await.brightness.mode,
+      BrightnessMode::Auto,
+      "the daemon entered a mode the panel never took"
+    );
+  }
+
+  #[tokio::test]
+  async fn a_failed_backlight_write_leaves_the_prior_brightness_in_place() {
+    let root = scratch("als-test-write-failure");
+    let backlight = root.join("backlight");
+    std::fs::create_dir_all(&backlight).expect("scratch backlight");
+    std::fs::write(backlight.join("max_brightness"), "255\n").expect("max_brightness");
+    std::fs::write(backlight.join("actual_brightness"), "128\n").expect("actual_brightness");
+    std::fs::write(backlight.join("brightness"), "128\n").expect("brightness");
+
+    let (manager, _rig) = manager_at(&root).await;
+    manager
+      .set_mode(BrightnessMode::Manual)
+      .await
+      .expect("a writable backlight takes the mode switch");
+    manager
+      .set_level(0.5)
+      .await
+      .expect("a writable backlight takes the level")
+      .expect("manual mode accepts a level");
+    let settled = manager.snapshot().await.brightness;
+
+    std::fs::remove_file(backlight.join("brightness")).expect("unlink brightness");
+    std::fs::create_dir(backlight.join("brightness")).expect("shadow brightness");
+
+    let failed = manager.set_level(0.9).await;
+    assert!(
+      matches!(failed, Err(AlsError::Io(_))),
+      "a level change whose backlight write failed cannot report success: {failed:?}"
+    );
+    let after = manager.snapshot().await.brightness;
+    assert_eq!(
+      after.level, settled.level,
+      "the daemon reports a brightness the panel never took"
+    );
+    assert_eq!(after.effective_level, settled.effective_level);
   }
 }

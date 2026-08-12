@@ -3,7 +3,10 @@ use std::{
   io::Read,
   os::raw::{c_char, c_int, c_uint, c_void},
   path::{Path, PathBuf},
-  sync::Once,
+  sync::{
+    Arc, Once,
+    atomic::{AtomicBool, Ordering},
+  },
   time::{Duration, Instant},
 };
 
@@ -20,6 +23,9 @@ const PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const SWUPDATE_CTRL_SOCKET: &str = "/tmp/sockinstctrl";
 const SWUPDATE_PROGRESS_SOCKET: &str = "/tmp/swupdateprog";
+const PROGRESS_CONNECT_RETRY: Duration = Duration::from_millis(100);
+const PROGRESS_CONNECT_BUDGET: Duration = Duration::from_secs(2);
+const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 unsafe extern "C" {
   static mut SOCKET_CTRL_PATH: *mut c_char;
@@ -48,7 +54,9 @@ where
 {
   ensure_socket_paths();
   let (prog_tx, mut prog_rx) = mpsc::channel::<sys::progress_msg>(32);
-  let _progress_handle = task::spawn_blocking(move || progress_reader(prog_tx));
+  let stop = StopSignal::new();
+  let stop_for_reader = stop.handle();
+  let _progress_handle = task::spawn_blocking(move || progress_reader(prog_tx, stop_for_reader));
 
   let path = swu_path.to_path_buf();
   let selector = selector.clone();
@@ -56,6 +64,7 @@ where
 
   let mut send_handle = Some(send_handle);
   let mut send_done = false;
+  let mut progress_closed = false;
   let mut last_emit: Option<(ProgressKey, Instant)> = None;
   let mut last_tick: Option<ProgressTick> = None;
   let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
@@ -63,8 +72,17 @@ where
   heartbeat.tick().await;
 
   loop {
+    if send_done && progress_closed {
+      tracing::warn!("progress socket closed after install bytes streamed; assuming success");
+      return Ok(());
+    }
+
     tokio::select! {
-      Some(msg) = prog_rx.recv() => {
+      msg = prog_rx.recv(), if !progress_closed => {
+        let Some(msg) = msg else {
+          progress_closed = true;
+          continue;
+        };
         let tick = translate(&msg);
         last_tick = Some(tick);
         heartbeat.reset();
@@ -110,13 +128,6 @@ where
           tracing::info!("ota cancellation observed; aborting install");
           return Err(Error::Cancelled);
         }
-      }
-      else => {
-        if send_done {
-          tracing::warn!("progress socket closed after install bytes streamed; assuming success");
-          return Ok(());
-        }
-        return Err(Error::Ipc("progress socket closed before install completed".into()));
       }
     }
   }
@@ -222,29 +233,68 @@ fn install_blocking(swu_path: PathBuf, selector: Selector) -> Result<(), Error> 
   Ok(())
 }
 
-fn progress_reader(tx: mpsc::Sender<sys::progress_msg>) {
-  // SAFETY: `progress_ipc_connect` returns a unix-socket fd or a negative error
-  unsafe {
-    let mut fd = sys::progress_ipc_connect(true);
-    if fd < 0 {
-      tracing::warn!("progress_ipc_connect returned {fd}; no progress events will surface");
-      return;
+struct StopSignal(Arc<AtomicBool>);
+
+impl StopSignal {
+  fn new() -> Self {
+    Self(Arc::new(AtomicBool::new(false)))
+  }
+
+  fn handle(&self) -> Arc<AtomicBool> {
+    self.0.clone()
+  }
+}
+
+impl Drop for StopSignal {
+  fn drop(&mut self) {
+    self.0.store(true, Ordering::Relaxed);
+  }
+}
+
+fn progress_reader(tx: mpsc::Sender<sys::progress_msg>, stop: Arc<AtomicBool>) {
+  let Some(mut fd) = connect_progress(&stop) else {
+    return;
+  };
+
+  while !stop.load(Ordering::Relaxed) {
+    let mut msg: sys::progress_msg = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` is the connected progress socket; the _nb arm polls instead of blocking
+    let r = unsafe { sys::progress_ipc_receive_nb(&mut fd, &mut msg) };
+    if r == 0 {
+      std::thread::sleep(PROGRESS_POLL_INTERVAL);
+      continue;
     }
-    loop {
-      let mut msg: sys::progress_msg = std::mem::zeroed();
-      let r = sys::progress_ipc_receive(&mut fd, &mut msg);
-      if r <= 0 {
-        tracing::debug!("progress_ipc_receive returned {r}; reader exiting");
-        return;
-      }
-      let terminal = matches!(msg.status, sys::RECOVERY_STATUS_SUCCESS | sys::RECOVERY_STATUS_FAILURE);
-      if tx.blocking_send(msg).is_err() {
-        return;
-      }
-      if terminal {
-        return;
-      }
+    if r < 0 {
+      tracing::debug!("progress_ipc_receive returned {r}; reader exiting");
+      break;
     }
+    let terminal = matches!(msg.status, sys::RECOVERY_STATUS_SUCCESS | sys::RECOVERY_STATUS_FAILURE);
+    if tx.blocking_send(msg).is_err() || terminal {
+      break;
+    }
+  }
+
+  if fd >= 0 {
+    // SAFETY: the fd is ours and nothing else holds it
+    unsafe { libc::close(fd) };
+  }
+}
+
+fn connect_progress(stop: &AtomicBool) -> Option<c_int> {
+  let deadline = Instant::now() + PROGRESS_CONNECT_BUDGET;
+  loop {
+    if stop.load(Ordering::Relaxed) {
+      return None;
+    }
+    let fd = unsafe { sys::progress_ipc_connect(false) };
+    if fd >= 0 {
+      return Some(fd);
+    }
+    if Instant::now() >= deadline {
+      tracing::warn!("swupdate progress socket unreachable; no progress events will surface");
+      return None;
+    }
+    std::thread::sleep(PROGRESS_CONNECT_RETRY);
   }
 }
 
@@ -264,4 +314,83 @@ fn info_str(msg: &sys::progress_msg) -> String {
   let bytes = &msg.info[..msg.infolen.min(msg.info.len() as c_uint) as usize];
   let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
   String::from_utf8_lossy(&bytes[..end].iter().map(|&b| b as u8).collect::<Vec<u8>>()).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{io::Write, os::unix::net::UnixListener};
+
+  use super::*;
+
+  fn serve_one_install(listener: UnixListener) -> std::io::Result<usize> {
+    let (mut stream, _) = listener.accept()?;
+    let size = std::mem::size_of::<sys::ipc_message>();
+    let mut msg: sys::ipc_message = unsafe { std::mem::zeroed() };
+
+    stream.read_exact(unsafe { std::slice::from_raw_parts_mut(&mut msg as *mut _ as *mut u8, size) })?;
+    msg.type_ = sys::msgtype_ACK as c_int;
+    stream.write_all(unsafe { std::slice::from_raw_parts(&msg as *const _ as *const u8, size) })?;
+
+    let mut payload = Vec::new();
+    stream.read_to_end(&mut payload)?;
+    Ok(payload.len())
+  }
+
+  #[tokio::test]
+  async fn install_returns_when_the_progress_socket_never_answers() {
+    ensure_socket_paths();
+    let _ = std::fs::remove_file(SWUPDATE_CTRL_SOCKET);
+    let listener = UnixListener::bind(SWUPDATE_CTRL_SOCKET).expect("bind the stand-in control socket");
+    let server = task::spawn_blocking(move || serve_one_install(listener));
+
+    let dir = std::env::temp_dir().join(format!("bridgething-swupdate-test-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let swu = dir.join("update.swu");
+    std::fs::write(&swu, vec![0x5au8; 4096]).unwrap();
+
+    let selector = Selector {
+      software_set: "stable".into(),
+      running_mode: "slot_b".into(),
+    };
+    let (_cancel_tx, mut cancel_rx) = watch::channel(false);
+    let progress = |_: ProgressTick| {};
+
+    let outcome = tokio::time::timeout(
+      PROGRESS_CONNECT_BUDGET * 4,
+      install_swu(&swu, &selector, &progress, &mut cancel_rx),
+    )
+    .await
+    .expect("install must give a verdict once the progress socket is written off, not heartbeat forever");
+
+    assert!(
+      outcome.is_ok(),
+      "streamed bytes with no verdict assume success: {outcome:?}"
+    );
+    assert_eq!(
+      server.await.unwrap().unwrap(),
+      4096,
+      "the whole .swu reached the socket"
+    );
+
+    let _ = std::fs::remove_file(SWUPDATE_CTRL_SOCKET);
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[tokio::test]
+  async fn progress_reader_stops_instead_of_stranding_the_blocking_pool() {
+    ensure_socket_paths();
+    let (tx, _rx) = mpsc::channel::<sys::progress_msg>(1);
+    let stop = StopSignal::new();
+    let handle = {
+      let stop = stop.handle();
+      task::spawn_blocking(move || progress_reader(tx, stop))
+    };
+
+    tokio::time::sleep(PROGRESS_CONNECT_RETRY * 2).await;
+    drop(stop);
+    tokio::time::timeout(PROGRESS_CONNECT_BUDGET * 4, handle)
+      .await
+      .expect("progress reader must exit; a stranded one blocks runtime shutdown forever")
+      .expect("progress reader panicked");
+  }
 }

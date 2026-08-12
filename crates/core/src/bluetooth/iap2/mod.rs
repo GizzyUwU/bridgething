@@ -1,52 +1,74 @@
-use std::{
-  collections::{HashMap, HashSet},
-  os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd},
-  sync::Arc,
-  time::Duration,
-};
+#[cfg(target_os = "linux")]
+use std::collections::HashMap;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd};
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::{collections::HashSet, sync::Arc};
 
+#[cfg(target_os = "linux")]
 use bluer::{
-  Adapter, Address, Session,
+  Adapter, Session,
   rfcomm::{ConnectRequest, Profile, ProfileHandle, Role, Stream},
 };
+use bridgething_iap2::{HidCommand, NowPlayingCommand, SessionEvent, session::TelephonyCommand};
+#[cfg(target_os = "linux")]
 use bridgething_iap2::{
-  HidCommand, IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event as Iap2InternalEvent,
-  Iap2Session, Link, LinkConfig, Lsp, NowPlayingAuthorityState, NowPlayingCommand, SessionEvent,
+  IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Event as Iap2InternalEvent, Iap2Session, Link,
+  LinkConfig, Lsp,
   csm::identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
-  session::{TelephonyCommand, WorkerMfiAccess},
+  session::WorkerMfiAccess,
 };
+#[cfg(target_os = "linux")]
+use bridgething_iap2::{Iap2Command, NowPlayingAuthorityState};
+#[cfg(target_os = "linux")]
 use bridgething_mfi::MfiAuth;
 pub use ea::{EaActivity, Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
+#[cfg(target_os = "linux")]
 use futures::StreamExt;
-use tokio::{
-  sync::{RwLock, mpsc, oneshot, watch},
-  task::JoinHandle,
-};
+#[cfg(target_os = "linux")]
+use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot};
+#[cfg(target_os = "linux")]
+use tokio::{sync::watch, task::JoinHandle};
 
 mod ea;
 
+use super::Address;
+#[cfg(target_os = "linux")]
 use super::BluetoothResult;
+#[cfg(target_os = "linux")]
 use crate::{authority::AuthorityRegistry, state::meta::SuperbirdMeta};
 
+#[cfg(target_os = "linux")]
 const IAP2_PROFILE_NAME: &str = "iAP2";
+#[cfg(target_os = "linux")]
 const IAP2_CLIENT_PROFILE_NAME: &str = "iAP2 (device dial-in)";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
 const IAP2_EVENTS_CAPACITY: usize = 64;
-#[cfg(feature = "test-tap")]
 const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
+#[cfg(target_os = "linux")]
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 pub(crate) const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
+#[cfg(target_os = "linux")]
 const COMPANION_EA_PROTOCOL_ID: u8 = 1;
+#[cfg(target_os = "linux")]
 const LINK_TEARDOWN_GRACE: Duration = Duration::from_millis(750);
+#[cfg(target_os = "linux")]
 const EA_CLOSE_GRACE: Duration = Duration::from_millis(500);
+#[cfg(target_os = "linux")]
 const INHERITED_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 const IAP2_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
+#[cfg(target_os = "linux")]
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
+#[cfg(target_os = "linux")]
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+#[cfg(target_os = "linux")]
 const RECONNECT_DIAL_SETTLE: Duration = Duration::from_secs(8);
 const RECONNECT_KICK_CAPACITY: usize = 16;
 const SESSION_DEAD_CAPACITY: usize = 16;
 
+#[cfg(target_os = "linux")]
 fn iap2_service_record() -> String {
   format!(
     r#"<?xml version="1.0" encoding="UTF-8" ?>
@@ -82,18 +104,18 @@ pub struct Iap2Event {
 
 pub type Iap2EventsRx = mpsc::Receiver<Iap2Event>;
 
-#[cfg(feature = "test-tap")]
 pub type Iap2InjectTx = mpsc::Sender<Iap2Event>;
 
-#[cfg(feature = "test-tap")]
 pub type Iap2OutboundTapTx = tokio::sync::broadcast::Sender<Iap2TransportCommand>;
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SessionOrigin {
   Dialed,
   Inherited,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 struct ActiveSession {
   generation: u64,
@@ -109,6 +131,7 @@ struct ActiveSession {
   shovel_handle: JoinHandle<()>,
 }
 
+#[cfg(target_os = "linux")]
 impl ActiveSession {
   fn abort(&self) {
     self.link_handle.abort();
@@ -164,6 +187,10 @@ impl Iap2ReconnectHandle {
   }
 }
 
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("the iAP2 link is down")]
+pub struct Iap2LinkDown;
+
 #[derive(Debug, Clone)]
 pub struct Iap2TransportHandle {
   tx: mpsc::Sender<Iap2TransportCommand>,
@@ -172,13 +199,13 @@ pub struct Iap2TransportHandle {
 impl Iap2TransportHandle {
   pub async fn send_hid(&self, cmd: HidCommand) {
     if self.tx.send(Iap2TransportCommand::Hid(cmd)).await.is_err() {
-      tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+      tracing::error!(?cmd, "iap2 link down; the transport press reached nothing");
     }
   }
 
   pub async fn send_now_playing(&self, cmd: NowPlayingCommand) {
     if self.tx.send(Iap2TransportCommand::NowPlaying(cmd)).await.is_err() {
-      tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+      tracing::error!(?cmd, "iap2 link down; the now-playing command reached nothing");
     }
   }
 
@@ -189,7 +216,7 @@ impl Iap2TransportHandle {
       .await
       .is_err()
     {
-      tracing::debug!("iap2 wake-spotify command dropped; manager exited");
+      tracing::error!("iap2 link down; the wake-spotify request reached nothing");
     }
   }
 }
@@ -200,18 +227,24 @@ pub struct Iap2TelephonyHandle {
 }
 
 impl Iap2TelephonyHandle {
-  pub async fn send(&self, cmd: TelephonyCommand) {
-    if self.tx.send(cmd).await.is_err() {
-      tracing::debug!("iap2 telephony command dropped; manager exited");
-    }
+  pub async fn send(&self, cmd: TelephonyCommand) -> Result<(), Iap2LinkDown> {
+    self.tx.send(cmd).await.map_err(|_| Iap2LinkDown)
+  }
+
+  #[cfg(test)]
+  pub(crate) fn for_test() -> (Self, mpsc::Receiver<TelephonyCommand>) {
+    let (tx, rx) = mpsc::channel(IAP2_CHANNEL_CAPACITY);
+    (Iap2TelephonyHandle { tx }, rx)
   }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Default)]
 pub struct Iap2ActiveSessions {
   inner: Arc<RwLock<HashSet<Address>>>,
 }
 
+#[cfg(target_os = "linux")]
 impl Iap2ActiveSessions {
   pub async fn insert(&self, mac: Address) {
     self.inner.write().await.insert(mac);
@@ -226,6 +259,7 @@ impl Iap2ActiveSessions {
   }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct Iap2Manager {
   server_handle: ProfileHandle,
@@ -273,18 +307,21 @@ pub struct Iap2Handles {
 }
 
 pub(super) struct Iap2Bootstrap {
+  #[cfg(target_os = "linux")]
   reconnect_rx: mpsc::Receiver<Address>,
   transport_rx: mpsc::Receiver<Iap2TransportCommand>,
+  #[cfg(target_os = "linux")]
   telephony_rx: mpsc::Receiver<TelephonyCommand>,
   events_tx: mpsc::Sender<Iap2Event>,
+  #[cfg(target_os = "linux")]
   session_dead_tx: mpsc::Sender<(Address, u64)>,
+  #[cfg(target_os = "linux")]
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
+  #[cfg(target_os = "linux")]
   shutdown_rx: mpsc::Receiver<oneshot::Sender<()>>,
-  #[cfg(feature = "test-tap")]
   outbound_tap_tx: Iap2OutboundTapTx,
 }
 
-#[cfg(feature = "test-tap")]
 impl Iap2Bootstrap {
   pub(super) fn events_tx(&self) -> Iap2InjectTx {
     self.events_tx.clone()
@@ -300,13 +337,12 @@ impl Iap2Bootstrap {
 }
 
 pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
-  let (reconnect_tx, reconnect_rx) = mpsc::channel(RECONNECT_KICK_CAPACITY);
+  let (reconnect_tx, _reconnect_rx) = mpsc::channel(RECONNECT_KICK_CAPACITY);
   let (transport_tx, transport_rx) = mpsc::channel::<Iap2TransportCommand>(IAP2_CHANNEL_CAPACITY);
-  let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
+  let (telephony_tx, _telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
   let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
-  let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
-  let (shutdown_tx, shutdown_rx) = mpsc::channel::<oneshot::Sender<()>>(1);
-  #[cfg(feature = "test-tap")]
+  let (_session_dead_tx, _session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
+  let (shutdown_tx, _shutdown_rx) = mpsc::channel::<oneshot::Sender<()>>(1);
   let (outbound_tap_tx, _) = tokio::sync::broadcast::channel::<Iap2TransportCommand>(IAP2_OUTBOUND_TAP_CAPACITY);
 
   let handles = Iap2Handles {
@@ -316,19 +352,24 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
     shutdown: Iap2ShutdownHandle { tx: shutdown_tx },
   };
   let bootstrap = Iap2Bootstrap {
-    reconnect_rx,
+    #[cfg(target_os = "linux")]
+    reconnect_rx: _reconnect_rx,
     transport_rx,
-    telephony_rx,
+    #[cfg(target_os = "linux")]
+    telephony_rx: _telephony_rx,
     events_tx,
-    session_dead_tx,
-    session_dead_rx,
-    shutdown_rx,
-    #[cfg(feature = "test-tap")]
+    #[cfg(target_os = "linux")]
+    session_dead_tx: _session_dead_tx,
+    #[cfg(target_os = "linux")]
+    session_dead_rx: _session_dead_rx,
+    #[cfg(target_os = "linux")]
+    shutdown_rx: _shutdown_rx,
     outbound_tap_tx,
   };
   (handles, events_rx, bootstrap)
 }
 
+#[cfg(target_os = "linux")]
 impl Iap2Manager {
   pub(super) async fn start(
     bootstrap: Iap2Bootstrap,
@@ -385,8 +426,7 @@ impl Iap2Manager {
       session_dead_rx,
       session_dead_tx,
       shutdown_rx,
-      #[cfg(feature = "test-tap")]
-        outbound_tap_tx: _,
+      outbound_tap_tx: _,
     } = bootstrap;
     let active_sessions = Iap2ActiveSessions::default();
 
@@ -483,7 +523,7 @@ impl Iap2Manager {
     tracing::info!(%address, ?direction, "iAP2 connect request");
 
     let stream = request.accept()?;
-    self.start_session(address, stream, SessionOrigin::Dialed).await
+    self.start_session(address.into(), stream, SessionOrigin::Dialed).await
   }
 
   async fn restore_inherited(&mut self) {
@@ -501,8 +541,8 @@ impl Iap2Manager {
           continue;
         }
       };
-      let address = match stream.peer_addr() {
-        Ok(addr) => addr.addr,
+      let address: Address = match stream.peer_addr() {
+        Ok(addr) => addr.addr.into(),
         Err(err) => {
           tracing::warn!(?err, "inherited iAP2 RFCOMM socket has no peer; dropping it");
           continue;
@@ -639,12 +679,12 @@ impl Iap2Manager {
       }
     };
     for mac in addresses {
-      self.spawn_reconnect(mac).await;
+      self.spawn_reconnect(mac.into()).await;
     }
   }
 
   async fn peer_advertises_iap2(&self, mac: Address) -> bool {
-    let Ok(device) = self.adapter.device(mac) else {
+    let Ok(device) = self.adapter.device(mac.into()) else {
       return false;
     };
     if !device.is_paired().await.unwrap_or(false) {
@@ -705,14 +745,16 @@ impl Iap2Manager {
   }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy)]
 enum ConnectDirection {
   Inbound,
   Outbound,
 }
 
+#[cfg(target_os = "linux")]
 async fn reconnect_loop(adapter: Adapter, active_sessions: Iap2ActiveSessions, mac: Address) {
-  let device = match adapter.device(mac) {
+  let device = match adapter.device(mac.into()) {
     Ok(d) => d,
     Err(err) => {
       tracing::debug!(%mac, ?err, "iAP2 reconnect aborted: no device handle");
@@ -750,8 +792,9 @@ async fn reconnect_loop(adapter: Adapter, active_sessions: Iap2ActiveSessions, m
   }
 }
 
+#[cfg(target_os = "linux")]
 async fn still_should_reconnect(adapter: &Adapter, active_sessions: &Iap2ActiveSessions, mac: Address) -> bool {
-  let Ok(device) = adapter.device(mac) else {
+  let Ok(device) = adapter.device(mac.into()) else {
     return false;
   };
   if !device.is_paired().await.unwrap_or(false) {
@@ -763,6 +806,7 @@ async fn still_should_reconnect(adapter: &Adapter, active_sessions: &Iap2ActiveS
   true
 }
 
+#[cfg(target_os = "linux")]
 async fn shovel_session_events(
   address: Address,
   generation: u64,
@@ -781,6 +825,7 @@ async fn shovel_session_events(
   }
 }
 
+#[cfg(target_os = "linux")]
 fn build_identification(meta: &SuperbirdMeta) -> IdentificationConfig {
   let bt_mac = parse_bt_mac(&meta.bt_mac);
   let mut config = IdentificationConfig::for_carthing(CarthingIdentification {
@@ -797,6 +842,7 @@ fn build_identification(meta: &SuperbirdMeta) -> IdentificationConfig {
   config
 }
 
+#[cfg(target_os = "linux")]
 fn parse_bt_mac(s: &str) -> [u8; 6] {
   let parts: Vec<&str> = s.split(':').collect();
   if parts.len() != 6 {
@@ -816,7 +862,7 @@ fn parse_bt_mac(s: &str) -> [u8; 6] {
   out
 }
 
-#[cfg(debug_assertions)]
+#[cfg(all(target_os = "linux", debug_assertions))]
 async fn probe_and_spawn_worker() -> Result<WorkerMfiAccess, String> {
   use bridgething_mfi::RemoteI2c;
 
@@ -836,7 +882,7 @@ async fn probe_and_spawn_worker() -> Result<WorkerMfiAccess, String> {
   Ok(WorkerMfiAccess::spawn(mfi))
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(target_os = "linux", not(debug_assertions)))]
 async fn probe_and_spawn_worker() -> Result<WorkerMfiAccess, String> {
   let mfi = tokio::task::spawn_blocking(|| -> Result<MfiAuth<bridgething_mfi::LinuxI2c>, String> {
     let mut auth = MfiAuth::open_default().map_err(|e| format!("MfiAuth::open_default: {e:?}"))?;

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Tile } from './App';
 import { controlKind, friendlyName, isActive, num } from './domains';
 import type { HaState, HaStatus } from './ha';
@@ -27,15 +28,15 @@ export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp,
   if (!live && status.kind === 'error') return <FullError message={status.message} />;
 
   return (
-    <div className="relative flex h-full w-full flex-col bg-bt-charcoal text-bt-off-white">
-      <header className="flex items-center justify-between px-6 pt-4 pb-2">
+    <div className="relative flex h-full w-full flex-col bg-bg text-off-white">
+      <header className="mb-3 flex items-center justify-between border-b border-rule px-6 pt-4 pb-2">
         <div className="flex items-baseline gap-3">
-          <span className="bt-wordmark text-xl font-semibold">Home Assistant</span>
-          {status.kind !== 'ready' && <span className="text-xs text-bt-soft-gray">{statusLabel(status)}</span>}
+          <span className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">home assistant</span>
+          {status.kind !== 'ready' && <span className="font-mono text-hint text-warn">{statusLabel(status)}</span>}
         </div>
         <button
           onClick={onOpenPicker}
-          className="rounded-full bg-black/30 px-4 py-1.5 text-xs text-bt-soft-gray active:bg-black/50">
+          className="border border-rule px-4 py-1.5 font-mono text-eyebrow text-soft active:bg-neutral-soft">
           edit tiles
         </button>
       </header>
@@ -53,7 +54,7 @@ export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp,
           ))}
         </div>
       ) : (
-        <div className="grid flex-1 grid-flow-col grid-rows-3 auto-cols-[176px] gap-3 overflow-x-auto px-6 pb-5">
+        <div className="grid flex-1 grid-flow-col grid-rows-3 auto-cols-44 gap-3 overflow-x-auto px-6 pb-5">
           {tiles.map(t => (
             <TileView key={t.entityId} tile={t} onActivate={onActivate} onSetTemp={onSetTemp} />
           ))}
@@ -62,30 +63,38 @@ export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp,
 
       {toast && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="rounded-full bg-black/70 px-5 py-2 text-xs text-bt-off-white">{toast}</div>
+          <div className="border border-edge bg-screen px-5 py-2 font-mono text-hint text-near">{toast}</div>
         </div>
       )}
     </div>
   );
 }
 
-function TileView({
-  tile,
-  onActivate,
-  onSetTemp,
-}: {
-  tile: Tile;
-  onActivate: Props['onActivate'];
-  onSetTemp: Props['onSetTemp'];
-}) {
+type TileProps = { tile: Tile; onActivate: Props['onActivate']; onSetTemp: Props['onSetTemp'] };
+
+export function sameTile(a: Tile, b: Tile): boolean {
+  return a.entityId === b.entityId && a.pendingTemp === b.pendingTemp && sameState(a.state, b.state);
+}
+
+function sameState(a: HaState | null, b: HaState | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.entityId === b.entityId && a.state === b.state && a.attributes === b.attributes;
+}
+
+const TileView = memo(TileBody, (a: TileProps, b: TileProps) => {
+  return a.onActivate === b.onActivate && a.onSetTemp === b.onSetTemp && sameTile(a.tile, b.tile);
+});
+
+function TileBody({ tile, onActivate, onSetTemp }: TileProps) {
   const { entityId, state } = tile;
   if (!state || state.state === 'unavailable') {
     return (
-      <div className="flex flex-col justify-between rounded-2xl bg-black/20 p-4 opacity-50">
+      <div className="flex flex-col justify-between border border-rule border-dashed bg-screen p-4 opacity-60">
         <DomainIcon entityId={entityId} />
         <div>
-          <div className="truncate text-sm">{entityId}</div>
-          <div className="text-xs text-bt-soft-gray">unavailable</div>
+          <div className="truncate font-mono text-hint">{entityId}</div>
+          <div className="font-mono text-eyebrow tracking-[0.12em] text-dim uppercase">unavailable</div>
         </div>
       </div>
     );
@@ -111,13 +120,15 @@ function ActionTile({
   return (
     <button
       onClick={() => onActivate(state)}
-      className={`flex flex-col justify-between rounded-2xl p-4 text-left transition-colors ${
-        accent ? 'bg-bt-blue text-bt-charcoal' : 'bg-black/30 text-bt-off-white active:bg-black/50'
+      className={`flex flex-col justify-between border p-4 text-left transition-colors ${
+        accent
+          ? 'border-accent bg-accent text-screen'
+          : 'border-rule bg-screen text-off-white active:border-edge active:bg-neutral-soft'
       }`}>
       <DomainIcon entityId={state.entityId} />
       <div>
-        <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
-        <div className={`text-xs ${accent ? 'text-bt-charcoal/70' : 'text-bt-soft-gray'}`}>
+        <div className="truncate text-row font-medium">{friendlyName(state)}</div>
+        <div className={`font-mono text-eyebrow tracking-[0.12em] uppercase ${accent ? 'text-screen/70' : 'text-dim'}`}>
           {actionLabel(state, kind)}
         </div>
       </div>
@@ -136,28 +147,28 @@ function ClimateTile({ tile, state, onSetTemp }: { tile: Tile; state: HaState; o
     onSetTemp(state.entityId, clamp(round(target + delta, step), min, max));
   };
   return (
-    <div className="flex flex-col justify-between rounded-2xl bg-black/30 p-4">
+    <div className="flex flex-col justify-between border border-rule bg-screen p-4">
       <div className="flex items-center justify-between">
         <DomainIcon entityId={state.entityId} />
-        <span className="text-xs text-bt-soft-gray">{state.state}</span>
+        <span className="font-mono text-eyebrow tracking-[0.12em] text-dim uppercase">{state.state}</span>
       </div>
-      <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
+      <div className="truncate text-row font-medium">{friendlyName(state)}</div>
       <div className="flex items-center justify-between">
         <button
           onClick={() => adjust(-step)}
-          className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60"
+          className="size-9 border border-edge text-lg text-near active:bg-neutral-soft"
           disabled={target == null}>
           -
         </button>
         <div className="text-center">
-          <div className="bt-wordmark text-2xl font-semibold leading-none">
+          <div className="font-display text-2xl font-medium tracking-wordmark tabular-nums">
             {target != null ? `${fmt(target)}°` : '--'}
           </div>
-          {current != null && <div className="text-[0.65rem] text-bt-soft-gray">now {fmt(current)}°</div>}
+          {current != null && <div className="font-mono text-eyebrow tabular-nums text-dim">now {fmt(current)}°</div>}
         </div>
         <button
           onClick={() => adjust(step)}
-          className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60"
+          className="size-9 border border-edge text-lg text-near active:bg-neutral-soft"
           disabled={target == null}>
           +
         </button>
@@ -172,13 +183,13 @@ function ReadonlyTile({ state }: { state: HaState }) {
       ? (state.attributes['unit_of_measurement'] as string)
       : '';
   return (
-    <div className="flex flex-col justify-between rounded-2xl bg-black/20 p-4">
+    <div className="flex flex-col justify-between border border-rule bg-screen p-4">
       <DomainIcon entityId={state.entityId} />
       <div>
-        <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
-        <div className="bt-wordmark text-lg">
+        <div className="truncate text-row font-medium">{friendlyName(state)}</div>
+        <div className="font-display text-row-lg tracking-display tabular-nums">
           {state.state}
-          {unit && <span className="ml-0.5 text-xs text-bt-soft-gray">{unit}</span>}
+          {unit && <span className="ml-0.5 font-mono text-hint text-dim">{unit}</span>}
         </div>
       </div>
     </div>
@@ -187,8 +198,10 @@ function ReadonlyTile({ state }: { state: HaState }) {
 
 function FullError({ message }: { message: string }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-bt-charcoal px-10">
-      <div className="max-w-[34rem] text-center text-sm text-bt-soft-gray">{message}</div>
+    <div className="flex h-full w-full items-center justify-center bg-bg px-10">
+      <div className="max-w-136 border border-err/40 bg-err-soft px-5 py-3 text-center font-mono text-body text-err">
+        {message}
+      </div>
     </div>
   );
 }

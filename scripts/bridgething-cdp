@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Open an SSH tunnel from this host's port 9222 to the device's
-# chromium CDP port 9222.
-#
-# Once this script is running, point a host browser at:
-#   chrome://inspect              -> add discovery target localhost:9222
-#   curl http://localhost:9222/json/version
-#
-# Press Ctrl-C to close the tunnel.
-
 set -euo pipefail
 
 PORT="${1:-9222}"

@@ -13,10 +13,11 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func snapshot() async -> BridgethingSessionSnapshot
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
-    func companionDebug() async -> BridgethingCompanionDebug
+    func companionDebug() async throws -> BridgethingCompanionDebug
 
     func persistedLogSize() async -> Double
     func logArchives() async -> [BridgethingLogArchive]
+    func logArchiveLines(archiveId: String, limit: Double) async -> [BridgethingDeviceLogLine]
     func exportLogs(archiveId: String?) async throws -> String
     func shareLogs(archiveId: String?) async -> Bool
     func deleteLogArchive(archiveId: String) async
@@ -46,14 +47,16 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
     func voiceModelState() async -> BridgethingVoiceModelState
+    func downloadVoiceModel() async
 
     func setDeviceAutoResume(deviceId: String, enabled: Bool) async
     func isDeviceAutoResumeEnabled(deviceId: String) async -> Bool
 
     func setOtaPollConfig(config: BridgethingOtaPollConfig?) async
-    func checkForOtaUpdate(rootUrl: String?) async
-    func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest
-    func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) async throws
+    func checkForOtaUpdate(rootUrl: String) async
+    func fetchOtaManifest(rootUrl: String) async throws -> BridgethingOtaManifest
+    func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String) async throws
+    func otaRunProgress(deviceId: String, nowMs: Double) -> BridgethingOtaProgress?
     func dismissOtaRun(deviceId: String) async throws
 
     func installWebappFromUrl(
@@ -92,7 +95,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnPeerLinkFailed(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnNowPlayingChanged(_ callback: @escaping @Sendable (BridgethingNowPlaying?) -> Void)
     func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (String, BridgethingAncsAuthStatus) -> Void)
-    func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void)
+    func setOnLog(_ callback: @escaping @Sendable (String, String, String) -> Void)
     func setLogStreamingEnabled(_ enabled: Bool)
     func setLocalLogStreamingEnabled(_ enabled: Bool)
 
@@ -100,6 +103,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappDocChanged(_ callback: @escaping @Sendable (String, String, String, String?) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnVoiceModelStateChanged(_ callback: @escaping @Sendable (BridgethingVoiceModelState) -> Void)
+    func setOnVoiceTurnChanged(_ callback: @escaping @Sendable (BridgethingVoiceTurn) -> Void)
     func setOnOtaRunChanged(_ callback: @escaping @Sendable (BridgethingOtaRun) -> Void)
     func setOnOtaAvailableChanged(_ callback: @escaping @Sendable (BridgethingOtaAvailable) -> Void)
     func setOnOtaPollChanged(_ callback: @escaping @Sendable (BridgethingOtaPollStatus) -> Void)
@@ -116,11 +120,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
     private static var pendingAncsAuthStatusChanged: (@Sendable (String, BridgethingAncsAuthStatus) -> Void)?
-    private static var pendingLog: (@Sendable (String, String) -> Void)?
+    private static var pendingLog: (@Sendable (String, String, String) -> Void)?
     private static var pendingWebappsChanged: (@Sendable (BridgethingDeviceWebappsEntry) -> Void)?
     private static var pendingWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingVoiceModelStateChanged: (@Sendable (BridgethingVoiceModelState) -> Void)?
+    private static var pendingVoiceTurnChanged: (@Sendable (BridgethingVoiceTurn) -> Void)?
     private static var pendingOtaRunChanged: (@Sendable (BridgethingOtaRun) -> Void)?
     private static var pendingOtaAvailableChanged: (@Sendable (BridgethingOtaAvailable) -> Void)?
     private static var pendingOtaPollChanged: (@Sendable (BridgethingOtaPollStatus) -> Void)?
@@ -140,6 +145,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let webappDocCb = pendingWebappDocChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let voiceModelCb = pendingVoiceModelStateChanged
+        let voiceTurnCb = pendingVoiceTurnChanged
         let otaRunCb = pendingOtaRunChanged
         let otaAvailCb = pendingOtaAvailableChanged
         let otaPollCb = pendingOtaPollChanged
@@ -155,6 +161,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingWebappDocChanged = nil
         pendingDeviceMetaChanged = nil
         pendingVoiceModelStateChanged = nil
+        pendingVoiceTurnChanged = nil
         pendingOtaRunChanged = nil
         pendingOtaAvailableChanged = nil
         pendingOtaPollChanged = nil
@@ -172,6 +179,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let webappDocCb { backend.setOnWebappDocChanged(webappDocCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let voiceModelCb { backend.setOnVoiceModelStateChanged(voiceModelCb) }
+        if let voiceTurnCb { backend.setOnVoiceTurnChanged(voiceTurnCb) }
         if let otaRunCb { backend.setOnOtaRunChanged(otaRunCb) }
         if let otaAvailCb { backend.setOnOtaAvailableChanged(otaAvailCb) }
         if let otaPollCb { backend.setOnOtaPollChanged(otaPollCb) }
@@ -257,7 +265,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     public func companionDebug() throws -> Promise<BridgethingCompanionDebug> {
         Promise.async {
-            await (try Self.backend()).companionDebug()
+            try await (try Self.backend()).companionDebug()
         }
     }
 
@@ -270,6 +278,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func logArchives() throws -> Promise<[BridgethingLogArchive]> {
         Promise.async {
             await (try Self.backend()).logArchives()
+        }
+    }
+
+    public func logArchiveLines(archiveId: String, limit: Double) throws -> Promise<[BridgethingDeviceLogLine]> {
+        Promise.async {
+            await (try Self.backend()).logArchiveLines(archiveId: archiveId, limit: limit)
         }
     }
 
@@ -428,6 +442,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
+    public func downloadVoiceModel() throws -> Promise<Void> {
+        Promise.async {
+            await (try Self.backend()).downloadVoiceModel()
+        }
+    }
+
     // MARK: - OTA
 
     public func setDeviceAutoResume(deviceId: String, enabled: Bool) throws -> Promise<Void> {
@@ -454,17 +474,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func checkForOtaUpdate(rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
-        let url = Self.unwrapString(rootUrl)
-        return Promise.async {
-            await (try Self.backend()).checkForOtaUpdate(rootUrl: url)
+    public func checkForOtaUpdate(rootUrl: String) throws -> Promise<Void> {
+        Promise.async {
+            await (try Self.backend()).checkForOtaUpdate(rootUrl: rootUrl)
         }
     }
 
-    public func fetchOtaManifest(rootUrl: Variant_NullType_String?) throws -> Promise<BridgethingOtaManifest> {
-        let url = Self.unwrapString(rootUrl)
-        return Promise.async {
-            try await Self.backend().fetchOtaManifest(rootUrl: url)
+    public func fetchOtaManifest(rootUrl: String) throws -> Promise<BridgethingOtaManifest> {
+        Promise.async {
+            try await Self.backend().fetchOtaManifest(rootUrl: rootUrl)
         }
     }
 
@@ -472,11 +490,18 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async { try await Self.backend().dismissOtaRun(deviceId: deviceId) }
     }
 
-    public func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
-        let url = Self.unwrapString(rootUrl)
-        return Promise.async {
-            try await Self.backend().applyOtaUpdate(deviceId: deviceId, channel: channel, version: version, rootUrl: url)
+    public func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().applyOtaUpdate(deviceId: deviceId, channel: channel, version: version, rootUrl: rootUrl)
         }
+    }
+
+    public func otaRunProgress(deviceId: String, nowMs: Double) throws -> Variant_NullType_BridgethingOtaProgress {
+        Self.stateLock.lock()
+        let backend = Self._backend
+        Self.stateLock.unlock()
+        let progress = backend.flatMap { $0.otaRunProgress(deviceId: deviceId, nowMs: nowMs) }
+        return progress.map { .second($0) } ?? .first(NullType.null)
     }
 
     // MARK: - Webapp install
@@ -626,8 +651,8 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         backend?.setOnAncsAuthStatusChanged(wrapped)
     }
 
-    public func setOnLog(callback: @escaping (String, String) -> Void) throws {
-        let wrapped: @Sendable (String, String) -> Void = { level, msg in callback(level, msg) }
+    public func setOnLog(callback: @escaping (String, String, String) -> Void) throws {
+        let wrapped: @Sendable (String, String, String) -> Void = { origin, level, msg in callback(origin, level, msg) }
         Self.stateLock.lock()
         let backend = Self._backend
         if backend == nil { Self.pendingLog = wrapped }
@@ -685,6 +710,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingVoiceModelStateChanged = wrapped }
         Self.stateLock.unlock()
         backend?.setOnVoiceModelStateChanged(wrapped)
+    }
+
+    public func setOnVoiceTurnChanged(callback: @escaping (BridgethingVoiceTurn) -> Void) throws {
+        let wrapped: @Sendable (BridgethingVoiceTurn) -> Void = { turn in callback(turn) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingVoiceTurnChanged = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnVoiceTurnChanged(wrapped)
     }
 
     public func setOnOtaRunChanged(callback: @escaping (BridgethingOtaRun) -> Void) throws {

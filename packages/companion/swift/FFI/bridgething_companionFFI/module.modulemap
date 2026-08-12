@@ -1,0 +1,4 @@
+module bridgething_companionFFI {
+    header "bridgething_companionFFI.h"
+    export *
+}

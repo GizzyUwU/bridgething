@@ -1,34 +1,61 @@
-use crate::Priority;
+use crate::{Priority, protocol::EndecError};
 
-/// Wire frame plus its priority hint. The codec writes the priority
-/// to header byte 5 on encode and reads it back on decode. The
-/// `Encoder<T>` impls also accept a bare `T`, defaulting to
-/// `Priority::Normal`; only callers that want Bulk lift to the wrapped
-/// form.
+#[derive(Debug)]
+pub enum DecodedFrame<T> {
+  Frame(PrioritizedFrame<T>),
+  Failed(EndecError),
+}
+
+impl<T> DecodedFrame<T> {
+  pub fn frame(self) -> Option<PrioritizedFrame<T>> {
+    match self {
+      DecodedFrame::Frame(frame) => Some(frame),
+      DecodedFrame::Failed(_) => None,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Compress {
+  #[default]
+  Auto,
+  Never,
+  Always,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrioritizedFrame<T> {
   pub priority: Priority,
+  pub compress: Compress,
   pub msg: T,
 }
 
 impl<T> PrioritizedFrame<T> {
-  pub fn normal(msg: T) -> Self {
+  pub fn new(priority: Priority, msg: T) -> Self {
     Self {
-      priority: Priority::Normal,
+      priority,
+      compress: Compress::Auto,
       msg,
     }
   }
 
+  pub fn normal(msg: T) -> Self {
+    Self::new(Priority::Normal, msg)
+  }
+
   pub fn bulk(msg: T) -> Self {
-    Self {
-      priority: Priority::Bulk,
-      msg,
-    }
+    Self::new(Priority::Bulk, msg)
+  }
+
+  pub fn compressed(mut self, compress: Compress) -> Self {
+    self.compress = compress;
+    self
   }
 
   pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> PrioritizedFrame<U> {
     PrioritizedFrame {
       priority: self.priority,
+      compress: self.compress,
       msg: f(self.msg),
     }
   }

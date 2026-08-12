@@ -1,34 +1,67 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use std::time::Duration;
 
-use bluer::{Adapter, Address, Device, gatt::remote::Service};
+#[cfg(target_os = "linux")]
+use bluer::{Adapter, Device, gatt::remote::Service};
+#[cfg(target_os = "linux")]
 use futures::{Stream, StreamExt, stream};
-use libbridgething::{AncsAuthState, client::VolumeChanged};
-use tokio::{sync::mpsc, task::JoinHandle, time};
+use libbridgething::AncsAuthState;
+#[cfg(target_os = "linux")]
+use libbridgething::client::VolumeChanged;
+use tokio::sync::mpsc;
+#[cfg(target_os = "linux")]
+use tokio::{task::JoinHandle, time};
+#[cfg(target_os = "linux")]
 use tokio_util::sync::CancellationToken;
+#[cfg(target_os = "linux")]
 use uuid::Uuid;
+#[cfg(target_os = "linux")]
 use zbus::Connection;
 
+#[cfg(target_os = "linux")]
 mod advertise;
+#[cfg(target_os = "linux")]
 mod ams;
+#[cfg(target_os = "linux")]
 mod ancs;
+#[cfg(target_os = "linux")]
 mod pair_trigger;
 
+#[cfg(target_os = "linux")]
 use advertise::LeAdvertisement;
+#[cfg(target_os = "linux")]
 use ancs::AuthStateReporter;
+#[cfg(target_os = "linux")]
 use pair_trigger::{PAIR_TRIGGER_SERVICE, PairTrigger};
 
+use super::Address;
+#[cfg(target_os = "linux")]
 use super::hci;
+#[cfg(target_os = "linux")]
 use crate::{bluetooth::BluetoothMan, net::WireEventBus, state::AudioManager};
 
 const COMMAND_MAILBOX_CAP: usize = 16;
+#[cfg(target_os = "linux")]
 const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
+#[cfg(target_os = "linux")]
 const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
+#[cfg(target_os = "linux")]
 const ANCS_REPROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+#[cfg(target_os = "linux")]
 const LE_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(target_os = "linux")]
 const ACL_DOWN_HEARTBEAT: Duration = Duration::from_secs(60);
+#[cfg(target_os = "linux")]
 const ADV_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+#[cfg(target_os = "linux")]
 const ADV_REASSERT_AFTER: Duration = Duration::from_secs(90);
+#[cfg(target_os = "linux")]
 const GATT_SERVICE_INTERFACE: &str = "org.bluez.GattService1";
+
+pub const ACTION_POSITIVE: u8 = 0x00;
+pub const ACTION_NEGATIVE: u8 = 0x01;
+pub const ANCS_ID_PREFIX: &str = "ancs:";
 
 #[derive(Debug)]
 enum LeCommand {
@@ -45,12 +78,32 @@ pub struct LeManager {
 
 pub(crate) struct LeBootstrap {
   rx: mpsc::Receiver<LeCommand>,
+  #[cfg(target_os = "linux")]
   ancs_auth: Arc<std::sync::Mutex<AncsAuthState>>,
+  #[cfg(target_os = "linux")]
   serial_suffix: [char; 4],
 }
 
+impl LeBootstrap {
+  pub(crate) fn spawn_no_radio(mut self) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+      while let Some(command) = self.rx.recv().await {
+        match command {
+          LeCommand::Attach { address } => tracing::debug!(%address, "LE attach dropped: no radio attached"),
+          LeCommand::Detach { address } => tracing::debug!(%address, "LE detach dropped: no radio attached"),
+          LeCommand::Invoke { uid, action } => {
+            tracing::debug!(uid, action, "LE invoke dropped: no radio attached")
+          }
+        }
+      }
+    })
+  }
+}
+
 impl LeManager {
-  pub(crate) fn allocate(serial_suffix: [char; 4]) -> (Self, LeBootstrap) {
+  pub(crate) fn allocate(
+    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))] serial_suffix: [char; 4],
+  ) -> (Self, LeBootstrap) {
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
     let ancs_auth = Arc::new(std::sync::Mutex::new(AncsAuthState::Unknown));
     (
@@ -60,7 +113,9 @@ impl LeManager {
       },
       LeBootstrap {
         rx,
+        #[cfg(target_os = "linux")]
         ancs_auth,
+        #[cfg(target_os = "linux")]
         serial_suffix,
       },
     )
@@ -83,15 +138,15 @@ impl LeManager {
   }
 
   pub async fn try_invoke_positive(&self, id: &str) -> bool {
-    self.try_invoke(id, ancs::ACTION_POSITIVE).await
+    self.try_invoke(id, ACTION_POSITIVE).await
   }
 
   pub async fn try_invoke_negative(&self, id: &str) -> bool {
-    self.try_invoke(id, ancs::ACTION_NEGATIVE).await
+    self.try_invoke(id, ACTION_NEGATIVE).await
   }
 
   async fn try_invoke(&self, id: &str, action: u8) -> bool {
-    let Some(rest) = id.strip_prefix(ancs::ANCS_ID_PREFIX) else {
+    let Some(rest) = id.strip_prefix(ANCS_ID_PREFIX) else {
       return false;
     };
     let Ok(uid) = rest.parse::<u32>() else {
@@ -105,6 +160,7 @@ impl LeManager {
   }
 }
 
+#[cfg(target_os = "linux")]
 impl LeBootstrap {
   pub(crate) async fn start(
     self,
@@ -154,6 +210,7 @@ impl LeBootstrap {
   }
 }
 
+#[cfg(target_os = "linux")]
 struct LeDispatcher {
   adapter: Arc<Adapter>,
   adapter_dbus_path: String,
@@ -167,6 +224,7 @@ struct LeDispatcher {
   _pair_trigger: Option<PairTrigger>,
 }
 
+#[cfg(target_os = "linux")]
 struct ActiveSession {
   address: Address,
   invoke_tx: mpsc::Sender<(u32, u8)>,
@@ -174,6 +232,7 @@ struct ActiveSession {
   _handle: JoinHandle<()>,
 }
 
+#[cfg(target_os = "linux")]
 impl LeDispatcher {
   async fn run(mut self, mut rx: mpsc::Receiver<LeCommand>) {
     let mut adv_check = time::interval(ADV_CHECK_INTERVAL);
@@ -262,6 +321,7 @@ impl LeDispatcher {
   }
 }
 
+#[cfg(target_os = "linux")]
 struct LeSession {
   address: Address,
   adapter: Arc<Adapter>,
@@ -272,12 +332,14 @@ struct LeSession {
   cancel: CancellationToken,
 }
 
+#[cfg(target_os = "linux")]
 enum LoopExit {
   Cancelled,
   ConnectionLost,
   ReprobeAncs,
 }
 
+#[cfg(target_os = "linux")]
 impl LeSession {
   async fn run(self) {
     let LeSession {
@@ -347,13 +409,16 @@ impl LeSession {
   }
 }
 
+#[cfg(target_os = "linux")]
 type NotifyStream = std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 
+#[cfg(target_os = "linux")]
 fn pending_stream() -> NotifyStream {
   Box::pin(stream::pending())
 }
 
 #[derive(Debug, thiserror::Error)]
+#[cfg(target_os = "linux")]
 enum ServiceEnumError {
   #[error(transparent)]
   Zbus(#[from] zbus::Error),
@@ -363,6 +428,7 @@ enum ServiceEnumError {
   Bluer(#[from] bluer::Error),
 }
 
+#[cfg(target_os = "linux")]
 async fn enumerate_services(
   conn: &Connection,
   device: &Device,
@@ -396,6 +462,7 @@ async fn enumerate_services(
   Ok(services)
 }
 
+#[cfg(target_os = "linux")]
 async fn find_service(services: &[Service], uuid: Uuid) -> Option<Service> {
   for svc in services {
     if let Ok(u) = svc.uuid().await
@@ -407,18 +474,21 @@ async fn find_service(services: &[Service], uuid: Uuid) -> Option<Service> {
   None
 }
 
+#[cfg(target_os = "linux")]
 fn le_acl_up(adapter: &Adapter, address: Address) -> bool {
-  hci::le_acl_connected(adapter, address).unwrap_or_else(|err| {
+  hci::le_acl_connected(adapter, address.into()).unwrap_or_else(|err| {
     tracing::warn!(%address, ?err, "LE ACL query failed; treating LE as down");
     false
   })
 }
 
 #[derive(Default)]
+#[cfg(target_os = "linux")]
 struct AclWatch {
   down: Option<(time::Instant, time::Instant)>,
 }
 
+#[cfg(target_os = "linux")]
 impl AclWatch {
   fn note_down(&mut self, address: Address) {
     let now = time::Instant::now();
@@ -449,6 +519,7 @@ impl AclWatch {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(target_os = "linux")]
 async fn attempt(
   conn: &Connection,
   adapter: &Adapter,
@@ -466,7 +537,7 @@ async fn attempt(
     acl_watch.note_down(address);
     return Ok(LoopExit::ConnectionLost);
   }
-  let device = adapter.device(address)?;
+  let device = adapter.device(address.into())?;
   let services_resolved = device.is_services_resolved().await.unwrap_or(false);
   acl_watch.note_up(address, services_resolved);
 

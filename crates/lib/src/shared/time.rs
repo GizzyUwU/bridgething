@@ -5,7 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 /// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
 /// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
@@ -17,7 +16,6 @@ use typeshare::typeshare;
 /// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
 /// separate `dst_offset_minutes`. Webapps prefer `tz_iana` when present
 /// and fall back to the offset pair.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-//! `create-bridgething` - copy the bundled template into a new directory,
-//! substitute the project name, print next steps. Opinionated stack:
-//! React 19 + Vite + Tailwind v4 + TypeScript strict, plus
-//! `@bridgething/client` preinstalled.
-
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,

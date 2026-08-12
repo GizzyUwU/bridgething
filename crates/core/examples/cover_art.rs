@@ -1,16 +1,21 @@
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 use bluer::{
   AddressType,
   l2cap::{Opts, Socket, SocketAddr, Stream},
 };
+#[cfg(target_os = "linux")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[cfg(target_os = "linux")]
 const OBEX_HELLO: [u8; 26] = [
   0x80, 0x00, 0x1a, 0x15, 0x00, 0x06, 0x9b, 0x46, 0x00, 0x13, 0x71, 0x63, 0xdd, 0x54, 0x4a, 0x7e, 0x11, 0xe2, 0xb4,
   0x7c, 0x00, 0x50, 0xc2, 0x49, 0x00, 0x48,
 ];
 
+#[cfg(target_os = "linux")]
 fn create_l2cap_opts() -> Opts {
   let mut opts = Opts::default();
   opts.omtu = 672;
@@ -24,6 +29,12 @@ fn create_l2cap_opts() -> Opts {
   opts
 }
 
+#[cfg(not(target_os = "linux"))]
+fn main() {
+  eprintln!("cover_art drives a bluez l2cap socket directly; it only runs on linux");
+}
+
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> bluer::Result<()> {
   let session = bluer::Session::new().await?;
@@ -37,7 +48,7 @@ async fn main() -> bluer::Result<()> {
 
   println!("Before connection: {:?}", socket.l2cap_opts()?);
   let mut stream = socket.connect(target_sa).await.expect("connection failed");
-  tokio::time::sleep(Duration::from_millis(500)).await; // If this is removed, connection fails most of the time
+  tokio::time::sleep(Duration::from_millis(500)).await;
 
   println!("Local address: {:?}", stream.as_ref().local_addr()?);
   println!("Remote address: {:?}", stream.peer_addr()?);
@@ -76,6 +87,7 @@ async fn main() -> bluer::Result<()> {
   Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn get_ios_image(stream: &mut Stream, conn_id: [u8; 4]) {
   let handle_str = format!("{:07}", 0);
   let mut req = vec![0x83, 0x00, 0x2d, 0xcb];

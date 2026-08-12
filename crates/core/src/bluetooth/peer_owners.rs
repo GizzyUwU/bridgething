@@ -3,9 +3,7 @@ use std::{
   sync::{Arc, Mutex, OnceLock},
 };
 
-use bluer::Address;
-
-use super::GatewayType;
+use super::{Address, GatewayType};
 
 type DisconnectHook = Arc<dyn Fn(Address, bool) + Send + Sync>;
 

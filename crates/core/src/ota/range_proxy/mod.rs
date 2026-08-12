@@ -6,7 +6,6 @@ use std::{
   },
 };
 
-use bluer::Address;
 use libbridgething::RangePart;
 use tokio::{
   sync::{mpsc, oneshot},
@@ -15,7 +14,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::{bluetooth::BluetoothMan, transfer::sinks::TransferSinks};
+use crate::{
+  bluetooth::{Address, BluetoothMan},
+  transfer::sinks::TransferSinks,
+};
 
 mod layout;
 mod server;

@@ -1,21 +1,25 @@
+use bridgething_sdk_runtime::{Batch, LaneFeed, LaneItem, OutboundLanes, lanes};
 use bytes::{Bytes, BytesMut};
+use libbridgething::Priority;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{frame::LINK_FRAME_OVERHEAD, link::Iap2Command};
 
 pub(crate) const EA_LINK_SESSION_ID: u8 = 3;
 const EA_STREAM_ID_PREFIX_LEN: usize = 2;
-const LANE_CAPACITY: usize = 16;
-const LANE_STARVATION_GUARD: u32 = 8;
+const EA_LANE_BYTES: usize = 256 * 1024;
+const EA_BATCH_BYTES: usize = 32 * 1024;
 
-type FramedBytes = (u16, Bytes);
+#[derive(Debug, Clone)]
+struct EaFrame {
+  stream_id: u16,
+  bytes: Bytes,
+}
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum EaPriority {
-  #[default]
-  Normal,
-  Bulk,
-  Background,
+impl LaneItem for EaFrame {
+  fn len(&self) -> usize {
+    self.bytes.len()
+  }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -27,9 +31,7 @@ pub enum EaSendError {
 #[derive(Debug, Clone)]
 pub struct EaStreamSender {
   stream_id: u16,
-  normal_tx: mpsc::Sender<FramedBytes>,
-  bulk_tx: mpsc::Sender<FramedBytes>,
-  background_tx: mpsc::Sender<FramedBytes>,
+  lanes: OutboundLanes<EaFrame>,
 }
 
 impl EaStreamSender {
@@ -37,53 +39,35 @@ impl EaStreamSender {
     self.stream_id
   }
 
-  pub async fn send(&self, priority: EaPriority, frame: Bytes) -> std::result::Result<(), EaSendError> {
-    let lane = match priority {
-      EaPriority::Normal => &self.normal_tx,
-      EaPriority::Bulk => &self.bulk_tx,
-      EaPriority::Background => &self.background_tx,
+  pub async fn send(&self, priority: Priority, frame: Bytes) -> Result<(), EaSendError> {
+    let frame = EaFrame {
+      stream_id: self.stream_id,
+      bytes: frame,
     };
-    lane
-      .send((self.stream_id, frame))
-      .await
-      .map_err(|_| EaSendError::ChannelClosed)
+    if self.lanes.send(priority, frame).await {
+      Ok(())
+    } else {
+      Err(EaSendError::ChannelClosed)
+    }
   }
 }
 
 pub(crate) struct EaChunker {
-  normal_tx: mpsc::Sender<FramedBytes>,
-  bulk_tx: mpsc::Sender<FramedBytes>,
-  background_tx: mpsc::Sender<FramedBytes>,
+  lanes: OutboundLanes<EaFrame>,
   _handle: JoinHandle<()>,
 }
 
 impl EaChunker {
   pub(crate) fn new(link_command_tx: mpsc::Sender<Iap2Command>, peer_max_len: u16) -> Self {
-    let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
-    let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
-    let (background_tx, background_rx) = mpsc::channel(LANE_CAPACITY);
-    let max_chunk = max_chunk_payload(peer_max_len);
-    let _handle = tokio::spawn(chunker_task(
-      normal_rx,
-      bulk_rx,
-      background_rx,
-      link_command_tx,
-      max_chunk,
-    ));
-    Self {
-      normal_tx,
-      bulk_tx,
-      background_tx,
-      _handle,
-    }
+    let (lanes, feed) = lanes(EA_LANE_BYTES, EA_BATCH_BYTES);
+    let _handle = tokio::spawn(chunker_task(feed, link_command_tx, max_chunk_payload(peer_max_len)));
+    Self { lanes, _handle }
   }
 
   pub(crate) fn sender(&self, stream_id: u16) -> EaStreamSender {
     EaStreamSender {
       stream_id,
-      normal_tx: self.normal_tx.clone(),
-      bulk_tx: self.bulk_tx.clone(),
-      background_tx: self.background_tx.clone(),
+      lanes: self.lanes.clone(),
     }
   }
 }
@@ -102,112 +86,90 @@ const fn max_chunk_payload(peer_max_len: u16) -> usize {
   if total <= overhead { 1 } else { total - overhead }
 }
 
-async fn chunker_task(
-  normal_rx: mpsc::Receiver<FramedBytes>,
-  bulk_rx: mpsc::Receiver<FramedBytes>,
-  background_rx: mpsc::Receiver<FramedBytes>,
-  link_tx: mpsc::Sender<Iap2Command>,
-  max_chunk_payload: usize,
-) {
-  struct LaneBuf {
-    rx: mpsc::Receiver<FramedBytes>,
-    queue: std::collections::VecDeque<FramedBytes>,
-  }
-
-  impl LaneBuf {
-    fn drain_ready(&mut self) {
-      while let Ok(frame) = self.rx.try_recv() {
-        self.queue.push_back(frame);
-      }
-    }
-
-    fn next_packet(&mut self, max_payload: usize) -> Option<(u16, Bytes)> {
-      let stream_id = self.queue.front().map(|(id, _)| *id)?;
-      let mut out = BytesMut::with_capacity(max_payload.min(64 * 1024));
-      while out.len() < max_payload {
-        let Some((id, bytes)) = self.queue.front_mut() else {
-          break;
-        };
-        if *id != stream_id {
-          break;
-        }
-        let take = (max_payload - out.len()).min(bytes.len());
-        out.extend_from_slice(&bytes.split_to(take));
-        if bytes.is_empty() {
-          self.queue.pop_front();
-        }
-      }
-      Some((stream_id, out.freeze()))
-    }
-  }
-
-  fn pick_lane(lanes: &[LaneBuf; 3], skipped: &[u32; 3]) -> Option<usize> {
-    lanes
-      .iter()
-      .enumerate()
-      .find(|(i, l)| !l.queue.is_empty() && skipped[*i] >= LANE_STARVATION_GUARD)
-      .map(|(i, _)| i)
-      .or_else(|| lanes.iter().position(|l| !l.queue.is_empty()))
-  }
-
-  let lane = |rx| LaneBuf {
-    rx,
-    queue: std::collections::VecDeque::new(),
-  };
-  let mut lanes = [lane(normal_rx), lane(bulk_rx), lane(background_rx)];
-  let mut skipped = [0u32; 3];
-
-  loop {
-    for lane in &mut lanes {
-      lane.drain_ready();
-    }
-
-    if let Some(idx) = pick_lane(&lanes, &skipped) {
-      for (i, lane) in lanes.iter().enumerate() {
-        if lane.queue.is_empty() {
-          skipped[i] = 0;
-        } else if i != idx {
-          skipped[i] += 1;
-        }
-      }
-      skipped[idx] = 0;
-
-      let Some((stream_id, payload)) = lanes[idx].next_packet(max_chunk_payload) else {
-        continue;
-      };
-      if !send_packet(&link_tx, stream_id, payload).await {
+async fn chunker_task(mut feed: LaneFeed<EaFrame>, link_tx: mpsc::Sender<Iap2Command>, max_payload: usize) {
+  while feed.ready().await {
+    let Ok(permit) = link_tx.reserve().await else {
+      return;
+    };
+    let Some(batch) = feed.take_batch() else {
+      continue;
+    };
+    let mut packets = ea_packets(batch, max_payload).into_iter();
+    let Some(first) = packets.next() else {
+      continue;
+    };
+    permit.send(Iap2Command::Send {
+      session_id: EA_LINK_SESSION_ID,
+      payload: first,
+    });
+    for payload in packets {
+      let sent = link_tx
+        .send(Iap2Command::Send {
+          session_id: EA_LINK_SESSION_ID,
+          payload,
+        })
+        .await;
+      if sent.is_err() {
         return;
       }
-      continue;
     }
-
-    let [normal, bulk, background] = &mut lanes;
-    tokio::select! {
-      biased;
-      Some(f) = normal.rx.recv() => normal.queue.push_back(f),
-      Some(f) = bulk.rx.recv() => bulk.queue.push_back(f),
-      Some(f) = background.rx.recv() => background.queue.push_back(f),
-      else => return,
-    };
   }
 }
 
-async fn send_packet(link_tx: &mpsc::Sender<Iap2Command>, stream_id: u16, payload: Bytes) -> bool {
-  let mut wire = BytesMut::with_capacity(2 + payload.len());
-  wire.extend_from_slice(&stream_id.to_be_bytes());
-  wire.extend_from_slice(&payload);
-  link_tx
-    .send(Iap2Command::Send {
-      session_id: EA_LINK_SESSION_ID,
-      payload: wire.freeze(),
-    })
-    .await
-    .is_ok()
+fn ea_packets(batch: Batch<EaFrame>, max_payload: usize) -> Vec<Bytes> {
+  let capacity = EA_STREAM_ID_PREFIX_LEN + max_payload.min(batch.bytes.max(1));
+  let full = EA_STREAM_ID_PREFIX_LEN + max_payload;
+  let mut packets = Vec::new();
+  let mut open: Option<(u16, BytesMut)> = None;
+
+  for frame in batch.items {
+    if let Some((stream_id, _)) = &open
+      && *stream_id != frame.stream_id
+    {
+      let (_, buf) = open.take().expect("a packet is open");
+      packets.push(buf.freeze());
+    }
+
+    let mut rest = frame.bytes;
+    while !rest.is_empty() {
+      let (_, buf) = open.get_or_insert_with(|| {
+        let mut buf = BytesMut::with_capacity(capacity);
+        buf.extend_from_slice(&frame.stream_id.to_be_bytes());
+        (frame.stream_id, buf)
+      });
+      let take = (full - buf.len()).min(rest.len());
+      buf.extend_from_slice(&rest.split_to(take));
+      if buf.len() == full {
+        let (_, buf) = open.take().expect("a packet is open");
+        packets.push(buf.freeze());
+      }
+    }
+  }
+
+  if let Some((_, buf)) = open {
+    packets.push(buf.freeze());
+  }
+  packets
 }
 
 #[cfg(test)]
 mod tests {
+  use std::time::Duration;
+
   use super::*;
+
+  fn spawn_chunker(link_tx: mpsc::Sender<Iap2Command>, max_batch: usize, max_payload: usize) -> OutboundLanes<EaFrame> {
+    let (lanes, feed) = lanes(EA_LANE_BYTES, max_batch);
+    tokio::spawn(chunker_task(feed, link_tx, max_payload));
+    lanes
+  }
+
+  async fn feed(lanes: &OutboundLanes<EaFrame>, priority: Priority, stream_id: u16, bytes: Bytes) {
+    assert!(
+      lanes.send(priority, EaFrame { stream_id, bytes }).await,
+      "the chunker is still running"
+    );
+  }
 
   fn drain_chunks(rx: &mut mpsc::Receiver<Iap2Command>) -> Vec<Bytes> {
     let mut out = Vec::new();
@@ -230,16 +192,13 @@ mod tests {
   #[tokio::test]
   async fn chunker_splits_large_frame() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let (n_tx, n_rx) = mpsc::channel(8);
-    let (_b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, 4);
 
     let payload = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    n_tx.send((0x0100, payload)).await.unwrap();
-    drop(n_tx);
+    feed(&lanes, Priority::Normal, 0x0100, payload).await;
+    drop(lanes);
 
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
     let chunks = drain_chunks(&mut link_rx);
     assert_eq!(chunks.len(), 3, "9 bytes / 4 chunk size = 3 chunks");
     assert_chunk(&chunks[0], 0x0100, &[1, 2, 3, 4]);
@@ -250,26 +209,22 @@ mod tests {
   #[tokio::test]
   async fn chunker_normal_preempts_bulk_at_chunk_boundary() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let (n_tx, n_rx) = mpsc::channel(8);
-    let (b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, 4);
 
-    b_tx
-      .send((
-        0x0200,
-        Bytes::from_static(&[0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7]),
-      ))
-      .await
-      .unwrap();
+    feed(
+      &lanes,
+      Priority::Bulk,
+      0x0200,
+      Bytes::from_static(&[0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7]),
+    )
+    .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
-    n_tx.send((0x0100, Bytes::from_static(&[0xA0, 0xA1]))).await.unwrap();
+    feed(&lanes, Priority::Normal, 0x0100, Bytes::from_static(&[0xA0, 0xA1])).await;
 
-    drop(n_tx);
-    drop(b_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    drop(lanes);
+    tokio::time::sleep(Duration::from_millis(40)).await;
 
     let chunks = drain_chunks(&mut link_rx);
     let stream_seq: Vec<u16> = chunks.iter().map(|p| u16::from_be_bytes([p[0], p[1]])).collect();
@@ -289,15 +244,12 @@ mod tests {
   #[tokio::test]
   async fn chunker_coalesces_same_stream_frames_into_full_packets() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let (n_tx, n_rx) = mpsc::channel(8);
-    let (_b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, 4);
 
-    n_tx.send((0x0100, Bytes::from_static(&[1, 2, 3]))).await.unwrap();
-    n_tx.send((0x0100, Bytes::from_static(&[4, 5, 6]))).await.unwrap();
-    drop(n_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    feed(&lanes, Priority::Normal, 0x0100, Bytes::from_static(&[1, 2, 3])).await;
+    feed(&lanes, Priority::Normal, 0x0100, Bytes::from_static(&[4, 5, 6])).await;
+    drop(lanes);
+    tokio::time::sleep(Duration::from_millis(40)).await;
 
     let chunks = drain_chunks(&mut link_rx);
     let sizes: Vec<usize> = chunks.iter().map(|p| p.len() - 2).collect();
@@ -309,15 +261,12 @@ mod tests {
   #[tokio::test]
   async fn chunker_never_mixes_streams_in_one_packet() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let (n_tx, n_rx) = mpsc::channel(8);
-    let (_b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 8));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, 8);
 
-    n_tx.send((0x0100, Bytes::from_static(&[1, 2, 3]))).await.unwrap();
-    n_tx.send((0x0200, Bytes::from_static(&[4, 5, 6]))).await.unwrap();
-    drop(n_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    feed(&lanes, Priority::Normal, 0x0100, Bytes::from_static(&[1, 2, 3])).await;
+    feed(&lanes, Priority::Normal, 0x0200, Bytes::from_static(&[4, 5, 6])).await;
+    drop(lanes);
+    tokio::time::sleep(Duration::from_millis(40)).await;
 
     let chunks = drain_chunks(&mut link_rx);
     assert_eq!(
@@ -334,26 +283,22 @@ mod tests {
   #[tokio::test]
   async fn chunker_bulk_preempts_background_at_chunk_boundary() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let (_n_tx, n_rx) = mpsc::channel(8);
-    let (b_tx, b_rx) = mpsc::channel(8);
-    let (g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, 4);
 
-    g_tx
-      .send((
-        0x0300,
-        Bytes::from_static(&[0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7]),
-      ))
-      .await
-      .unwrap();
+    feed(
+      &lanes,
+      Priority::Background,
+      0x0300,
+      Bytes::from_static(&[0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7]),
+    )
+    .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
-    b_tx.send((0x0200, Bytes::from_static(&[0xB0, 0xB1]))).await.unwrap();
+    feed(&lanes, Priority::Bulk, 0x0200, Bytes::from_static(&[0xB0, 0xB1])).await;
 
-    drop(b_tx);
-    drop(g_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    drop(lanes);
+    tokio::time::sleep(Duration::from_millis(40)).await;
 
     let chunks = drain_chunks(&mut link_rx);
     let stream_seq: Vec<u16> = chunks.iter().map(|p| u16::from_be_bytes([p[0], p[1]])).collect();
@@ -375,25 +320,31 @@ mod tests {
 
   #[tokio::test]
   async fn a_saturated_normal_lane_cannot_hold_the_link_forever() {
+    const CEILING: usize = 100;
+
     let (link_tx, mut link_rx) = mpsc::channel(4096);
-    let (n_tx, n_rx) = mpsc::channel(512);
-    let (b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, 4));
+    let lanes = spawn_chunker(link_tx, CEILING, CEILING);
 
-    let feeder = tokio::spawn(async move {
-      for _ in 0..2000 {
-        if n_tx.send((0x0100, Bytes::from_static(&[0xA0; 4]))).await.is_err() {
-          return;
+    let feeder = {
+      let lanes = lanes.clone();
+      tokio::spawn(async move {
+        for _ in 0..2000 {
+          let frame = EaFrame {
+            stream_id: 0x0100,
+            bytes: Bytes::from_static(&[0xA0; 4]),
+          };
+          if !lanes.send(Priority::Normal, frame).await {
+            return;
+          }
         }
-      }
-    });
+      })
+    };
 
-    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
     let _ = drain_chunks(&mut link_rx);
-    b_tx.send((0x0200, Bytes::from_static(&[0xB0; 4]))).await.unwrap();
+    feed(&lanes, Priority::Bulk, 0x0200, Bytes::from_static(&[0xB0; 4])).await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
     let chunks = drain_chunks(&mut link_rx);
     feeder.abort();
 
@@ -402,8 +353,8 @@ mod tests {
       .position(|p| u16::from_be_bytes([p[0], p[1]]) == 0x0200)
       .expect("bulk must get a turn while normal is saturated");
     assert!(
-      bulk_at <= LANE_STARVATION_GUARD as usize + 4,
-      "bulk waited {bulk_at} packets after becoming available, past the starvation guard"
+      bulk_at <= 4,
+      "bulk waited {bulk_at} packets after becoming available, past the share the emission owes it"
     );
   }
 
@@ -429,17 +380,17 @@ mod tests {
     let max_chunk = max_chunk_payload(peer_max_len);
 
     let (link_tx, mut link_rx) = mpsc::channel(256);
-    let (n_tx, n_rx) = mpsc::channel(8);
-    let (_b_tx, b_rx) = mpsc::channel(8);
-    let (_g_tx, g_rx) = mpsc::channel(8);
-    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, max_chunk));
+    let lanes = spawn_chunker(link_tx, EA_BATCH_BYTES, max_chunk);
 
-    n_tx
-      .send((0x0100, Bytes::from(vec![0xAB; max_chunk * 3 + 7])))
-      .await
-      .unwrap();
-    drop(n_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    feed(
+      &lanes,
+      Priority::Normal,
+      0x0100,
+      Bytes::from(vec![0xAB; max_chunk * 3 + 7]),
+    )
+    .await;
+    drop(lanes);
+    tokio::time::sleep(Duration::from_millis(40)).await;
 
     let chunks = drain_chunks(&mut link_rx);
     assert!(!chunks.is_empty());
@@ -451,5 +402,197 @@ mod tests {
         link_budget
       );
     }
+  }
+}
+
+#[cfg(test)]
+mod trace {
+  use std::{collections::HashMap, time::Duration};
+
+  use bridgething_sdk_runtime::lane_corpus::{
+    CaseIn, Constants, Emission, Emitted, EmittedCase, EmittedStep, Op, Segment, assert_conforms, constants, corpus,
+    write_trace,
+  };
+  use futures::FutureExt;
+  use tokio::task::JoinHandle;
+
+  use super::*;
+
+  const SETTLE: Duration = Duration::from_millis(60);
+  const BOOKKEEPING_SETTLE: Duration = Duration::from_millis(5);
+
+  struct Parked {
+    id: String,
+    byte_len: u64,
+    task: JoinHandle<bool>,
+  }
+
+  struct Arm {
+    lanes: OutboundLanes<EaFrame>,
+    link_rx: mpsc::Receiver<Iap2Command>,
+    chunker: JoinHandle<()>,
+    frames: HashMap<u8, String>,
+    next_index: u16,
+    parked: Vec<Parked>,
+    enqueued: u64,
+    emitted: u64,
+  }
+
+  impl Arm {
+    fn new(case: &CaseIn) -> Self {
+      let ceiling = case.max_emission_bytes();
+      let (lanes, feed) = lanes(case.max_lane_bytes(), ceiling);
+      let (link_tx, link_rx) = mpsc::channel::<Iap2Command>(1);
+      link_tx
+        .try_send(Iap2Command::Disconnect)
+        .expect("the link starts plugged");
+      let chunker = tokio::spawn(chunker_task(feed, link_tx, ceiling));
+      Self {
+        lanes,
+        link_rx,
+        chunker,
+        frames: HashMap::new(),
+        next_index: 0,
+        parked: Vec::new(),
+        enqueued: 0,
+        emitted: 0,
+      }
+    }
+
+    async fn enqueue(&mut self, id: String, priority: Priority, byte_len: usize, stream: u16) -> EmittedStep {
+      assert!(
+        self.next_index < 256,
+        "a case enqueues more than 256 frames; the index-tag encoding needs widening"
+      );
+      let index = self.next_index as u8;
+      self.next_index += 1;
+      self.frames.insert(index, id.clone());
+      self.enqueued += byte_len as u64;
+
+      let frame = EaFrame {
+        stream_id: stream,
+        bytes: Bytes::from(vec![index; byte_len]),
+      };
+      let admitted = tokio::task::unconstrained(self.lanes.send(priority, frame.clone())).now_or_never();
+      let outcome = match admitted {
+        Some(true) => "accepted",
+        Some(false) => panic!("lane closed unexpectedly"),
+        None => {
+          let lanes = self.lanes.clone();
+          let task = tokio::spawn(async move { lanes.send(priority, frame).await });
+          self.parked.push(Parked {
+            id,
+            byte_len: byte_len as u64,
+            task,
+          });
+          "parked"
+        }
+      };
+
+      let mut step = EmittedStep::new("enqueue");
+      step.outcome = Some(outcome.to_string());
+      step
+    }
+
+    async fn drain(&mut self) -> EmittedStep {
+      let mut step = EmittedStep::new("drain");
+      let deadline = tokio::time::Instant::now() + SETTLE;
+      while let Ok(Some(command)) = tokio::time::timeout_at(deadline, self.link_rx.recv()).await {
+        let Iap2Command::Send { payload, .. } = command else {
+          continue;
+        };
+        step.segments = self.decode(&payload);
+        self.emitted += step.segments.iter().map(|segment| segment.bytes).sum::<u64>();
+        break;
+      }
+      step
+    }
+
+    fn decode(&self, payload: &[u8]) -> Vec<Segment> {
+      let mut segments: Vec<Segment> = Vec::new();
+      let mut rest = &payload[EA_STREAM_ID_PREFIX_LEN.min(payload.len())..];
+      while let Some(&value) = rest.first() {
+        let run = rest.iter().take_while(|byte| **byte == value).count();
+        let id = self
+          .frames
+          .get(&value)
+          .cloned()
+          .unwrap_or_else(|| format!("unknown-index-{value}"));
+        segments.push(Segment { id, bytes: run as u64 });
+        rest = &rest[run..];
+      }
+      segments
+    }
+
+    async fn settle(&mut self) {
+      if self.parked.is_empty() {
+        return;
+      }
+      tokio::time::sleep(BOOKKEEPING_SETTLE).await;
+      let mut still = Vec::new();
+      for item in std::mem::take(&mut self.parked) {
+        if item.task.is_finished() {
+          assert!(item.task.await.expect("sender task"), "lane closed unexpectedly");
+        } else {
+          still.push(item);
+        }
+      }
+      self.parked = still;
+    }
+
+    fn finish(&self, step: &mut EmittedStep) {
+      let waiting: u64 = self.parked.iter().map(|item| item.byte_len).sum();
+      step.parked_ids = self.parked.iter().map(|item| item.id.clone()).collect();
+      step.queued_bytes = Some(self.enqueued - self.emitted - waiting);
+    }
+  }
+
+  async fn run_case(case: &CaseIn) -> EmittedCase {
+    let mut arm = Arm::new(case);
+    let mut steps = Vec::new();
+    for op in case.expand() {
+      let mut step = match op {
+        Op::Enqueue {
+          id,
+          priority,
+          byte_len,
+          stream,
+        } => arm.enqueue(id, priority, byte_len, stream).await,
+        Op::Drain => arm.drain().await,
+        Op::WriteComplete => EmittedStep::new("write_complete"),
+      };
+      arm.settle().await;
+      arm.finish(&mut step);
+      steps.push(step);
+    }
+
+    for item in std::mem::take(&mut arm.parked) {
+      item.task.abort();
+    }
+    arm.chunker.abort();
+
+    EmittedCase {
+      name: case.name.clone(),
+      steps,
+    }
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn rust_ea_conforms_to_the_frozen_expectation() {
+    let mut cases = Vec::new();
+    for case in &corpus().cases {
+      cases.push(run_case(case).await);
+    }
+    let emitted = Emitted {
+      implementation: "rust-ea",
+      constants: Constants {
+        fragments_frames: true,
+        ..constants()
+      },
+      cases,
+    };
+
+    write_trace(&emitted);
+    assert_conforms(&emitted, Emission::Fragmented);
   }
 }

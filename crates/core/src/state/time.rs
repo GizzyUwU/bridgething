@@ -57,12 +57,13 @@ impl TimeManager {
     tz_offset_minutes: i16,
     dst_offset_minutes: i8,
   ) -> Result<(), TimeError> {
-    let synthetic_zone = system_time::fixed_offset_zone_name(tz_offset_minutes, dst_offset_minutes);
+    let standard_offset_minutes = tz_offset_minutes.saturating_sub(i16::from(dst_offset_minutes));
+    let synthetic_zone = system_time::fixed_offset_zone_name(standard_offset_minutes, dst_offset_minutes);
     let zone_to_apply = {
       let mut guard = self.inner.write().await;
       guard.state.wall_clock_unix_s = u32::try_from(seconds_since_reference_date).ok();
       guard.clock_anchor = Some(Instant::now());
-      guard.state.utc_offset_minutes = Some(tz_offset_minutes);
+      guard.state.utc_offset_minutes = Some(standard_offset_minutes);
       guard.state.dst_offset_minutes = Some(dst_offset_minutes);
 
       let existing_iana = guard.state.tz_iana.clone();
@@ -200,6 +201,24 @@ mod tests {
     let _ = time.apply_companion_snapshot(info).await;
 
     assert!(time.snapshot().await.wall_clock_unix_s.is_none());
+  }
+
+  #[tokio::test]
+  async fn an_iap2_update_splits_dst_out_of_the_reported_offset() {
+    let time = manager();
+    let _ = time.apply_iap2_update(1_785_000_000, -240, 60).await;
+
+    let snapshot = time.snapshot().await;
+    assert_eq!(snapshot.utc_offset_minutes, Some(-300));
+    assert_eq!(snapshot.dst_offset_minutes, Some(60));
+    assert_eq!(
+      system_time::fixed_offset_zone_name(
+        snapshot.utc_offset_minutes.expect("offset"),
+        snapshot.dst_offset_minutes.expect("dst")
+      )
+      .as_deref(),
+      Some("Etc/GMT+4")
+    );
   }
 
   #[tokio::test]

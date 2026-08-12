@@ -18,9 +18,8 @@ type HaOpts = {
 
 type Pending = { resolve: (result: unknown) => void; reject: (err: Error) => void };
 
-// compact entity shape used by subscribe_entities: s = state, a = attributes.
 type Compact = { s?: string; a?: Record<string, unknown> };
-type EntitiesEvent = {
+export type EntitiesEvent = {
   a?: Record<string, Compact>;
   c?: Record<string, { '+'?: Compact; '-'?: Compact }>;
   r?: string[];
@@ -29,12 +28,6 @@ type EntitiesEvent = {
 const RECONNECT_MIN = 1_000;
 const RECONNECT_MAX = 20_000;
 
-/**
- * One Home Assistant WebSocket session, tunneled through the daemon's
- * net.ws proxy on the connected phone. Owns the auth handshake, the
- * id-keyed request/response map, and a single subscribe_entities stream.
- * Reconnects with backoff and replays the active subscription.
- */
 export class HaConnection {
   private readonly client: BridgethingClient;
   private readonly wsUrl: string;
@@ -66,7 +59,6 @@ export class HaConnection {
     this.ready = this.freshReady();
   }
 
-  /** Resolves on the first successful auth_ok; rejects on auth_invalid or a hard open failure. */
   whenReady(): Promise<void> {
     return this.ready;
   }
@@ -82,7 +74,6 @@ export class HaConnection {
     this.teardownSocket();
   }
 
-  /** One-shot full entity list, for the picker. */
   async getStates(): Promise<HaState[]> {
     await this.ready;
     const result = (await this.request({ type: 'get_states' })) as Array<{
@@ -93,7 +84,6 @@ export class HaConnection {
     return result.map(s => ({ entityId: s.entity_id, state: s.state, attributes: s.attributes }));
   }
 
-  /** Subscribe to live updates for exactly `entityIds`. Replaces any prior subscription. */
   async subscribeEntities(entityIds: string[], onEntities: (entities: HaEntities) => void): Promise<void> {
     await this.ready;
     this.onEntities = onEntities;
@@ -203,21 +193,10 @@ export class HaConnection {
   }
 
   private applyEvent(ev: EntitiesEvent): void {
-    if (ev.a) for (const [id, c] of Object.entries(ev.a)) this.entities[id] = fromCompact(id, c);
-    if (ev.c)
-      for (const [id, diff] of Object.entries(ev.c)) {
-        const cur = this.entities[id];
-        if (!cur) continue;
-        const plus = diff['+'];
-        if (plus) {
-          if (plus.s !== undefined) cur.state = plus.s;
-          if (plus.a) cur.attributes = { ...cur.attributes, ...plus.a };
-        }
-        const minus = diff['-'];
-        if (minus?.a) for (const k of Object.keys(minus.a)) delete cur.attributes[k];
-      }
-    if (ev.r) for (const id of ev.r) delete this.entities[id];
-    this.onEntities?.({ ...this.entities });
+    const next = applyEntitiesEvent(this.entities, ev);
+    if (!next) return;
+    this.entities = next;
+    this.onEntities?.(next);
   }
 
   private request(payload: Record<string, unknown>, forcedId?: number): Promise<unknown> {
@@ -268,6 +247,43 @@ export class HaConnection {
     for (const off of this.offFns) off();
     this.offFns = [];
   }
+}
+
+export function applyEntitiesEvent(prev: HaEntities, ev: EntitiesEvent): HaEntities | null {
+  const next = { ...prev };
+  let changed = false;
+
+  if (ev.a)
+    for (const [id, c] of Object.entries(ev.a)) {
+      next[id] = fromCompact(id, c);
+      changed = true;
+    }
+
+  if (ev.c)
+    for (const [id, diff] of Object.entries(ev.c)) {
+      const cur = next[id];
+      if (!cur) continue;
+      const plus = diff['+'];
+      const minus = diff['-'];
+      let attributes = cur.attributes;
+      if (plus?.a || minus?.a) {
+        attributes = { ...cur.attributes, ...plus?.a };
+        if (minus?.a) for (const k of Object.keys(minus.a)) delete attributes[k];
+      }
+      const state = plus?.s ?? cur.state;
+      if (state === cur.state && attributes === cur.attributes) continue;
+      next[id] = { entityId: cur.entityId, state, attributes };
+      changed = true;
+    }
+
+  if (ev.r)
+    for (const id of ev.r) {
+      if (!(id in next)) continue;
+      delete next[id];
+      changed = true;
+    }
+
+  return changed ? next : null;
 }
 
 function fromCompact(entityId: string, c: Compact): HaState {

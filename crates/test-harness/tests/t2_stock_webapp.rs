@@ -1,3 +1,5 @@
+#![cfg(feature = "chrome")]
+
 use std::time::Duration;
 
 use bridgething_test_harness::Harness;

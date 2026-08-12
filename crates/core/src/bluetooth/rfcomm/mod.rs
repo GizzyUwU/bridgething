@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 
+#[cfg(target_os = "linux")]
 use bluer::{
-  Address, Session,
+  Session,
   rfcomm::{self, Profile, ProfileHandle},
 };
+use bridgething_sdk_runtime::{LaneFeed, OutboundLanes, lanes};
 use futures::StreamExt;
+#[cfg(target_os = "linux")]
+use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
 use libbridgething::{
-  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, Device, DeviceType, PeerCompanionStatus, Priority,
+  Device, DeviceType, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{BridgeEndec, EnvelopeProbe, encode_bridge_frame},
+  protocol::{BridgeEndec, Compress, DecodedFrame, EnvelopeProbe, encode_frame},
   wire::MsgMeta,
 };
 use tokio::{
@@ -21,17 +25,15 @@ use tokio_util::{
   codec::FramedRead,
 };
 
-use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx, peer_owners::PeerOwners};
+use super::{Address, BluetoothResult, GatewayRecvTx, GatewaySendRx, peer_owners::PeerOwners};
 use crate::{
-  bluetooth::{
-    GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode,
-  },
+  bluetooth::{GatewayType, InboundGatewayMessage, OutboundGatewayMessage, auto_nack_for_failed_decode},
   peer::PeerTracker,
   state::meta::DeviceMeta,
 };
 
 const RFCOMM_BATCH_BYTES: usize = 4 * 1024;
-const LANE_CAPACITY: usize = 16;
+const RFCOMM_LANE_BYTES: usize = 256 * 1024;
 
 #[derive(Debug)]
 enum ConnectionMessage {
@@ -49,30 +51,29 @@ impl From<GatewayToBridgeMsg> for ConnectionMessage {
 type ConnectionTx = mpsc::Sender<(Address, ConnectionMessage)>;
 type ConnectionRx = mpsc::Receiver<(Address, ConnectionMessage)>;
 
-#[cfg(feature = "test-tap")]
 pub type InjectConnectionTx = mpsc::Sender<(Address, tokio::io::DuplexStream)>;
-#[cfg(feature = "test-tap")]
 pub(crate) type InjectConnectionRx = mpsc::Receiver<(Address, tokio::io::DuplexStream)>;
 
 #[derive(Debug)]
 pub enum ConnectionSource {
+  #[cfg(target_os = "linux")]
   Bluez(ProfileHandle),
-  #[cfg(feature = "test-tap")]
   Injected(InjectConnectionRx),
 }
 
 enum Incoming {
+  #[cfg(target_os = "linux")]
   Bluez(Address, rfcomm::Stream),
-  #[cfg(feature = "test-tap")]
   Injected(Address, tokio::io::DuplexStream),
 }
 
 impl ConnectionSource {
   async fn accept(&mut self) -> Option<Incoming> {
     match self {
+      #[cfg(target_os = "linux")]
       Self::Bluez(handle) => loop {
         let request = handle.next().await?;
-        let address = request.device();
+        let address: Address = request.device().into();
         tracing::debug!("rfcomm connect request from: {address}");
         match request.accept() {
           Ok(stream) => {
@@ -82,7 +83,6 @@ impl ConnectionSource {
           Err(err) => tracing::warn!("({address}) rfcomm accept failed: {err:?}"),
         }
       },
-      #[cfg(feature = "test-tap")]
       Self::Injected(rx) => {
         let (address, stream) = rx.recv().await?;
         Some(Incoming::Injected(address, stream))
@@ -91,7 +91,6 @@ impl ConnectionSource {
   }
 }
 
-#[cfg(feature = "test-tap")]
 pub(crate) fn inject_channel() -> (InjectConnectionTx, InjectConnectionRx) {
   mpsc::channel(16)
 }
@@ -99,9 +98,7 @@ pub(crate) fn inject_channel() -> (InjectConnectionTx, InjectConnectionRx) {
 #[derive(Debug)]
 struct Connection {
   address: Address,
-  normal_tx: mpsc::Sender<Bytes>,
-  bulk_tx: mpsc::Sender<Bytes>,
-  background_tx: mpsc::Sender<Bytes>,
+  lanes: OutboundLanes<Bytes>,
   _writer_handle: JoinHandle<()>,
   _reader_handle: JoinHandle<()>,
 }
@@ -115,17 +112,12 @@ impl Connection {
     let reader = FramedRead::new(read_half, BridgeEndec::default());
     let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
 
-    let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
-    let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
-    let (background_tx, background_rx) = mpsc::channel(LANE_CAPACITY);
-    let packer = OutboundPacker::new(normal_rx, bulk_rx, background_rx, RFCOMM_BATCH_BYTES);
-    let _writer_handle = tokio::spawn(writer_task(address, write_half, packer));
+    let (lanes, feed) = lanes(RFCOMM_LANE_BYTES, RFCOMM_BATCH_BYTES);
+    let _writer_handle = tokio::spawn(writer_task(address, write_half, feed));
 
     Self {
       address,
-      normal_tx,
-      bulk_tx,
-      background_tx,
+      lanes,
       _writer_handle,
       _reader_handle,
     }
@@ -134,14 +126,8 @@ impl Connection {
   async fn send(&self, msg: &BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
     tracing::trace!(target: "bridgething::rfcomm::frame", "({}) sending rfcomm message ({:?}): {:?}", self.address, priority, msg);
     let mut buf = BytesMut::new();
-    encode_bridge_frame(priority, msg, &mut buf)?;
-    let bytes = buf.freeze();
-    let lane = match priority {
-      Priority::Normal => &self.normal_tx,
-      Priority::Bulk => &self.bulk_tx,
-      Priority::Background => &self.background_tx,
-    };
-    if lane.send(bytes).await.is_err() {
+    encode_frame(priority, Compress::Auto, msg, &mut buf)?;
+    if !self.lanes.send(priority, buf.freeze()).await {
       tracing::debug!("({}) rfcomm writer lane closed; dropping frame", self.address);
     }
     Ok(())
@@ -154,12 +140,12 @@ where
 {
   while let Some(frame) = reader.next().await {
     match frame {
-      Ok(frame) => {
+      Ok(DecodedFrame::Frame(frame)) => {
         if let Err(e) = tx.send((address, frame.msg.into())).await {
           tracing::error!("({address}) failed to forward gateway message: {:?}", e);
         }
       }
-      Err(e) if e.is_recoverable() => {
+      Ok(DecodedFrame::Failed(e)) => {
         if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = e {
           tracing::warn!(
             target: "bridgething::rfcomm::decode",
@@ -188,12 +174,12 @@ where
   }
 }
 
-async fn writer_task<W>(address: Address, mut writer: W, mut packer: OutboundPacker)
+async fn writer_task<W>(address: Address, mut writer: W, mut feed: LaneFeed<Bytes>)
 where
   W: AsyncWrite + Unpin + Send + 'static,
 {
-  while let Some(batch) = packer.next_batch().await {
-    if let Err(err) = writer.write_all(&batch).await {
+  while let Some(batch) = feed.next_batch().await {
+    if let Err(err) = writer.write_all(&batch.into_bytes()).await {
       tracing::debug!("({address}) rfcomm write error: {:?}", err);
       break;
     }
@@ -256,19 +242,23 @@ impl RfcommGateway {
     loop {
       tokio::select! {
         incoming = self.source.accept() => match incoming {
+          #[cfg(target_os = "linux")]
           Some(Incoming::Bluez(address, stream)) => {
             if let Err(err) = self.add_connection(address, stream).await {
               tracing::error!("({address}) failed to add rfcomm connection: {:?}", err);
             }
           }
-          #[cfg(feature = "test-tap")]
           Some(Incoming::Injected(address, stream)) => {
             if let Err(err) = self.add_connection(address, stream).await {
               tracing::error!("({address}) failed to add injected connection: {:?}", err);
             }
           }
           None => {
-            tracing::error!("rfcomm connection source ended");
+            match self.source {
+              ConnectionSource::Injected(_) => tracing::debug!("rfcomm injected connection source ended"),
+              #[cfg(target_os = "linux")]
+              ConnectionSource::Bluez(_) => tracing::error!("rfcomm connection source ended"),
+            }
             return;
           }
         },
@@ -345,6 +335,7 @@ impl RfcommGateway {
   }
 }
 
+#[cfg(target_os = "linux")]
 pub async fn bluez_source(session: &Session) -> BluetoothResult<ConnectionSource> {
   tracing::debug!("creating rfcomm gateway profile");
   let profile = Profile {
@@ -362,6 +353,7 @@ pub async fn bluez_source(session: &Session) -> BluetoothResult<ConnectionSource
   Ok(ConnectionSource::Bluez(handle))
 }
 
+#[cfg(target_os = "linux")]
 fn bridgething_service_record() -> String {
   format!(
     r#"<?xml version="1.0" encoding="UTF-8" ?>

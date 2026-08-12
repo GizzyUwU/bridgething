@@ -6,10 +6,6 @@ const SOURCE = resolve(import.meta.dir, '..', '..', 'webapp-shared', 'src', 'pus
 const DEST = resolve(import.meta.dir, '..', 'template', 'scripts', 'push.ts');
 
 const HEADER = `#!/usr/bin/env bun
-// Build this webapp and install it onto a connected Car Thing, then make it
-// visible: a plain app becomes active, a launcher takes the home-screen slot,
-// an overlay takes the overlay slot. Run with --help for the flags.
-//
 // Generated from @bridgething/webapp-shared. It is yours now; tweak it freely.
 `;
 

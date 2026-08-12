@@ -4,7 +4,7 @@ use tokenizers::Tokenizer;
 
 use crate::error::{NluError, Result};
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone)]
 pub struct TokenizedInput {
   pub input_ids: Vec<i32>,
   pub attention_mask: Vec<i32>,

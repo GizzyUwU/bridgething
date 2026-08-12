@@ -1,4 +1,3 @@
-use bluer::Address;
 use libbridgething::{
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsgData},
   wire::{MsgMeta, ResponseMeta, WireRequest},
@@ -7,7 +6,7 @@ use uuid::Uuid;
 
 use super::GatewayHandler;
 use crate::{
-  bluetooth::{BluetoothMan, GatewayType, OutboundGatewayMessage},
+  bluetooth::{Address, BluetoothMan, GatewayType, OutboundGatewayMessage},
   state::State,
   transport::TransportController,
 };
@@ -19,19 +18,12 @@ pub struct MsgHandle {
   pub transport: TransportController,
 
   pub id: Uuid,
-  pub meta: MsgMeta,
   pub address: Option<Address>,
   pub protocol: GatewayType,
 }
 
 impl MsgHandle {
-  pub fn new(
-    handler: &GatewayHandler,
-    id: Uuid,
-    meta: MsgMeta,
-    address: Option<Address>,
-    protocol: GatewayType,
-  ) -> Self {
+  pub fn new(handler: &GatewayHandler, id: Uuid, address: Option<Address>, protocol: GatewayType) -> Self {
     tracing::trace!("creating connection handle for message id {id} from {address:?} via {protocol:?}");
 
     Self {
@@ -40,7 +32,6 @@ impl MsgHandle {
       transport: handler.transport.clone(),
 
       id,
-      meta,
       address,
       protocol,
     }
@@ -59,10 +50,6 @@ impl MsgHandle {
         },
       ))
       .await
-  }
-
-  pub async fn request(&self, data: impl Into<BridgeToGatewayMsgData>) {
-    self.send(Uuid::now_v7(), data, MsgMeta::Request).await
   }
 
   pub async fn respond(&self, data: impl Into<BridgeToGatewayMsgData>) {

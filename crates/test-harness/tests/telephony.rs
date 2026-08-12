@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use bluer::Address;
-use bridgething::{ClientMode, TappedFrame};
+use bridgething::{Address, ClientMode, TappedFrame};
 use bridgething_iap2::{SessionEvent, csm::telephony::CallStateUpdate};
 use bridgething_test_harness::Harness;
 use libbridgething::{Device, DeviceType, PeerIap2Status};

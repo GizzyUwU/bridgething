@@ -13,6 +13,7 @@ use libbridgething::{
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use super::ANCS_ID_PREFIX;
 use crate::{bluetooth::BluetoothMan, net::WireEventBus};
 
 pub const ANCS_SERVICE: Uuid = Uuid::from_u128(0x7905F431_B5CE_4E99_A40F_4B1E122D00D0);
@@ -41,9 +42,6 @@ const EVENT_ADDED: u8 = 0x00;
 const EVENT_MODIFIED: u8 = 0x01;
 const EVENT_REMOVED: u8 = 0x02;
 
-pub const ACTION_POSITIVE: u8 = 0x00;
-pub const ACTION_NEGATIVE: u8 = 0x01;
-
 const TITLE_MAX: u16 = 256;
 const SUBTITLE_MAX: u16 = 256;
 const MESSAGE_MAX: u16 = 1024;
@@ -53,7 +51,6 @@ const ATTRIBUTE_FETCH_ATTEMPTS: u32 = 3;
 const ATTRIBUTE_AUTH_PROBE_INTERVAL: Duration = Duration::from_secs(60);
 const ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD: u32 = 3;
 pub const ATTRIBUTE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
-pub const ANCS_ID_PREFIX: &str = "ancs:";
 
 type NotifyStream = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 

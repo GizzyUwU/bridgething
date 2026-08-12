@@ -3,22 +3,29 @@ import type {
   BridgethingWebappSlot,
   BridgethingWebappSlots,
 } from '@bridgething/session-react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Check, Layers, LayoutGrid, Lock } from 'lucide-react-native';
+import { describeError } from '@bridgething/ui/errors';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
+import { Icon, type IconName } from '../components/Icon';
+import { IconBadge } from '../components/IconBadge';
 import { ListGroup } from '../components/ListGroup';
+import { Note } from '../components/Note';
+import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ScrollScreen } from '../components/ScrollScreen';
-import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { SectionHeader } from '../components/SectionHeader';
+import { Spinner } from '../components/Spinner';
 import { WebappIcon } from '../components/WebappIcon';
 import { getSession } from '../lib/session';
+import { TEXT } from '../lib/theme';
 import { useWebapps } from '../lib/webapps';
-import type { RootStackParamList } from '../navigation';
+import type { AppsScreenProps } from '../navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'WebappSlots'>;
+type Props = AppsScreenProps<'WebappSlots'>;
+
+type SlotFailure = { slot: BridgethingWebappSlot; message: string };
 
 export function WebappSlotsScreen({ route }: Props) {
   const session = getSession();
@@ -26,35 +33,34 @@ export function WebappSlotsScreen({ route }: Props) {
   const { list } = useWebapps(deviceId);
 
   const [slots, setSlots] = useState<BridgethingWebappSlots | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<SlotFailure | null>(null);
   const [busy, setBusy] = useState<BridgethingWebappSlot | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoadError(null);
+    setSlots(null);
     let cancelled = false;
     session
       .getWebappSlots(deviceId)
       .then(next => !cancelled && setSlots(next))
-      .catch(
-        err =>
-          !cancelled &&
-          setError(err instanceof Error ? err.message : String(err)),
-      );
+      .catch(err => !cancelled && setLoadError(describeError(err)));
     return () => {
       cancelled = true;
     };
   }, [session, deviceId]);
 
+  useEffect(() => load(), [load]);
+
   const assign = useCallback(
     async (slot: BridgethingWebappSlot, id?: string) => {
       if (busy) return;
       setBusy(slot);
+      setFailure(null);
       try {
         setSlots(await session.setWebappSlot(deviceId, slot, id));
       } catch (err) {
-        Alert.alert(
-          'Could not change slot',
-          err instanceof Error ? err.message : String(err),
-        );
+        setFailure({ slot, message: describeError(err) });
       } finally {
         setBusy(null);
       }
@@ -69,82 +75,94 @@ export function WebappSlotsScreen({ route }: Props) {
     w => w.overlayHash != null && w.source === 'installed',
   );
 
-  if (error) {
-    return (
-      <ScrollScreen>
-        <ScreenHeader title="home screen and overlay" subtitle={error} />
-      </ScrollScreen>
-    );
-  }
-
-  if (!slots) {
-    return (
-      <ScrollScreen>
-        <View className="items-center py-12">
-          <ActivityIndicator />
-        </View>
-      </ScrollScreen>
-    );
-  }
-
   return (
     <ScrollScreen>
       <ScreenHeader
         title="home screen and overlay"
-        subtitle="pick which installed app provides each. choosing built-in always works, so this is also how you recover from one that misbehaves."
+        subtitle="pick which installed app provides each"
       />
 
-      <SectionHeader title="home screen" />
-      <ListGroup>
-        <BuiltinRow
-          label="built-in hub"
-          detail="the launcher that ships with bridgething"
-          icon={LayoutGrid}
-          selected={slots.launcher == null}
-          busy={busy === 'launcher'}
-          onPress={() => assign('launcher')}
-        />
-        {launchers.map(w => (
-          <CandidateRow
-            key={w.id}
-            webapp={w}
-            deviceId={deviceId}
-            selected={slots.launcher === w.id}
-            busy={busy === 'launcher'}
-            onPress={() => assign('launcher', w.id)}
+      {loadError ? (
+        <Note tone="err" action="retry" onAction={load}>
+          {loadError}
+        </Note>
+      ) : !slots ? (
+        <View className="items-center py-12">
+          <Spinner />
+        </View>
+      ) : (
+        <>
+          <SectionHeader
+            title="home screen"
+            hint={
+              launchers.length === 0
+                ? 'no installed app offers one yet'
+                : undefined
+            }
           />
-        ))}
-      </ListGroup>
-      {launchers.length === 0 ? (
-        <SectionEmpty>no installed app declares itself a launcher</SectionEmpty>
-      ) : null}
-
-      <View className="mt-10">
-        <SectionHeader title="system overlay" />
-        <ListGroup>
-          <BuiltinRow
-            label="built-in overlay"
-            detail="notifications, calls, pairing, volume"
-            icon={Layers}
-            selected={slots.overlay == null}
-            busy={busy === 'overlay'}
-            onPress={() => assign('overlay')}
-          />
-          {overlays.map(w => (
-            <CandidateRow
-              key={w.id}
-              webapp={w}
-              deviceId={deviceId}
-              selected={slots.overlay === w.id}
-              busy={busy === 'overlay'}
-              onPress={() => assign('overlay', w.id)}
+          <ListGroup>
+            <BuiltinRow
+              label="built-in hub"
+              detail="the launcher that ships with bridgething"
+              icon="LayoutGrid"
+              selected={slots.launcher == null}
+              busy={busy === 'launcher'}
+              onPress={() => assign('launcher')}
             />
-          ))}
-        </ListGroup>
-        {overlays.length === 0 ? (
-          <SectionEmpty>no installed app ships an overlay</SectionEmpty>
-        ) : null}
-      </View>
+            {launchers.map(w => (
+              <CandidateRow
+                key={w.id}
+                webapp={w}
+                deviceId={deviceId}
+                selected={slots.launcher === w.id}
+                busy={busy === 'launcher'}
+                onPress={() => assign('launcher', w.id)}
+              />
+            ))}
+          </ListGroup>
+          {failure?.slot === 'launcher' ? (
+            <Note className="mt-2" tone="err">
+              {failure.message}
+            </Note>
+          ) : null}
+
+          <View className="mt-10">
+            <SectionHeader
+              title="system overlay"
+              hint={
+                overlays.length === 0
+                  ? 'no installed app offers one yet'
+                  : undefined
+              }
+            />
+            <ListGroup>
+              <BuiltinRow
+                label="built-in overlay"
+                detail="notifications, calls, pairing, volume"
+                icon="Layers"
+                selected={slots.overlay == null}
+                busy={busy === 'overlay'}
+                onPress={() => assign('overlay')}
+              />
+              {overlays.map(w => (
+                <CandidateRow
+                  key={w.id}
+                  webapp={w}
+                  deviceId={deviceId}
+                  selected={slots.overlay === w.id}
+                  busy={busy === 'overlay'}
+                  onPress={() => assign('overlay', w.id)}
+                />
+              ))}
+            </ListGroup>
+            {failure?.slot === 'overlay' ? (
+              <Note className="mt-2" tone="err">
+                {failure.message}
+              </Note>
+            ) : null}
+          </View>
+        </>
+      )}
     </ScrollScreen>
   );
 }
@@ -156,49 +174,44 @@ function SelectionMark({
   selected: boolean;
   busy: boolean;
 }) {
-  if (busy) return <ActivityIndicator size="small" />;
+  if (busy) return <Spinner />;
   if (!selected) return <View className="h-[18px] w-[18px]" />;
-  return <Check size={18} color="hsl(215 14% 38%)" strokeWidth={2.6} />;
+  return <Icon name="Check" tone="accent" size={18} />;
 }
 
 function BuiltinRow({
   label,
   detail,
-  icon: Icon,
+  icon,
   selected,
   busy,
   onPress,
 }: {
   label: string;
   detail: string;
-  icon: typeof LayoutGrid;
+  icon: IconName;
   selected: boolean;
   busy: boolean;
   onPress: () => void;
 }) {
   return (
-    <Press onPress={onPress} fade={false} scaleTo={1}>
-      <View className="flex-row items-center gap-3 px-4 py-3.5">
-        <View className="h-11 w-11 items-center justify-center rounded-xl bg-secondary">
-          <Icon size={20} color="hsl(215 14% 38%)" strokeWidth={2.2} />
-        </View>
+    <Press onPress={onPress}>
+      <View className="flex-row items-center gap-3 px-4 py-3">
+        <IconBadge name={icon} tone="neutral" size="md" />
         <View className="flex-1">
           <View className="flex-row items-center gap-2">
             <Text
-              className="flex-shrink text-[15px] font-semibold text-foreground"
+              className="flex-shrink font-sans text-fg"
+              style={TEXT.row}
               numberOfLines={1}
             >
               {label}
             </Text>
-            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2 py-0.5">
-              <Lock size={9} color="hsl(215 14% 38%)" strokeWidth={2.6} />
-              <Text className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                built-in
-              </Text>
-            </View>
+            <Pill tone="neutral">built-in</Pill>
           </View>
           <Text
-            className="mt-0.5 text-[12.5px] text-muted-foreground"
+            className="mt-0.5 font-sans text-muted"
+            style={TEXT.hint}
             numberOfLines={1}
           >
             {detail}
@@ -224,25 +237,26 @@ function CandidateRow({
   onPress: () => void;
 }) {
   return (
-    <Press onPress={onPress} fade={false} scaleTo={1}>
-      <View className="flex-row items-center gap-3 px-4 py-3.5">
+    <Press onPress={onPress}>
+      <View className="flex-row items-center gap-3 px-4 py-3">
         <WebappIcon
           deviceId={deviceId}
           id={webapp.id}
           iconHash={webapp.iconHash}
           name={webapp.name}
           size={44}
-          fallbackTextClass="text-[16px] font-extrabold text-foreground"
         />
         <View className="flex-1">
           <Text
-            className="text-[15px] font-semibold text-foreground"
+            className="font-sans text-fg"
+            style={TEXT.row}
             numberOfLines={1}
           >
             {webapp.name}
           </Text>
           <Text
-            className="mt-0.5 text-[12.5px] text-muted-foreground"
+            className="mt-0.5 font-sans text-muted"
+            style={TEXT.hint}
             numberOfLines={1}
           >
             v{webapp.version}

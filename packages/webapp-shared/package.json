@@ -4,6 +4,10 @@
   "private": false,
   "version": "0.1.0",
   "exports": {
+    "./daemon": {
+      "types": "./dist/daemon.d.ts",
+      "default": "./dist/daemon.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "default": "./dist/vite.js"
@@ -16,12 +20,15 @@
     "./gitignore": "./gitignore",
     "./styles.css": "./styles.css"
   },
-  "files": ["dist", "fonts", "tsconfig.json", "gitignore", "styles.css"],
+  "files": ["dist", "tsconfig.json", "gitignore", "styles.css"],
   "scripts": {
     "prebuild": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bridgething/ui": "workspace:*"
   },
   "peerDependencies": {
     "@msgpack/msgpack": "*",

@@ -1,0 +1,60 @@
+{
+  "name": "@bridgething/core-node",
+  "version": "0.9.0",
+  "description": "N-API bindings for the bridgething delivery core: gateway link, updates, webapp install, bundle store.",
+  "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
+  "homepage": "https://bridgething.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeyEamigh/bridgething.git",
+    "directory": "crates/delivery/napi"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeyEamigh/bridgething/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "bridgething",
+    "spotify",
+    "car-thing",
+    "superbird",
+    "ota",
+    "napi"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "napi:build": "napi build --platform --release --strip --esm && bun run napi:format",
+    "napi:build:debug": "napi build --platform --esm && bun run napi:format",
+    "napi:format": "prettier --write index.d.ts",
+    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
+    "artifacts": "napi artifacts",
+    "napi:version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.6.2"
+  },
+  "napi": {
+    "binaryName": "bridgething-core-node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "aarch64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl"
+    ],
+    "npmClient": "npm"
+  }
+}

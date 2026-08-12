@@ -26,25 +26,33 @@ pub fn init_notifier<'a>() -> impl Notify<'a> + Sized {
 }
 
 #[cfg(feature = "systemd")]
-pub struct SystemdNotify;
+pub struct SystemdNotify {
+  booted: bool,
+}
 
 #[cfg(feature = "systemd")]
 impl<'a> Notify<'a> for SystemdNotify {
   fn new() -> Self {
     tracing::debug!("creating systemd notifier");
 
-    if let Err(err) = match booted() {
-      Ok(true) => notify(&[NotifyState::Status("starting...")]),
-      _ => panic!("system was not booted with systemd! please disable the systemd feature."),
-    } {
+    let booted = booted().unwrap_or(false);
+    if !booted {
+      tracing::warn!("host was not booted with systemd; readiness notifications are inert");
+      return Self { booted };
+    }
+
+    if let Err(err) = notify(&[NotifyState::Status("starting...")]) {
       tracing::error!("failed to notify systemd!! {:?}", err);
     }
 
-    Self
+    Self { booted }
   }
 
   fn ready(&self, ready: bool, status: Option<&'a str>) {
     tracing::debug!("setting ready to {ready} with status: {:?}", status);
+    if !self.booted {
+      return;
+    }
 
     let mut messages = vec![NotifyState::Ready];
     if let Some(status) = status {
@@ -58,6 +66,9 @@ impl<'a> Notify<'a> for SystemdNotify {
 
   fn status(&self, status: &'a str) {
     tracing::debug!("setting status to: {status}");
+    if !self.booted {
+      return;
+    }
 
     if let Err(err) = notify(&[NotifyState::Status(status)]) {
       tracing::error!("failed to notify systemd!! {:?}", err);
@@ -65,9 +76,10 @@ impl<'a> Notify<'a> for SystemdNotify {
   }
 }
 
-#[allow(dead_code)]
+#[cfg(not(feature = "systemd"))]
 pub struct DummyNotify;
 
+#[cfg(not(feature = "systemd"))]
 impl<'a> Notify<'a> for DummyNotify {
   fn new() -> Self {
     tracing::debug!("creating dummy systemd notifier");

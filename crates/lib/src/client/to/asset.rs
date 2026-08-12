@@ -1,10 +1,10 @@
 use bridgething_macros::BridgeEnum;
+use bytes::Bytes;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -19,9 +19,8 @@ pub struct AssetGot {
   /// Raw asset bytes, already reassembled if the companion sent them as a
   /// chunked BT transfer.
   #[debug(skip)]
-  #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
-  pub bytes: Vec<u8>,
+  pub bytes: Bytes,
   /// Best-effort content type; `None` when the source didn't provide one.
   pub mime: Option<String>,
 }

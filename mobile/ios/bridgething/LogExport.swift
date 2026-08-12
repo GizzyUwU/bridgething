@@ -1,6 +1,10 @@
-import BridgethingGateway
+import BridgethingCompanion
 import Foundation
 import UIKit
+
+enum LogExportError: Error {
+    case notInstalled
+}
 
 enum LogExport {
     static func writeBundle(archiveId: String? = nil) throws -> URL {
@@ -16,7 +20,9 @@ enum LogExport {
 
         let suffix = archiveId.map { "-\($0)" } ?? ""
         let target = dir.appendingPathComponent("\(prefix)\(suffix)-\(stampFormatter.string(from: Date())).txt")
-        return try LogStore.shared.exportTo(target, id: archiveId)
+        guard let store = CompanionLogs.shared.store else { throw LogExportError.notInstalled }
+        let written = try store.exportTo(target: target.path, id: archiveId)
+        return URL(fileURLWithPath: written)
     }
 
     @MainActor

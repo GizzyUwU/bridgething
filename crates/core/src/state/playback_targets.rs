@@ -5,43 +5,58 @@ use libbridgething::{
   client::{BridgeToClientPlayerMsgEvent, PlayerTargetsReply},
 };
 
-use crate::net::WireEventBus;
+use crate::{bluetooth::Address, net::WireEventBus};
 
 #[derive(Debug, Clone)]
 pub struct PlaybackTargetStore {
-  inner: Arc<RwLock<Vec<PlaybackTarget>>>,
+  inner: Arc<RwLock<Owned>>,
   bus: WireEventBus,
+}
+
+#[derive(Debug, Default)]
+struct Owned {
+  targets: Vec<PlaybackTarget>,
+  owner: Option<Address>,
 }
 
 impl PlaybackTargetStore {
   pub fn new(bus: WireEventBus) -> Self {
     Self {
-      inner: Arc::new(RwLock::new(Vec::new())),
+      inner: Arc::new(RwLock::new(Owned::default())),
       bus,
     }
   }
 
   pub fn current(&self) -> PlayerTargetsReply {
     PlayerTargetsReply {
-      targets: self.inner.read().expect("playback targets lock poisoned").clone(),
+      targets: self
+        .inner
+        .read()
+        .expect("playback targets lock poisoned")
+        .targets
+        .clone(),
     }
   }
 
-  pub async fn apply_companion(&self, targets: Vec<PlaybackTarget>) -> Result<(), PlaybackTargetError> {
-    self.replace(targets).await
+  pub async fn apply_companion(&self, addr: Address, targets: Vec<PlaybackTarget>) -> Result<(), PlaybackTargetError> {
+    self.replace(Some(addr), targets).await
   }
 
-  pub async fn clear_companion(&self) -> Result<(), PlaybackTargetError> {
-    self.replace(Vec::new()).await
+  pub async fn clear_companion(&self, addr: Address) -> Result<(), PlaybackTargetError> {
+    if self.inner.read().expect("playback targets lock poisoned").owner != Some(addr) {
+      return Ok(());
+    }
+    self.replace(None, Vec::new()).await
   }
 
-  async fn replace(&self, targets: Vec<PlaybackTarget>) -> Result<(), PlaybackTargetError> {
+  async fn replace(&self, owner: Option<Address>, targets: Vec<PlaybackTarget>) -> Result<(), PlaybackTargetError> {
     {
       let mut guard = self.inner.write().expect("playback targets lock poisoned");
-      if *guard == targets {
+      if guard.targets == targets && guard.owner == owner {
         return Ok(());
       }
-      *guard = targets;
+      guard.targets = targets;
+      guard.owner = owner;
     }
     self.broadcast_current().await
   }
@@ -90,10 +105,14 @@ mod tests {
     assert!(store().current().targets.is_empty());
   }
 
+  fn addr(last: u8) -> Address {
+    Address([0xAA, 0, 0, 0, 0, last])
+  }
+
   #[tokio::test]
   async fn apply_then_read_back() {
     let s = store();
-    let _ = s.apply_companion(vec![target("kitchen", true)]).await;
+    let _ = s.apply_companion(addr(1), vec![target("kitchen", true)]).await;
     let targets = s.current().targets;
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].id, "kitchen");
@@ -104,9 +123,9 @@ mod tests {
   async fn a_full_replacement_drops_endpoints_that_went_away() {
     let s = store();
     let _ = s
-      .apply_companion(vec![target("kitchen", true), target("desk", false)])
+      .apply_companion(addr(1), vec![target("kitchen", true), target("desk", false)])
       .await;
-    let _ = s.apply_companion(vec![target("desk", true)]).await;
+    let _ = s.apply_companion(addr(1), vec![target("desk", true)]).await;
     let targets = s.current().targets;
     assert_eq!(targets.len(), 1, "list is a replacement, not a merge");
     assert_eq!(targets[0].id, "desk");
@@ -115,8 +134,20 @@ mod tests {
   #[tokio::test]
   async fn clear_empties_the_list() {
     let s = store();
-    let _ = s.apply_companion(vec![target("kitchen", true)]).await;
-    let _ = s.clear_companion().await;
+    let _ = s.apply_companion(addr(1), vec![target("kitchen", true)]).await;
+    let _ = s.clear_companion(addr(1)).await;
     assert!(s.current().targets.is_empty());
+  }
+
+  #[tokio::test]
+  async fn a_peer_companion_leaving_does_not_clear_the_list() {
+    let s = store();
+    let _ = s.apply_companion(addr(1), vec![target("kitchen", true)]).await;
+    let _ = s.clear_companion(addr(2)).await;
+    assert_eq!(
+      s.current().targets.len(),
+      1,
+      "a peer companion cleared someone else's targets"
+    );
   }
 }

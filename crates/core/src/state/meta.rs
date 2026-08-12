@@ -79,6 +79,7 @@ struct Inner {
   kv: KvStore,
   nickname_tx: watch::Sender<Option<String>>,
   daemon_sha_tx: watch::Sender<Option<String>>,
+  wakeword_version_tx: watch::Sender<Option<String>>,
 }
 
 impl DeviceMeta {
@@ -89,12 +90,14 @@ impl DeviceMeta {
     });
     let (nickname_tx, _rx) = watch::channel(initial);
     let (daemon_sha_tx, _sha_rx) = watch::channel(None);
+    let (wakeword_version_tx, _ww_rx) = watch::channel(crate::ota::wakeword_model_version().await);
     let me = Self {
       inner: Arc::new(Inner {
         static_meta,
         kv,
         nickname_tx,
         daemon_sha_tx,
+        wakeword_version_tx,
       }),
     };
     me.spawn_daemon_sha();
@@ -123,6 +126,15 @@ impl DeviceMeta {
     self.inner.daemon_sha_tx.borrow().clone()
   }
 
+  pub fn wakeword_model_version(&self) -> Option<String> {
+    self.inner.wakeword_version_tx.borrow().clone()
+  }
+
+  pub async fn refresh_wakeword_model_version(&self) {
+    let next = crate::ota::wakeword_model_version().await;
+    self.inner.wakeword_version_tx.send_replace(next);
+  }
+
   pub fn static_meta(&self) -> &SuperbirdMeta {
     &self.inner.static_meta
   }
@@ -145,7 +157,12 @@ impl DeviceMeta {
   }
 
   pub fn snapshot(&self) -> BridgeThingMeta {
-    build_meta(&self.inner.static_meta, self.nickname(), self.daemon_sha256())
+    build_meta(
+      &self.inner.static_meta,
+      self.nickname(),
+      self.daemon_sha256(),
+      self.wakeword_model_version(),
+    )
   }
 }
 
@@ -163,7 +180,12 @@ fn hash_file(path: &Path) -> io::Result<String> {
   Ok(hex::encode(hasher.finalize()))
 }
 
-fn build_meta(meta: &SuperbirdMeta, nickname: Option<String>, daemon_sha256: Option<String>) -> BridgeThingMeta {
+fn build_meta(
+  meta: &SuperbirdMeta,
+  nickname: Option<String>,
+  daemon_sha256: Option<String>,
+  wakeword_model_version: Option<String>,
+) -> BridgeThingMeta {
   BridgeThingMeta {
     bridgething_version: format!("v{}", BRIDGETHING_VERSION),
     libbridgething_version: BridgeThingMeta::libbridgething_version(),
@@ -171,6 +193,7 @@ fn build_meta(meta: &SuperbirdMeta, nickname: Option<String>, daemon_sha256: Opt
     nickname,
     app_version: BRIDGETHING_VERSION.to_string(),
     daemon_sha256,
+    wakeword_model_version,
     os_name: meta.name.clone(),
     os_version: meta.version.clone(),
     os_description: meta.description.clone(),

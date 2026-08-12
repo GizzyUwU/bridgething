@@ -13,8 +13,6 @@ class MainActivity : ReactActivity() {
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
 
-  // Route activity results to one-shot handlers registered via
-  // BridgethingActivityRegistry (CompanionDeviceManager picker, etc).
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     if (!BridgethingActivityRegistry.deliverResult(requestCode, resultCode, data)) {
       super.onActivityResult(requestCode, resultCode, data)

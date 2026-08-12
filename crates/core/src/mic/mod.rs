@@ -34,6 +34,13 @@ type Link = ();
 
 const RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
+#[derive(Debug, Clone)]
+struct CapturedFrame {
+  pcm: bytes::Bytes,
+  #[cfg(feature = "mic")]
+  on_target: Option<f32>,
+}
+
 #[cfg(feature = "mic")]
 const WAKEWORD_THRESHOLD: f32 = 0.35;
 
@@ -308,7 +315,7 @@ async fn run_loop(
   bluetooth: BluetoothMan,
   config: MicConfig,
 ) {
-  let (frame_tx, mut frame_rx) = mpsc::channel::<bytes::Bytes>(64);
+  let (frame_tx, mut frame_rx) = mpsc::channel::<CapturedFrame>(64);
   #[cfg(feature = "mic")]
   let (mut link, mut hits) = match wakeword::WakeWordLink::spawn(&config.wakeword_models, config.wakeword_threshold) {
     Some((link, hits)) => (Some(link), Some(hits)),
@@ -333,15 +340,15 @@ async fn run_loop(
       Some(frame) = frame_rx.recv() => {
         #[cfg(feature = "mic")]
         if let Some(link) = link.as_ref() {
-          link.offer(frame.clone());
+          link.offer(frame.pcm.clone());
         }
         if let Some(open) = stream.as_mut() {
           let ended = open.endpoint(&frame);
-          if !open.forward(frame) {
+          if !open.forward(frame.pcm) {
             tracing::error!("gateway fell a full uplink buffer behind; ending the stream rather than holing it");
-            stop_stream(&state, &bus, &mut stream, VoiceCloseReason::Error, &mut resolve_by).await;
+            stop_stream(&state, &bus, &capture, &mut stream, VoiceCloseReason::Error, &mut resolve_by).await;
           } else if let Some(reason) = ended {
-            stop_stream(&state, &bus, &mut stream, reason, &mut resolve_by).await;
+            stop_stream(&state, &bus, &capture, &mut stream, reason, &mut resolve_by).await;
           }
         }
       }
@@ -350,7 +357,7 @@ async fn run_loop(
       }
       () = past_cap(stream.as_ref()) => {
         tracing::warn!(cap = ?config.max_uplink, "uplink hit the cap; answering with what the turn already carried");
-        stop_stream(&state, &bus, &mut stream, VoiceCloseReason::EndOfSpeech, &mut resolve_by).await;
+        stop_stream(&state, &bus, &capture, &mut stream, VoiceCloseReason::EndOfSpeech, &mut resolve_by).await;
       }
       () = past_deadline(resolve_by) => {
         tracing::warn!(wait = ?RESOLVE_TIMEOUT, "companion never answered a closed turn");
@@ -381,7 +388,7 @@ async fn run_loop(
   tracing::debug!("mic manager loop exiting");
 }
 
-fn open_capture(config: &MicConfig, frames: &mpsc::Sender<bytes::Bytes>) -> Option<Capture> {
+fn open_capture(config: &MicConfig, frames: &mpsc::Sender<CapturedFrame>) -> Option<Capture> {
   match Capture::start(config.clone(), frames.clone()) {
     Ok(capture) => {
       tracing::info!(device = config.device, "microphone open");
@@ -394,18 +401,20 @@ fn open_capture(config: &MicConfig, frames: &mpsc::Sender<bytes::Bytes>) -> Opti
   }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn on_wake_word(
   hit: Detection,
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
   config: &MicConfig,
-  frames: &mpsc::Sender<bytes::Bytes>,
+  frames: &mpsc::Sender<CapturedFrame>,
   capture: &mut Option<Capture>,
   stream: &mut Option<Stream>,
 ) {
   if let Some(open) = capture.as_ref() {
     open.mark_target();
+    open.hold_noise(true);
   }
   if state.read().await.muted {
     tracing::debug!("wake word fired while muted; ignoring");
@@ -429,13 +438,14 @@ async fn on_wake_word(
   }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_cmd(
   cmd: Cmd,
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
   config: &MicConfig,
-  frame_tx: &mpsc::Sender<bytes::Bytes>,
+  frame_tx: &mpsc::Sender<CapturedFrame>,
   capture: &mut Option<Capture>,
   stream: &mut Option<Stream>,
   resolve_by: &mut Option<tokio::time::Instant>,
@@ -448,7 +458,7 @@ async fn handle_cmd(
       let _ = reply.send(outcome);
     }
     Cmd::Stop { reason, reply } => {
-      stop_stream(state, bus, stream, reason, resolve_by).await;
+      stop_stream(state, bus, capture, stream, reason, resolve_by).await;
       let _ = reply.send(());
     }
     Cmd::Finish { activity, reply } => {
@@ -493,7 +503,7 @@ async fn handle_cmd(
         open.stop();
       }
       if was_open && !preserve {
-        stop_stream(state, bus, stream, VoiceCloseReason::Muted, resolve_by).await;
+        stop_stream(state, bus, capture, stream, VoiceCloseReason::Muted, resolve_by).await;
       } else {
         broadcast_state(bus, state).await;
       }
@@ -513,12 +523,13 @@ async fn handle_cmd(
   }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_stream(
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
   bluetooth: &BluetoothMan,
   config: &MicConfig,
-  frame_tx: &mpsc::Sender<bytes::Bytes>,
+  frame_tx: &mpsc::Sender<CapturedFrame>,
   capture: &mut Option<Capture>,
   stream: &mut Option<Stream>,
   reason: VoiceCaptureReason,
@@ -567,6 +578,7 @@ async fn start_stream(
     .broadcast(BridgeToGatewayVoiceMsgEvent::StreamOpen(VoiceStreamOpen {
       stream_id,
       format: config.format.wire(),
+      reason,
     }))
     .await;
   broadcast_activity(bus, activity).await;
@@ -585,11 +597,15 @@ fn settled_phase(reason: VoiceCloseReason) -> VoicePhase {
 async fn stop_stream(
   state: &Arc<RwLock<State>>,
   bus: &WireEventBus,
+  capture: &Option<Capture>,
   stream: &mut Option<Stream>,
   reason: VoiceCloseReason,
   resolve_by: &mut Option<tokio::time::Instant>,
 ) {
   let next = settled_phase(reason);
+  if let Some(open) = capture.as_ref() {
+    open.hold_noise(false);
+  }
 
   let activity = {
     let mut guard = state.write().await;
@@ -658,14 +674,14 @@ struct Capture {
 
 impl Capture {
   #[cfg(feature = "mic")]
-  fn start(config: MicConfig, frames: mpsc::Sender<bytes::Bytes>) -> Result<Self, MicError> {
+  fn start(config: MicConfig, frames: mpsc::Sender<CapturedFrame>) -> Result<Self, MicError> {
     Ok(Self {
       worker: alsa_capture::WorkerHandle::start(config, frames)?,
     })
   }
 
   #[cfg(not(feature = "mic"))]
-  fn start(_config: MicConfig, _frames: mpsc::Sender<bytes::Bytes>) -> Result<Self, MicError> {
+  fn start(_config: MicConfig, _frames: mpsc::Sender<CapturedFrame>) -> Result<Self, MicError> {
     Err(MicError::Unavailable)
   }
 
@@ -676,6 +692,14 @@ impl Capture {
 
   #[cfg(not(feature = "mic"))]
   fn mark_target(&self) {}
+
+  #[cfg(feature = "mic")]
+  fn hold_noise(&self, holding: bool) {
+    self.worker.hold_noise(holding);
+  }
+
+  #[cfg(not(feature = "mic"))]
+  fn hold_noise(&self, _holding: bool) {}
 
   fn stop(self) {
     #[cfg(feature = "mic")]
@@ -698,10 +722,10 @@ impl Endpointer {
     }
   }
 
-  fn observe(&mut self, pcm: &[u8]) -> Option<VoiceCloseReason> {
+  fn observe(&mut self, frame: &CapturedFrame) -> Option<VoiceCloseReason> {
     self.samples.clear();
-    bridgething_dsp::pipeline::from_pcm16(pcm, &mut self.samples);
-    let end = self.vad.observe(&self.samples)?;
+    bridgething_dsp::pipeline::from_pcm16(&frame.pcm, &mut self.samples);
+    let end = self.vad.observe(&self.samples, frame.on_target)?;
     tracing::debug!(?end, "the endpointer ended the turn");
     Some(VoiceCloseReason::EndOfSpeech)
   }
@@ -744,12 +768,12 @@ impl Stream {
   }
 
   #[cfg(feature = "mic")]
-  fn endpoint(&mut self, pcm: &[u8]) -> Option<VoiceCloseReason> {
-    self.endpointer.as_mut()?.observe(pcm)
+  fn endpoint(&mut self, frame: &CapturedFrame) -> Option<VoiceCloseReason> {
+    self.endpointer.as_mut()?.observe(frame)
   }
 
   #[cfg(not(feature = "mic"))]
-  fn endpoint(&mut self, _pcm: &[u8]) -> Option<VoiceCloseReason> {
+  fn endpoint(&mut self, _frame: &CapturedFrame) -> Option<VoiceCloseReason> {
     None
   }
 

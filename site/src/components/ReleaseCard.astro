@@ -1,0 +1,71 @@
+---
+import { marked } from 'marked';
+import type { Release } from '../../manifest/types.ts';
+
+export type Props = {
+  release: Release;
+  channelDefault: boolean;
+};
+
+const { release, channelDefault } = Astro.props;
+const html = await marked.parse(release.changelog, { gfm: true, breaks: false });
+const formattedDate = new Date(release.released_at).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+const sizeMb = (release.download.size / (1024 * 1024)).toFixed(1);
+
+const articleClasses = [
+  'border border-white/15 p-6 mb-4',
+  release.yanked ? 'border-warn/35 bg-warn/5' : '',
+  release.deprecated ? 'opacity-75' : '',
+];
+---
+
+<article class:list={articleClasses}>
+  <header>
+    <div class="mb-1 flex flex-wrap items-center gap-3">
+      <h3 class="m-0 font-mono text-base/none font-medium">{release.version}</h3>
+      {channelDefault ? <span class="pill pill-default">default</span> : null}
+      {release.yanked ? <span class="pill pill-warn">yanked</span> : null}
+      {release.deprecated && !release.yanked ? <span class="pill">deprecated</span> : null}
+    </div>
+    <p class="m-0 mb-2 flex flex-wrap items-baseline gap-2 font-mono text-sm text-white/45">
+      <time datetime={release.released_at}>{formattedDate}</time>
+      <span class="opacity-50">·</span>
+      <span>{sizeMb} MB</span>
+      <span class="opacity-50">·</span>
+      <code class="text-xs" title={release.download.sha256}>
+        {release.download.sha256.slice(0, 12)}
+      </code>
+    </p>
+    {
+      release.yanked ? (
+        <p class="text-warn my-2 text-base">
+          <strong>yanked:</strong> {release.yanked}
+        </p>
+      ) : null
+    }
+    <p class="mt-2 mb-4 text-base text-white/75">{release.summary}</p>
+  </header>
+  <details class="my-4">
+    <summary class="cursor-pointer py-1 font-mono text-sm text-white/45 select-none hover:text-white/80">
+      full changelog
+    </summary>
+    <div
+      class="prose prose-sm prose-invert prose-headings:font-display prose-h2:text-lg prose-h2:font-medium prose-h2:mt-6 prose-h2:mb-2 prose-h2:pb-1 prose-h2:border-b prose-h2:border-white/10 prose-h3:text-base prose-h3:mt-4 prose-h3:mb-2 prose-em:text-white/50 prose-em:not-italic prose-em:text-sm mt-3 max-w-none"
+      set:html={html}
+    />
+  </details>
+  <div class="flex flex-wrap gap-3">
+    <a href={release.download.url} class="btn" download>download .zip</a>
+    {
+      release.changelog_url ? (
+        <a href={release.changelog_url} class="btn">
+          read more
+        </a>
+      ) : null
+    }
+  </div>
+</article>

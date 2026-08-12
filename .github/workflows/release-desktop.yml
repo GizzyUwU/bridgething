@@ -1,0 +1,249 @@
+name: release-desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: channel slug (stable | dev)
+        required: true
+        type: choice
+        options:
+          - stable
+          - dev
+        default: dev
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            target: aarch64-apple-darwin
+            updater_target: darwin-aarch64
+          - runner: macos-26
+            target: x86_64-apple-darwin
+            updater_target: darwin-x86_64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            updater_target: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            updater_target: linux-aarch64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            updater_target: windows-x86_64
+          - runner: windows-11-arm
+            updater_target: windows-aarch64
+            bundles: nsis
+
+    runs-on: ${{ matrix.runner }}
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: linux bundling deps
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf clang
+          { echo "CC=clang"; echo "CXX=clang++"; } >> "$GITHUB_ENV"
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the frontend and its workspace deps
+        run: bunx turbo run build --filter='@bridgething/desktop-frontend...'
+
+      - name: require the auth psk
+        shell: bash
+        env:
+          BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BRIDGETHING_AUTH_PSK" ]] || { echo "BRIDGETHING_AUTH_PSK is unset; the build would ship an app that cannot authenticate" >&2; exit 1; }
+
+      - name: point the updater at this channel
+        shell: bash
+        working-directory: desktop
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          printf '{"plugins":{"updater":{"endpoints":["https://ota.bridgething.com/desktop/%s/{{target}}-{{arch}}.json"]}}}\n' \
+            "$CHANNEL" >src-tauri/channel.conf.json
+          cat src-tauri/channel.conf.json
+
+      - name: bundle
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.DESKTOP_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.DESKTOP_UPDATER_KEY_PASSWORD }}
+          BRIDGETHING_AUTH_PSK: ${{ secrets.BRIDGETHING_AUTH_PSK }}
+        run: bun run tauri build --config src-tauri/channel.conf.json ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.bundles && format('--bundles {0}', matrix.bundles) || '' }}
+
+      - name: resolve the bundle dir
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "dir=target/${{ matrix.target && format('{0}/', matrix.target) || '' }}release/bundle" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.updater_target }}
+          path: |
+            ${{ steps.bundle.outputs.dir }}/**/*.tar.gz
+            ${{ steps.bundle.outputs.dir }}/**/*.tar.gz.sig
+            ${{ steps.bundle.outputs.dir }}/**/*.zip
+            ${{ steps.bundle.outputs.dir }}/**/*.zip.sig
+            ${{ steps.bundle.outputs.dir }}/**/*.AppImage
+            ${{ steps.bundle.outputs.dir }}/**/*.AppImage.sig
+            ${{ steps.bundle.outputs.dir }}/**/*.dmg
+            ${{ steps.bundle.outputs.dir }}/**/*.msi
+            ${{ steps.bundle.outputs.dir }}/**/*.msi.sig
+            ${{ steps.bundle.outputs.dir }}/**/*.exe
+            ${{ steps.bundle.outputs.dir }}/**/*.exe.sig
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: bridgething-ota
+      PUBLIC_BASE: https://ota.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/desktop
+
+      - name: install rclone (R2 client)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - name: upload each target and write its updater manifest
+        id: targets
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          notes="see ${PUBLIC_BASE}/desktop/${CHANNEL}/${version}/"
+          released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          pick() {
+            local dir="$1" pattern
+            shift
+            local matches=()
+            for pattern in "$@"; do
+              mapfile -t matches < <(find "$dir" -type f -name "$pattern" ! -name '*.sig' | LC_ALL=C sort)
+              [ "${#matches[@]}" -gt 0 ] || continue
+              printf '%s\n' "${matches[0]}"
+              return 0
+            done
+            return 0
+          }
+
+          for dir in /tmp/desktop/desktop-*; do
+            updater_target="${dir##*/desktop-}"
+
+            archive=$(pick "$dir" '*.app.tar.gz' '*.AppImage.tar.gz' '*.AppImage' '*.exe' '*.msi' '*.tar.gz' '*.zip')
+            [ -n "$archive" ] || { echo "::error::no archive for ${updater_target}"; exit 1; }
+            [ -f "${archive}.sig" ] || { echo "::error::${archive} was not signed; DESKTOP_UPDATER_PRIVATE_KEY is unset or wrong"; exit 1; }
+
+            key="desktop/${CHANNEL}/${version}/${updater_target}/$(basename "$archive")"
+            site/scripts/r2-put "$archive" "$key" application/octet-stream "public, max-age=31536000, immutable"
+
+            jq -n \
+              --arg version "$version" \
+              --arg notes "$notes" \
+              --arg pub_date "$released_at" \
+              --arg signature "$(cat "${archive}.sig")" \
+              --arg url "${PUBLIC_BASE}/${key}" \
+              --arg target "$updater_target" \
+              '{version: $version, notes: $notes, pub_date: $pub_date,
+                platforms: {($target): {signature: $signature, url: $url}}}' \
+              >"/tmp/${updater_target}.json"
+
+            site/scripts/r2-put "/tmp/${updater_target}.json" "desktop/${CHANNEL}/${updater_target}.json" application/json \
+              "public, max-age=300, must-revalidate"
+
+            download="$archive"
+            download_key="$key"
+            runnable=$(pick "$dir" '*.dmg' '*.AppImage')
+            if [ -n "$runnable" ]; then
+              download="$runnable"
+              download_key="desktop/${CHANNEL}/${version}/${updater_target}/$(basename "$runnable")"
+              site/scripts/r2-put "$runnable" "$download_key" application/octet-stream "public, max-age=31536000, immutable"
+            fi
+
+            jq -nc \
+              --arg target "$updater_target" \
+              --arg url "${PUBLIC_BASE}/${download_key}" \
+              --argjson size "$(stat -c%s "$download")" \
+              --arg sha256 "$(sha256sum "$download" | cut -d' ' -f1)" \
+              '{($target): {url: $url, size: $size, sha256: $sha256}}' >>/tmp/desktop-platforms.jsonl
+          done
+
+          {
+            echo "version=${version}"
+            echo "released_at=${released_at}"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: write the aggregate desktop manifest
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ steps.targets.outputs.version }}
+          RELEASED_AT: ${{ steps.targets.outputs.released_at }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$VERSION" \
+            --arg released_at "$RELEASED_AT" \
+            --argjson platforms "$(jq -sc 'add' /tmp/desktop-platforms.jsonl)" \
+            '{version: $version, released_at: $released_at, platforms: $platforms}' \
+            >/tmp/desktop.json
+          cat /tmp/desktop.json
+          site/scripts/r2-put /tmp/desktop.json "desktop/${CHANNEL}/desktop.json" application/json \
+            "public, max-age=300, must-revalidate"
+
+      - name: purge the cloudflare edge
+        if: always()
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: site/scripts/cf-purge

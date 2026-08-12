@@ -179,16 +179,12 @@ impl ClientManager {
     Ok(client.tx.send(msg).await?)
   }
 
-  pub async fn broadcast(
-    &self,
-    data: impl Into<BridgeToClientMsgData> + Clone,
-    meta: MsgMeta,
-  ) -> Result<(), Vec<WSError>> {
+  pub async fn broadcast(&self, data: impl Into<BridgeToClientMsgData>, meta: MsgMeta) -> Result<(), Vec<WSError>> {
     let data = data.into();
 
     let msg = BridgeToClientMsg {
       id: uuid::Uuid::now_v7(),
-      data: data.clone(),
+      data,
       meta,
     };
 
@@ -213,10 +209,7 @@ impl ClientManager {
     self.send(Uuid::now_v7(), to, event.into(), MsgMeta::Event, None).await
   }
 
-  pub async fn broadcast_event<E: WireEvent<BridgeToClientMsgData> + Clone>(
-    &self,
-    event: E,
-  ) -> Result<(), Vec<WSError>> {
+  pub async fn broadcast_event<E: WireEvent<BridgeToClientMsgData>>(&self, event: E) -> Result<(), Vec<WSError>> {
     self.broadcast(event.into(), MsgMeta::Event).await
   }
 
@@ -224,10 +217,7 @@ impl ClientManager {
     self.send(Uuid::now_v7(), to, cmd.into(), MsgMeta::Command, None).await
   }
 
-  pub async fn broadcast_command<C: WireCommand<BridgeToClientMsgData> + Clone>(
-    &self,
-    cmd: C,
-  ) -> Result<(), Vec<WSError>> {
+  pub async fn broadcast_command<C: WireCommand<BridgeToClientMsgData>>(&self, cmd: C) -> Result<(), Vec<WSError>> {
     self.broadcast(cmd.into(), MsgMeta::Command).await
   }
 
@@ -295,7 +285,7 @@ impl ClientManager {
     let msg = data.into();
     tracing::trace!("sending stock message to {to} with data {:?}", msg);
 
-    Ok(client.tx.send(PossibleSendMsg::Stock(msg)).await?)
+    Ok(client.tx.send(msg.into()).await?)
   }
 
   pub async fn broadcast_stock(&self, data: impl Into<StockSendMsg> + Clone) -> Result<(), Vec<WSError>> {
@@ -307,7 +297,7 @@ impl ClientManager {
       if c.mode != ClientMode::Stock {
         continue;
       }
-      if let Err(err) = c.tx.try_send(PossibleSendMsg::Stock(msg.clone())) {
+      if let Err(err) = c.tx.try_send(msg.clone().into()) {
         if matches!(err, TrySendError::Closed(_)) {
           closed.push(*c.key());
         }

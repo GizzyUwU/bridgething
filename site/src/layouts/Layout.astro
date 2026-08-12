@@ -1,0 +1,60 @@
+---
+import '../styles/global.css';
+import { SITE } from '../lib/site';
+
+export type Props = {
+  title?: string;
+  description?: string;
+  noindex?: boolean;
+};
+
+const { title, description = SITE.pitch, noindex = false } = Astro.props;
+const fullTitle = title ? `${title} | bridgething` : 'bridgething';
+
+const origin = Astro.site ?? new URL(`https://${SITE.domain}`);
+const canonical = new URL(Astro.url.pathname, origin).href;
+const ogImage = new URL('/og.png', origin).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
+    <meta name="generator" content={Astro.generator} />
+    <meta name="theme-color" content="#0a0c0e" />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/brand/icon-light.svg" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="/brand/icon-dark.svg" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" as="font" type="font/ttf" href="/fonts/Outfit/Outfit.ttf" crossorigin />
+    <link rel="preload" as="font" type="font/ttf" href="/fonts/Inter/Inter.ttf" crossorigin />
+    <meta property="og:site_name" content="bridgething" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="2400" />
+    <meta property="og:image:height" content="1260" />
+    <meta property="og:image:alt" content="bridgething - open firmware for the spotify car thing" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <title>{fullTitle}</title>
+  </head>
+  <body>
+    <div class="isolate flex min-h-dvh flex-col overflow-x-clip">
+      <div
+        aria-hidden="true"
+        class="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(rgba(239,239,239,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(239,239,239,0.02)_1px,transparent_1px),linear-gradient(rgba(239,239,239,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(239,239,239,0.045)_1px,transparent_1px)] mask-[linear-gradient(90deg,black,rgb(0_0_0/0.55)_30%,rgb(0_0_0/0.55)_70%,black),linear-gradient(180deg,black,rgb(0_0_0/0.65)_32%,rgb(0_0_0/0.65)_100%)] bg-size-[10px_10px,10px_10px,50px_50px,50px_50px] mask-intersect">
+      </div>
+      <slot />
+    </div>
+  </body>
+</html>

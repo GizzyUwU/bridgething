@@ -1,0 +1,18 @@
+repo:
+  name: bridgething apps
+  description: The official catalog of installable webapps for bridgething.
+  homepage: https://bridgething.com/apps
+  icon: https://bridgething.com/brand/icon-dark.svg
+apps:
+  - slug: calendar
+    author: JoeyEamigh
+    homepage: https://bridgething.com/apps
+    source: https://github.com/JoeyEamigh/bridgething
+  - slug: weather
+    author: JoeyEamigh
+    homepage: https://bridgething.com/apps
+    source: https://github.com/JoeyEamigh/bridgething
+  - slug: home-assistant
+    author: JoeyEamigh
+    homepage: https://bridgething.com/apps
+    source: https://github.com/JoeyEamigh/bridgething

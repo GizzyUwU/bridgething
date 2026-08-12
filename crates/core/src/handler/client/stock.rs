@@ -185,6 +185,7 @@ impl LegacyStockHandler {
       };
       match super::library::browse_request(
         &self.handle.bluetooth.gateway_man,
+        self.handle.state.capabilities.primary_addr(),
         &self.handle.state.root_browse,
         &self.handle.state.browse_content,
         &self.handle.state.player,
@@ -228,6 +229,7 @@ impl LegacyStockHandler {
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
       &self.handle.state.root_browse,
       &self.handle.state.browse_content,
       &self.handle.state.player,
@@ -356,7 +358,13 @@ impl LegacyStockHandler {
       return self.send_saved_result(false).await;
     }
     let req = LibraryFavoritesContainsRequest { uris: vec![id] };
-    match super::library::favorites_contains_request(&self.handle.bluetooth.gateway_man, req).await {
+    match super::library::favorites_contains_request(
+      &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
+      req,
+    )
+    .await
+    {
       Ok(reply) => {
         let liked = reply.liked.first().copied().unwrap_or(false);
         self.send_saved_result(liked).await?;
@@ -547,6 +555,7 @@ impl LegacyStockHandler {
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
       &self.handle.state.root_browse,
       &self.handle.state.browse_content,
       &self.handle.state.player,
@@ -586,6 +595,7 @@ impl LegacyStockHandler {
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
+      self.handle.state.capabilities.primary_addr(),
       &self.handle.state.root_browse,
       &self.handle.state.browse_content,
       &self.handle.state.player,

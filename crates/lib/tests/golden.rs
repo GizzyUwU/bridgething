@@ -1,13 +1,3 @@
-//! Cross-language wire-format golden vectors.
-//!
-//! Canonical bridgething wire messages constructed in Rust, encoded as
-//! `framed_hex` (16-byte header + msgpack-named, compression=NONE for
-//! determinism) plus the equivalent `decoded_json` shape. Every language
-//! in the polyglot SDK (Swift, Kotlin, TS) round-trips these fixtures to
-//! prove its codec agrees with Rust on the wire.
-//!
-//! Regenerate with: `UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden`
-
 use std::path::PathBuf;
 
 use libbridgething::{
@@ -171,6 +161,7 @@ fn bridge_meta() -> BridgeThingMeta {
     nickname: Some("Joey's kitchen".into()),
     app_version: "0.1.0".into(),
     daemon_sha256: Some("2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae".into()),
+    wakeword_model_version: Some("1.0.0".into()),
     os_name: "linux".into(),
     os_version: "6.19".into(),
     os_description: "bridgething wrynose".into(),
@@ -525,7 +516,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       data: GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
         transfer_id: req_id(),
         offset: 4096,
-        bytes: fingerprint_bytes(),
+        bytes: fingerprint_bytes().into(),
       })),
     },
     PRIORITY_BULK,
@@ -540,7 +531,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       data: GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
         transfer_id: req_id(),
         offset: 0,
-        bytes: fingerprint_bytes(),
+        bytes: fingerprint_bytes().into(),
       })),
     },
     PRIORITY_BACKGROUND,
@@ -837,37 +828,29 @@ fn priority_round_trips_through_codec_on_all_lanes() {
   for priority in [Priority::Normal, Priority::Bulk, Priority::Background] {
     let mut wire = BytesMut::new();
     BridgeEndec::default()
-      .encode(
-        PrioritizedFrame {
-          priority,
-          msg: bridge_msg.clone(),
-        },
-        &mut wire,
-      )
+      .encode(PrioritizedFrame::new(priority, bridge_msg.clone()), &mut wire)
       .expect("encode bridge");
     assert_eq!(wire[5], priority.as_byte(), "priority byte at offset 5");
     let decoded = GatewayEndec::default()
       .decode(&mut wire)
       .expect("decode bridge")
-      .expect("frame ready");
+      .expect("frame ready")
+      .frame()
+      .expect("a decoded frame");
     assert_eq!(decoded.priority, priority, "decoded priority preserved");
     assert_eq!(decoded.msg, bridge_msg, "decoded payload matches");
 
     let mut wire = BytesMut::new();
     GatewayEndec::default()
-      .encode(
-        PrioritizedFrame {
-          priority,
-          msg: gateway_msg.clone(),
-        },
-        &mut wire,
-      )
+      .encode(PrioritizedFrame::new(priority, gateway_msg.clone()), &mut wire)
       .expect("encode gateway");
     assert_eq!(wire[5], priority.as_byte());
     let decoded = BridgeEndec::default()
       .decode(&mut wire)
       .expect("decode gateway")
-      .expect("frame ready");
+      .expect("frame ready")
+      .frame()
+      .expect("a decoded frame");
     assert_eq!(decoded.priority, priority);
     assert_eq!(decoded.msg, gateway_msg);
   }
@@ -899,7 +882,9 @@ fn legacy_zero_priority_byte_decodes_as_normal() {
   let decoded = GatewayEndec::default()
     .decode(&mut wire)
     .expect("decode")
-    .expect("frame ready");
+    .expect("frame ready")
+    .frame()
+    .expect("a decoded frame");
   assert_eq!(decoded.priority, Priority::Normal);
   assert_eq!(decoded.msg, msg);
 }

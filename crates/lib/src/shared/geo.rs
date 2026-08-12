@@ -3,14 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 
 /// One position fix from the gateway. `accuracy_m` is the 1-sigma
 /// horizontal radius. `speed_mps` and `heading_deg` are populated when
 /// the underlying source provides them (CLLocation on iOS does for moving
 /// fixes; Android's FusedLocationProvider similar). `ts_ms` is the
 /// gateway-provided fix timestamp, not the wire-arrival time.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +28,6 @@ pub struct Position {
 /// accuracy, Android `PRIORITY_BALANCED_POWER_ACCURACY`). The daemon
 /// aggregates across subscribers and forwards the most-demanding to the
 /// companion.
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -40,7 +37,6 @@ pub enum GeoAccuracy {
   Fine,
 }
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]

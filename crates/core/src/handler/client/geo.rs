@@ -92,7 +92,8 @@ impl ClientToBridgeGeoMsgDispatch for GeoHandler {
       return Ok(());
     }
     let outbound = gateway::GeoGetOnce { accuracy };
-    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
+    let primary = self.handle.state.capabilities.primary_addr();
+    match self.handle.bluetooth.gateway_man.request(primary, outbound).await {
       Ok(reply) => {
         self.handle.state.geo_last_fix.record(reply.position);
         self

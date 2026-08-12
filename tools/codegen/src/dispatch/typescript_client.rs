@@ -1,10 +1,3 @@
-//! TypeScript emitter for the on-device webapp client SDK.
-//!
-//! Output shape mirrors the gateway emitter but stripped of the
-//! multi-peer machinery (no device proxy, no broadcast). The local
-//! WebSocket protocol always has exactly one peer (the daemon), so
-//! every `on*` listener and outbound send is implicitly addressed.
-
 use std::{
   collections::{BTreeMap, BTreeSet},
   path::Path,
@@ -18,12 +11,6 @@ use super::{
 };
 
 const TS_OUTPUT: &str = "packages/client-ts/src/dispatch.generated.ts";
-
-#[derive(Clone, Copy)]
-pub(super) enum BindingProtocol {
-  Client,
-  Gateway,
-}
 
 pub fn emit_typescript_client(plan: &Plan, binding_locations: &BTreeMap<String, BTreeSet<String>>) -> Result<()> {
   let surfaces = surfaces(plan);
@@ -99,20 +86,15 @@ fn push_imports(out: &mut String, surfaces: &[Surface], binding_locations: &BTre
   imports.insert("ClientToBridgeMsg".to_string());
   imports.insert("WireError".to_string());
 
-  emit_grouped_imports(out, &imports, binding_locations, BindingProtocol::Client);
+  emit_grouped_imports(out, &imports, binding_locations);
   out.push_str("import { newUuid } from '@bridgething/lib/uuid';\n");
   out.push_str("import { BridgethingClient, type ClientEvent } from './index.js';\n\n");
 }
 
-pub(super) fn emit_grouped_imports(
-  out: &mut String,
-  names: &BTreeSet<String>,
-  locations: &BTreeMap<String, BTreeSet<String>>,
-  protocol: BindingProtocol,
-) {
+fn emit_grouped_imports(out: &mut String, names: &BTreeSet<String>, locations: &BTreeMap<String, BTreeSet<String>>) {
   let mut by_subpath: BTreeMap<String, Vec<String>> = BTreeMap::new();
   for name in names {
-    let subpath = subpath_for(name, locations, protocol);
+    let subpath = subpath_for(name, locations);
     by_subpath.entry(subpath).or_default().push(name.clone());
   }
   for (subpath, mut names) in by_subpath {
@@ -121,25 +103,15 @@ pub(super) fn emit_grouped_imports(
   }
 }
 
-fn subpath_for(name: &str, locations: &BTreeMap<String, BTreeSet<String>>, protocol: BindingProtocol) -> String {
+fn subpath_for(name: &str, locations: &BTreeMap<String, BTreeSet<String>>) -> String {
   let Some(files) = locations.get(name) else {
     return "@bridgething/lib".to_string();
   };
-  let preferred = match protocol {
-    BindingProtocol::Client => "client.ts",
-    BindingProtocol::Gateway => "gateway.ts",
-  };
-  if files.contains(preferred) {
-    return match protocol {
-      BindingProtocol::Client => "@bridgething/lib/client".to_string(),
-      BindingProtocol::Gateway => "@bridgething/lib/gateway".to_string(),
-    };
+  if files.contains("client.ts") {
+    return "@bridgething/lib/client".to_string();
   }
   if files.contains("shared.ts") || files.contains("wire.ts") || files.contains("stock.ts") {
     return "@bridgething/lib".to_string();
-  }
-  if files.contains("client.ts") {
-    return "@bridgething/lib/client".to_string();
   }
   if files.contains("gateway.ts") {
     return "@bridgething/lib/gateway".to_string();
@@ -428,12 +400,6 @@ fn partialize(ty: &str) -> String {
 }
 
 fn push_surfaces_interface(out: &mut String, surfaces: &[Surface]) {
-  out.push_str("/**\n");
-  out.push_str(" * Codegen-emitted shape applied to `BridgethingClient` at runtime via\n");
-  out.push_str(" * `applyDispatch()`. `index.ts` declares `interface BridgethingClient\n");
-  out.push_str(" * extends ClientSurfaces {}` so class+interface merging picks these up\n");
-  out.push_str(" * for consumers regardless of how the published `.d.ts` is bundled.\n");
-  out.push_str(" */\n");
   out.push_str("export interface ClientSurfaces {\n");
   for s in surfaces {
     out.push_str(&format!(
@@ -473,7 +439,7 @@ fn push_apply_dispatch(out: &mut String, surfaces: &[Surface]) {
   }
   out.push_str("};\n\n");
 
-  out.push_str("/**\n * Apply codegen-emitted prototype augmentations to BridgethingClient.\n * Called once from `index.ts` after the class definition. Idempotent.\n */\nexport function applyDispatch(): void {\n");
+  out.push_str("export function applyDispatch(): void {\n");
   out.push_str("  const surfaceCache = new WeakMap<BridgethingClient, ClientSurfaceCache>();\n");
   out.push_str("  function bucketFor(c: BridgethingClient): ClientSurfaceCache {\n    let bucket = surfaceCache.get(c);\n    if (!bucket) { bucket = {}; surfaceCache.set(c, bucket); }\n    return bucket;\n  }\n\n");
   for s in surfaces {

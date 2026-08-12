@@ -1,14 +1,11 @@
 import { BridgethingClient } from '@bridgething/client';
+import { daemonUrl } from '@bridgething/webapp-shared/daemon';
 import { useEffect, useMemo, useState } from 'react';
-
-const wsUrl =
-  import.meta.env.VITE_BRIDGETHING_URL ??
-  (typeof window !== 'undefined' ? `ws://${window.location.host}/` : 'ws://127.0.0.1:8891/');
 
 type Bookmark = { label: string; url: string };
 
 export default function App() {
-  const client = useMemo(() => new BridgethingClient({ url: wsUrl }), []);
+  const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [draft, setDraft] = useState('');
 
@@ -33,8 +30,10 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-bt-charcoal px-10 py-8 text-bt-off-white">
-      <div className="bt-wordmark mb-5 text-2xl font-semibold">Browser</div>
+    <div className="flex h-full w-full flex-col bg-bg px-10 py-7 text-off-white">
+      <div className="mb-5 border-b border-rule pb-3 font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">
+        browser
+      </div>
 
       <form
         className="mb-7 flex gap-3"
@@ -51,19 +50,19 @@ export default function App() {
           value={draft}
           onChange={e => setDraft(e.target.value)}
           placeholder="enter a url"
-          className="min-w-0 flex-1 rounded-xl bg-black/30 px-4 py-3 text-base text-bt-off-white placeholder:text-bt-soft-gray focus:outline-none focus:ring-2 focus:ring-bt-blue"
+          className="min-w-0 flex-1 border border-edge bg-screen px-4 py-3 font-mono text-row-lg text-off-white outline-none placeholder:text-dim focus:border-accent"
         />
         <button
           type="submit"
           disabled={!draft.trim()}
-          className="rounded-xl bg-bt-blue px-6 py-3 text-base font-medium text-bt-charcoal disabled:opacity-40">
+          className="border border-accent bg-accent px-8 py-3 font-mono text-row-lg text-screen disabled:border-rule disabled:bg-transparent disabled:text-dim">
           go
         </button>
       </form>
 
       {bookmarks.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
-          <div className="max-w-[32rem] text-center text-sm text-bt-soft-gray">
+          <div className="max-w-lg text-center text-row text-near">
             add bookmarks in the companion app, or type a url above. sites load through the connected phone.
           </div>
         </div>
@@ -73,9 +72,9 @@ export default function App() {
             <button
               key={i}
               onClick={() => go(b.url)}
-              className="flex flex-col gap-1 rounded-2xl bg-black/30 px-4 py-4 text-left active:bg-black/50">
-              <span className="truncate text-base font-medium text-bt-off-white">{b.label}</span>
-              <span className="truncate text-xs text-bt-soft-gray">{hostOf(b.url)}</span>
+              className="flex flex-col gap-1 border border-rule bg-screen px-4 py-4 text-left active:border-edge active:bg-neutral-soft">
+              <span className="truncate text-row-lg font-medium text-off-white">{b.label}</span>
+              <span className="truncate font-mono text-hint text-dim">{hostOf(b.url)}</span>
             </button>
           ))}
         </div>

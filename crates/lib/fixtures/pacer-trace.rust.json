@@ -6,7 +6,7 @@
     "min_window_bytes": 65536,
     "max_window_bytes": 262144,
     "rate_sample_count": 8,
-    "fragment_bytes": null
+    "fragment_bytes": 16384
   },
   "cases": [
     {

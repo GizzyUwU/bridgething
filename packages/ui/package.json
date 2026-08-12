@@ -1,0 +1,30 @@
+{
+  "name": "@bridgething/ui",
+  "type": "module",
+  "private": true,
+  "description": "preact + tailwind components shared by the desktop app and the site",
+  "exports": {
+    ".": "./src/index.ts",
+    "./errors": "./src/errors.ts",
+    "./tokens": "./src/tokens.ts",
+    "./theme.css": "./src/theme.css",
+    "./fonts.css": "./src/fonts.css"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "preact": "^10.29.7",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "preact": "^10.29.7",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@bridgething/companion-types": "workspace:*"
+  }
+}

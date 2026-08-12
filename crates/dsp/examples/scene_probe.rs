@@ -1,54 +1,15 @@
-//! Diagnoses the scene estimator rather than scoring it.
-//!
-//! ```text
-//! cargo run --release --example scene_probe -- <scene-dir> [scenes] [noise-prerolls] [recent-tau-csv]
-//! ```
-
 use std::{env, path::Path};
 
 use bridgething_dsp::{
   beamformer::Design,
+  bench::{Scene, read_scene},
   geometry::CHANNELS,
   pipeline::{Beamformer, Config},
   scene,
   stft::{BINS, bin_frequencies},
 };
-use serde::Deserialize;
 
 const RATE: f64 = 16_000.0;
-
-#[derive(Deserialize)]
-struct Scene {
-  audio: String,
-  archetype: String,
-  talker_deg: f64,
-  snr_db: Option<f64>,
-  speech_start: usize,
-  speech_len: usize,
-  #[serde(default)]
-  speech_spans: Vec<[usize; 2]>,
-}
-
-impl Scene {
-  fn spans(&self) -> Vec<(usize, usize)> {
-    if self.speech_spans.is_empty() {
-      vec![(self.speech_start, self.speech_len)]
-    } else {
-      self.speech_spans.iter().map(|span| (span[0], span[1])).collect()
-    }
-  }
-}
-
-fn read_scene(path: &Path) -> Option<Vec<i32>> {
-  let mut reader = hound::WavReader::open(path).ok()?;
-  Some(
-    reader
-      .samples::<f32>()
-      .filter_map(Result::ok)
-      .map(|s| (s.clamp(-1.0, 1.0) as f64 * i32::MAX as f64) as i32)
-      .collect(),
-  )
-}
 
 fn main() {
   let args: Vec<String> = env::args().collect();

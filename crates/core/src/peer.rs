@@ -4,7 +4,6 @@ use std::{
   time::Duration,
 };
 
-use bluer::Address;
 use libbridgething::{
   Device, GatewayInfo, Peer, PeerCompanionStatus, PeerIap2Status,
   client::{
@@ -17,10 +16,11 @@ use libbridgething::{
 use tokio::sync::{mpsc, watch};
 
 use crate::{
+  bluetooth::Address,
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   player::Player,
-  state::{AudioManager, LogTap, PlaybackTargetStore, RouteTable, TunnelRoutes, log_tap::LogOwner},
+  state::{AudioManager, LogTap, PlaybackTargetStore, RouteTable, TelephonyManager, TunnelRoutes, log_tap::LogOwner},
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -101,6 +101,7 @@ impl PeerTracker {
     audio: AudioManager,
     capabilities: CapabilitiesRegistry,
     playback_targets: PlaybackTargetStore,
+    telephony: TelephonyManager,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
     tunnel_routes: TunnelRoutes,
@@ -117,6 +118,7 @@ impl PeerTracker {
       audio,
       capabilities,
       playback_targets,
+      telephony,
       ws_routes,
       stream_routes,
       tunnel_routes,
@@ -230,6 +232,7 @@ struct PeerActor {
   audio: AudioManager,
   capabilities: CapabilitiesRegistry,
   playback_targets: PlaybackTargetStore,
+  telephony: TelephonyManager,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
   tunnel_routes: TunnelRoutes,
@@ -252,6 +255,7 @@ async fn run_actor(
   audio: AudioManager,
   capabilities: CapabilitiesRegistry,
   playback_targets: PlaybackTargetStore,
+  telephony: TelephonyManager,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
   tunnel_routes: TunnelRoutes,
@@ -265,6 +269,7 @@ async fn run_actor(
     audio,
     capabilities,
     playback_targets,
+    telephony,
     ws_routes,
     stream_routes,
     tunnel_routes,
@@ -626,17 +631,20 @@ impl PeerActor {
       if let Err(err) = self.capabilities.clear_companion(addr).await {
         tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
       }
-      if let Err(err) = self.player.reset_companion().await {
+      if let Err(err) = self.player.reset_companion(addr).await {
         tracing::warn!(?err, "failed to reset player queue state on companion disconnect");
       }
-      if let Err(err) = self.playback_targets.clear_companion().await {
+      if let Err(err) = self.playback_targets.clear_companion(addr).await {
         tracing::warn!(?err, "failed to clear playback targets on companion disconnect");
+      }
+      if let Err(err) = self.telephony.clear_companion(addr).await {
+        tracing::warn!(?err, "failed to clear companion calls on disconnect");
       }
       let drained = self.log_tap.drain_for_owner(LogOwner::Gateway(Some(addr)));
       if !drained.is_empty() {
         tracing::debug!(count = drained.len(), %addr, "drained gateway log subscriptions on companion disconnect");
       }
-      self.tear_down_net_routes().await;
+      self.tear_down_net_routes(addr).await;
     }
   }
 
@@ -678,13 +686,13 @@ impl PeerActor {
     self.broadcast_useful_link_down().await;
   }
 
-  async fn tear_down_net_routes(&self) {
+  async fn tear_down_net_routes(&self, gateway: Address) {
     use libbridgething::{
       NetError, StreamError, WsError,
       client::{BridgeToClientNetMsgEvent, NetWsClosed, NetWsErrorEvent},
     };
 
-    for (connection_id, owner) in self.ws_routes.drain_all() {
+    for (connection_id, owner) in self.ws_routes.drain_for_gateway(gateway) {
       let event = BridgeToClientNetMsgEvent::WsErrorEvent(NetWsErrorEvent {
         connection_id,
         error: WsError::GatewayDisconnected,
@@ -702,7 +710,7 @@ impl PeerActor {
       }
     }
 
-    for (stream_id, owner) in self.stream_routes.drain_all() {
+    for (stream_id, owner) in self.stream_routes.drain_for_gateway(gateway) {
       let event = BridgeToClientNetMsgEvent::StreamError(StreamError {
         stream_id,
         error: NetError::NoGateway,
@@ -712,7 +720,7 @@ impl PeerActor {
       }
     }
 
-    let tunnels = self.tunnel_routes.kill_all();
+    let tunnels = self.tunnel_routes.kill_for_gateway(gateway);
     if tunnels > 0 {
       tracing::debug!(count = tunnels, "closing SOCKS tunnels on companion disconnect");
     }

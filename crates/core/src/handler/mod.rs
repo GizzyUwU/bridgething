@@ -23,6 +23,7 @@ pub enum HandlerError {
   WS(#[from] WSError),
   #[error("state error: {0}")]
   State(#[from] StateError),
+  #[cfg(target_os = "linux")]
   #[error("bluez error: {0}")]
   Bluez(#[from] bluer::Error),
   #[error("bluetooth handler error: {0}")]

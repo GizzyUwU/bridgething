@@ -1,0 +1,410 @@
+name: bundle
+
+on:
+  repository_dispatch:
+    types:
+      - daemon-released
+      - image-released
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: which trigger to simulate
+        required: true
+        type: choice
+        options:
+          - daemon
+          - image
+      channel:
+        description: channel slug (stable | dev)
+        required: true
+        type: string
+      daemon_version:
+        description: daemon version (e.g. 0.8.4)
+        required: true
+        type: string
+      image_version:
+        description: image version (e.g. 2026.05.0)
+        required: true
+        type: string
+      force:
+        description: recompose even if this pair is already the channel latest (artifacts changed under it)
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: bridgething-ota
+      PUBLIC_BASE: https://ota.bridgething.com
+      PURGE_URLS: /tmp/purge-urls.txt
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: resolve event payload
+        id: payload
+        env:
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          MANUAL_KIND: ${{ inputs.kind }}
+          MANUAL_CHANNEL: ${{ inputs.channel }}
+          MANUAL_DAEMON: ${{ inputs.daemon_version }}
+          MANUAL_IMAGE: ${{ inputs.image_version }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            kind=$(jq -r '.kind // empty' <<<"$CLIENT_PAYLOAD")
+            channel=$(jq -r '.channel' <<<"$CLIENT_PAYLOAD")
+            daemon_version=$(jq -r '.daemon_version // empty' <<<"$CLIENT_PAYLOAD")
+            image_version=$(jq -r '.image_version // empty' <<<"$CLIENT_PAYLOAD")
+            event_type='${{ github.event.action }}'
+            case "$event_type" in
+              daemon-released) kind=daemon ;;
+              image-released)  kind=image ;;
+            esac
+          else
+            kind="$MANUAL_KIND"
+            channel="$MANUAL_CHANNEL"
+            daemon_version="$MANUAL_DAEMON"
+            image_version="$MANUAL_IMAGE"
+          fi
+
+          [[ -n "$kind" && -n "$channel" ]] || { echo "missing kind or channel" >&2; exit 1; }
+          case "$channel" in
+            dev)    variant=dev ;;
+            stable) variant=prod ;;
+            *) echo "channel must be stable | dev" >&2; exit 1 ;;
+          esac
+
+          {
+            echo "kind=$kind"
+            echo "channel=$channel"
+            echo "variant=$variant"
+            echo "daemon_version=$daemon_version"
+            echo "image_version=$image_version"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: checkout bridgething (site + daemon notes)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: checkout yocto-superbird (image notes)
+        uses: actions/checkout@v4
+        with:
+          repository: JoeyEamigh/yocto-superbird
+          path: yocto-superbird
+          fetch-depth: 0
+
+      - name: install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install the wasm toolchain the site's deps build against
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: install rclone (R2 client)
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - name: install site deps
+        working-directory: site
+        run: bun install --frozen-lockfile
+
+      - name: build the site's workspace deps
+        working-directory: site
+        run: bunx turbo run build --filter='@bridgething/site^...'
+
+      - name: resolve current channel state
+        id: state
+        env:
+          KIND: ${{ steps.payload.outputs.kind }}
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+          DAEMON_VERSION: ${{ steps.payload.outputs.daemon_version }}
+          IMAGE_VERSION: ${{ steps.payload.outputs.image_version }}
+          FORCE: ${{ inputs.force }}
+        working-directory: site
+        run: |
+          set -euo pipefail
+          scripts/r2-get manifest.json ./manifest/current.json
+          [[ -s ./manifest/current.json ]] || echo '{}' > ./manifest/current.json
+          scripts/r2-get state/bundles.yaml ./manifest/bundles.yaml
+          args=()
+          [[ "${FORCE:-false}" == "true" ]] && args+=(--force)
+          bun run scripts/resolve-state.ts \
+            --current ./manifest/current.json \
+            --channel "$CHANNEL" \
+            --kind "$KIND" \
+            --daemon-version "$DAEMON_VERSION" \
+            --image-version "$IMAGE_VERSION" \
+            --daemon-notes "${{ github.workspace }}/releases" \
+            --image-notes "${{ github.workspace }}/yocto-superbird/releases" \
+            "${args[@]}"
+
+      - name: require release notes for both halves
+        if: steps.state.outputs.released == 'true'
+        env:
+          DAEMON_VERSION: ${{ steps.state.outputs.daemon_version }}
+          IMAGE_VERSION: ${{ steps.state.outputs.image_version }}
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+        run: |
+          set -euo pipefail
+          field() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -n1 | tr -d "\"' "; }
+          check() {
+            local notes="$1/releases/$2.md" declared
+            [[ -f "$notes" ]] || { echo "missing $3 release notes: $notes" >&2; exit 1; }
+            declared=$(field "$notes" version)
+            [[ "$declared" == "$2" ]] || { echo "$notes declares '$declared', expected '$2'" >&2; exit 1; }
+          }
+          check . "$DAEMON_VERSION" daemon
+          check yocto-superbird "$IMAGE_VERSION" image
+
+          image_channel=$(field "yocto-superbird/releases/${IMAGE_VERSION}.md" channel)
+          [[ "$image_channel" == "$CHANNEL" ]] || {
+            echo "image ${IMAGE_VERSION} is a '${image_channel}' build, but this run composes '${CHANNEL}'" >&2
+            exit 1
+          }
+
+      - name: fetch the image half from R2
+        if: steps.state.outputs.released == 'true'
+        env:
+          IMAGE_VERSION: ${{ steps.state.outputs.image_version }}
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+          VARIANT: ${{ steps.payload.outputs.variant }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          zip="bridgething-${VARIANT}-image-superbird-flashthing.zip"
+          prefix="images/${CHANNEL}/${IMAGE_VERSION}"
+          rclone copy "r2:${R2_BUCKET}/${prefix}/${zip}" artifacts/ --progress
+          [[ -s "artifacts/${zip}" ]] || { echo "no image half at ${R2_BUCKET}/${prefix}/${zip}" >&2; exit 1; }
+          rclone cat "r2:${R2_BUCKET}/${prefix}/release.json" >artifacts/image-release.json 2>/dev/null || true
+          [[ -s artifacts/image-release.json ]] \
+            || echo "no image sidecar for ${CHANNEL}/${IMAGE_VERSION}; its digests stay off the bundle row"
+          ls -la artifacts/
+
+      - name: fetch the daemon half from R2
+        if: steps.state.outputs.released == 'true'
+        env:
+          DAEMON_VERSION: ${{ steps.state.outputs.daemon_version }}
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+        run: |
+          set -euo pipefail
+          prefix="daemon/${CHANNEL}/${DAEMON_VERSION}"
+          rclone copy "r2:${R2_BUCKET}/${prefix}/bridgething" artifacts/ --progress
+          [[ -s artifacts/bridgething ]] || { echo "no daemon half at ${R2_BUCKET}/${prefix}/bridgething" >&2; exit 1; }
+          chmod +x artifacts/bridgething
+          rclone cat "r2:${R2_BUCKET}/${prefix}/release.json" >artifacts/daemon-release.json 2>/dev/null || true
+          [[ -s artifacts/daemon-release.json ]] \
+            || echo "no daemon sidecar for ${CHANNEL}/${DAEMON_VERSION}; its digests stay off the bundle row"
+
+      - name: compose bundle
+        if: steps.state.outputs.released == 'true'
+        id: bundle
+        env:
+          DAEMON_VERSION: ${{ steps.state.outputs.daemon_version }}
+          IMAGE_VERSION: ${{ steps.state.outputs.image_version }}
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+          VARIANT: ${{ steps.payload.outputs.variant }}
+        working-directory: site
+        run: |
+          set -euo pipefail
+          out_zip="../artifacts/bridgething-${DAEMON_VERSION}+image.${IMAGE_VERSION}.zip"
+          bun run scripts/bundle-zip.ts \
+            --image-zip "../artifacts/bridgething-${VARIANT}-image-superbird-flashthing.zip" \
+            --daemon-bin ../artifacts/bridgething \
+            --image-version "$IMAGE_VERSION" \
+            --daemon-version "$DAEMON_VERSION" \
+            --channel "$CHANNEL" \
+            --output "$out_zip" \
+            > ../bundle-meta.json
+          echo "out_zip=$out_zip" >>"$GITHUB_OUTPUT"
+          echo "size=$(jq -r '.size' ../bundle-meta.json)" >>"$GITHUB_OUTPUT"
+          echo "sha256=$(jq -r '.sha256' ../bundle-meta.json)" >>"$GITHUB_OUTPUT"
+          echo "version=$(jq -r '.version' ../bundle-meta.json)" >>"$GITHUB_OUTPUT"
+
+      - name: upload bundle to R2
+        if: steps.state.outputs.released == 'true'
+        env:
+          OUT_ZIP: ${{ steps.bundle.outputs.out_zip }}
+        working-directory: site
+        run: scripts/r2-put "$OUT_ZIP" "r/$(basename "$OUT_ZIP")" application/zip
+
+      - name: update bundles.yaml
+        if: steps.state.outputs.released == 'true'
+        env:
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+          DAEMON_VERSION: ${{ steps.state.outputs.daemon_version }}
+          IMAGE_VERSION: ${{ steps.state.outputs.image_version }}
+          DAEMON_BUMPED: ${{ steps.state.outputs.daemon_bumped }}
+          IMAGE_BUMPED: ${{ steps.state.outputs.image_bumped }}
+          SIZE: ${{ steps.bundle.outputs.size }}
+          SHA256: ${{ steps.bundle.outputs.sha256 }}
+          OUT_ZIP: ${{ steps.bundle.outputs.out_zip }}
+        working-directory: site
+        run: |
+          set -euo pipefail
+          daemon_json=../artifacts/daemon-release.json
+          image_json=../artifacts/image-release.json
+          args=()
+
+          if [[ -s "$daemon_json" ]]; then
+            daemon_digest=$(jq -r '.artifacts.daemon // empty | "\(.size):\(.sha256)"' "$daemon_json")
+            [[ -n "$daemon_digest" ]] && args+=(--artifact "daemon=$daemon_digest")
+            zst_digest=$(jq -r '.artifacts.daemon_zst // empty | "\(.size):\(.sha256)"' "$daemon_json")
+            [[ -n "$zst_digest" ]] && args+=(--artifact "daemon_zst=$zst_digest")
+            while read -r slug version size sha; do
+              args+=(--builtin-webapp "$slug=$version" --webapp-artifact "$slug=$size:$sha")
+            done < <(jq -r '.webapps // {} | to_entries[] | "\(.key) \(.value.version) \(.value.size) \(.value.sha256)"' "$daemon_json")
+            while read -r from size sha src; do
+              if [[ -n "$src" ]]; then
+                args+=(--daemon-patch "$from=$size:$sha:$src")
+              else
+                args+=(--daemon-patch "$from=$size:$sha")
+              fi
+            done < <(jq -r '.daemon_patches // {} | to_entries[]
+                            | "\(.key) \(.value.size) \(.value.sha256) \(.value.source_sha256 // "")"' "$daemon_json")
+          fi
+
+          if [[ -s "$image_json" ]]; then
+            while read -r key digest; do
+              args+=(--artifact "$key=$digest")
+            done < <(jq -r '.artifacts // {} | to_entries[]
+                            | select(.key | startswith("image_"))
+                            | "\(.key) \(.value.size):\(.value.sha256)"' "$image_json")
+
+            ww_model=$(jq -r '.wakeword.model // empty' "$image_json")
+            ww_runtime=$(jq -r '.wakeword.runtime // empty' "$image_json")
+            if [[ -n "$ww_model" && -n "$ww_runtime" ]]; then
+              args+=(--wakeword-model "$ww_model" --wakeword-runtime "$ww_runtime")
+              while read -r model runtime; do
+                args+=(--wakeword-trained-against "$model=$runtime")
+              done < <(jq -r '.wakeword.model_trained_against // {} | to_entries[] | "\(.key) \(.value)"' "$image_json")
+              ww_digest=$(jq -r '.artifacts.wakeword.model // empty | "\(.size):\(.sha256)"' "$image_json")
+              [[ -n "$ww_digest" ]] && args+=(--wakeword-artifact "model=$ww_digest")
+            elif [[ -n "${ww_model}${ww_runtime}" ]]; then
+              echo "image sidecar declares only half a wakeword block (model='${ww_model}' runtime='${ww_runtime}')." >&2
+              echo "shipping it would leave the release with a wake word that silently never fires." >&2
+              exit 1
+            fi
+          fi
+
+          bun run scripts/update-bundles-yaml.ts \
+            --channel "$CHANNEL" \
+            --daemon-version "$DAEMON_VERSION" \
+            --image-version "$IMAGE_VERSION" \
+            --daemon-bumped "$DAEMON_BUMPED" \
+            --image-bumped "$IMAGE_BUMPED" \
+            --size "$SIZE" \
+            --sha256 "$SHA256" \
+            --url "${PUBLIC_BASE}/r/$(basename "$OUT_ZIP")" \
+            "${args[@]}"
+
+      - name: regenerate manifest.json
+        if: steps.state.outputs.released == 'true'
+        working-directory: site
+        env:
+          BRIDGETHING_REPO: ${{ github.workspace }}
+          YOCTO_SUPERBIRD_REPO: ${{ github.workspace }}/yocto-superbird
+        run: |
+          set -euo pipefail
+          bun run manifest:build
+
+      - name: upload manifest.json to R2
+        if: steps.state.outputs.released == 'true'
+        working-directory: site
+        run: |
+          set -euo pipefail
+          scripts/r2-put manifest/fixture.json manifest.json application/json \
+            "public, max-age=300, must-revalidate"
+
+      - name: publish the release state to R2
+        if: steps.state.outputs.released == 'true'
+        working-directory: site
+        env:
+          CHANNEL: ${{ steps.payload.outputs.channel }}
+          DAEMON_VERSION: ${{ steps.state.outputs.daemon_version }}
+          IMAGE_VERSION: ${{ steps.state.outputs.image_version }}
+          DAEMON_BUMPED: ${{ steps.state.outputs.daemon_bumped }}
+          IMAGE_BUMPED: ${{ steps.state.outputs.image_bumped }}
+          SIZE: ${{ steps.bundle.outputs.size }}
+          SHA256: ${{ steps.bundle.outputs.sha256 }}
+          OUT_ZIP: ${{ steps.bundle.outputs.out_zip }}
+          VERSION: ${{ steps.bundle.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          scripts/r2-put manifest/bundles.yaml state/bundles.yaml application/yaml "no-store"
+          entry=$(jq -nc \
+            --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg run "$RUN_URL" \
+            --arg channel "$CHANNEL" \
+            --arg version "$VERSION" \
+            --arg daemon "$DAEMON_VERSION" \
+            --arg image "$IMAGE_VERSION" \
+            --argjson daemon_bumped "$DAEMON_BUMPED" \
+            --argjson image_bumped "$IMAGE_BUMPED" \
+            --arg url "${PUBLIC_BASE}/r/$(basename "$OUT_ZIP")" \
+            --argjson size "$SIZE" \
+            --arg sha256 "$SHA256" \
+            '{at: $at, run: $run, channel: $channel, version: $version,
+              daemon_version: $daemon, image_version: $image,
+              daemon_bumped: $daemon_bumped, image_bumped: $image_bumped,
+              download: {url: $url, size: $size, sha256: $sha256}}')
+          scripts/r2-log state/releases.log "$entry"
+
+      - name: purge the cloudflare edge
+        if: always()
+        working-directory: site
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
+        run: scripts/cf-purge
+
+      - name: pull the companion + desktop + catalog pointers from R2
+        if: steps.state.outputs.released == 'true'
+        working-directory: site
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ota.bridgething.com/companion.json -o manifest/companion.json || \
+            echo "no companion pointer yet; the apk card will render its empty state"
+          curl -fsSL https://ota.bridgething.com/desktop/stable/desktop.json -o manifest/desktop.json || \
+            echo "no desktop pointer yet; the desktop cards will render their empty state"
+          curl -fsSL https://apps.bridgething.com/catalog.json -o apps/catalog.json || \
+            echo "no published catalog yet; the store will render its empty state"
+
+      - name: deploy site
+        if: steps.state.outputs.released == 'true'
+        working-directory: site
+        env:
+          BRIDGETHING_REPO: ${{ github.workspace }}
+          YOCTO_SUPERBIRD_REPO: ${{ github.workspace }}/yocto-superbird
+        run: |
+          set -euo pipefail
+          bun run build
+          bunx wrangler deploy

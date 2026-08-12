@@ -368,7 +368,6 @@ impl ChunkedTransferActor {
     let _ = tokio::fs::remove_file(&transfer.meta_path).await;
     let _ = ack.send(Ok(ChunkOutcome::Completed {
       path: transfer.partial_path,
-      sha256: actual_sha,
     }));
   }
 

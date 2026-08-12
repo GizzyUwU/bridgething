@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Atomically replace the daemon binary on the device, with rollback safety.
-#
-# Usage:
-#   bridgething-push-daemon <local-path>
 set -euo pipefail
 
 if [ $# -ne 1 ]; then

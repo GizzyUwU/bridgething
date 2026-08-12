@@ -1,0 +1,179 @@
+name: publish-core-node
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build every target without publishing"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-core-node
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      run: ${{ steps.plan.outputs.run }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve the version and what is already on the registry
+        id: plan
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          run=true
+
+          if [[ "$DRY_RUN" != "true" ]]; then
+            if npm view "@bridgething/core-node@${version}" version >/dev/null 2>&1; then
+              echo "@bridgething/core-node@${version} is already on the registry, skipping"
+              run=false
+            elif ! npm view @bridgething/core-node version >/dev/null 2>&1; then
+              echo "@bridgething/core-node is NOT on the registry - it and its per-platform packages" >&2
+              echo "need a manual first publish before trusted publishing can take over, skipping" >&2
+              run=false
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "run=$run"
+          } >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            target: aarch64-apple-darwin
+          - runner: macos-26
+            target: x86_64-apple-darwin
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            zigbuild: true
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            zigbuild: true
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+
+    runs-on: ${{ matrix.runner }}
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: goto-bus-stop/setup-zig@v2
+        if: matrix.zigbuild
+        with:
+          version: 0.13.0
+
+      - uses: taiki-e/install-action@v2
+        if: matrix.zigbuild
+        with:
+          tool: cargo-zigbuild
+
+      - run: bun install --frozen-lockfile
+
+      - name: build the addon
+        shell: bash
+        working-directory: crates/delivery/napi
+        run: bun napi build --platform --release --strip --esm --target ${{ matrix.target }} ${{ matrix.zigbuild && '--cross-compile' || '' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-node-${{ matrix.target }}
+          path: crates/delivery/napi/*.node
+          if-no-files-found: error
+
+  publish:
+    needs: [decide, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    env:
+      # provenance attestations are unsupported from a private repository. flip to true when published
+      NPM_CONFIG_PROVENANCE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: ensure npm supports trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm --version
+
+      - run: bun install --frozen-lockfile
+
+      - name: align the addon version with the workspace
+        working-directory: crates/delivery/napi
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq --arg version "$VERSION" '.version = $version' package.json >/tmp/core-node.package.json
+          mv /tmp/core-node.package.json package.json
+          echo "@bridgething/core-node -> ${VERSION}"
+
+      - name: create the per-platform npm dirs
+        working-directory: crates/delivery/napi
+        run: bun napi create-npm-dirs
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: crates/delivery/napi/artifacts
+
+      - name: move each addon into its platform package
+        working-directory: crates/delivery/napi
+        run: |
+          set -euo pipefail
+          bun artifacts
+          ls -R npm
+
+      - name: publish
+        working-directory: crates/delivery/napi
+        run: npm publish --access public

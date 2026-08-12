@@ -24,10 +24,4 @@ apt-get update
 apt-get install --assume-yes --no-install-recommends "${PKGS[@]}"
 rm -rf /var/lib/apt/lists/*
 
-( cd "$SWUPDATE_SRC" && "$CC" -shared -fPIC \
-    -Wl,-soname,libswupdate.so.0.1 \
-    -I include \
-    ipc/network_ipc.c ipc/network_ipc-if.c ipc/progress_ipc.c \
-    -lpthread \
-    -o "$LIBDIR/libswupdate.so.0.1" )
-ln -sf libswupdate.so.0.1 "$LIBDIR/libswupdate.so"
+"$(dirname "${BASH_SOURCE[0]}")/libswupdate-stub.sh" "$SWUPDATE_SRC" "$CC" "$LIBDIR"

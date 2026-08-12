@@ -1,36 +1,86 @@
-import { cn } from '../../lib/utils';
-import * as SwitchPrimitives from '@rn-primitives/switch';
-import { Platform } from 'react-native';
+import { useEffect } from 'react';
+import { Pressable } from 'react-native';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+
+import { usePalette } from '../../lib/theme';
+
+const TRACK_W = 44;
+const TRACK_H = 26;
+const BORDER = 1;
+const INSET = 3;
+const THUMB = TRACK_H - 2 * BORDER - 2 * INSET;
+const TRAVEL = TRACK_W - 2 * BORDER - 2 * INSET - THUMB;
+
+const SPRING = { damping: 20, stiffness: 320, mass: 0.6 };
 
 function Switch({
-  className,
-  ...props
-}: React.ComponentProps<typeof SwitchPrimitives.Root>) {
+  value,
+  onValueChange,
+  disabled,
+}: {
+  value: boolean;
+  onValueChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  const palette = usePalette();
+  const progress = useSharedValue(value ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withSpring(value ? 1 : 0, SPRING);
+  }, [progress, value]);
+
+  const trackStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      [palette.neutralSoft, palette.accentSoft],
+    ),
+    borderColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      [palette.edge, palette.accent],
+    ),
+    opacity: withTiming(disabled ? 0.4 : 1, { duration: 120 }),
+  }));
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: progress.value * TRAVEL }],
+    backgroundColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      [palette.dim, palette.accent],
+    ),
+  }));
+
   return (
-    <SwitchPrimitives.Root
-      className={cn(
-        'flex h-[1.15rem] w-8 shrink-0 flex-row items-center rounded-full border border-transparent shadow-sm shadow-black/5',
-        Platform.select({
-          web: 'focus-visible:border-ring focus-visible:ring-ring/50 peer inline-flex outline-none transition-all focus-visible:ring-[3px] disabled:cursor-not-allowed',
-        }),
-        props.checked ? 'bg-primary' : 'bg-input dark:bg-input/80',
-        props.disabled && 'opacity-50',
-        className,
-      )}
-      {...props}
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled: disabled ?? false }}
+      disabled={disabled}
+      hitSlop={8}
+      onPress={() => onValueChange(!value)}
     >
-      <SwitchPrimitives.Thumb
-        className={cn(
-          'bg-background size-4 rounded-full transition-transform',
-          Platform.select({
-            web: 'pointer-events-none block ring-0',
-          }),
-          props.checked
-            ? 'dark:bg-primary-foreground translate-x-3.5'
-            : 'dark:bg-foreground translate-x-0',
-        )}
-      />
-    </SwitchPrimitives.Root>
+      <Animated.View
+        style={[
+          {
+            width: TRACK_W,
+            height: TRACK_H,
+            borderWidth: BORDER,
+            padding: INSET,
+            justifyContent: 'center',
+          },
+          trackStyle,
+        ]}
+      >
+        <Animated.View style={[{ width: THUMB, height: THUMB }, thumbStyle]} />
+      </Animated.View>
+    </Pressable>
   );
 }
 

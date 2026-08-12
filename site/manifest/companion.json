@@ -1,0 +1,9 @@
+{
+  "android": {
+    "version": "0.7.0",
+    "url": "https://ota.bridgething.com/companion/0.7.0/bridgething-companion-0.7.0.apk",
+    "size": 50448409,
+    "sha256": "144f72ea9ce610c660a9b6520dbf9e3bbb3ad67aaff1258aad363c9fdcd25820",
+    "released_at": "2026-07-28T22:46:35Z"
+  }
+}

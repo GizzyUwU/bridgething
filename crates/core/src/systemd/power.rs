@@ -18,8 +18,8 @@ pub enum PowerError {
   #[cfg(feature = "systemd")]
   #[error("systemd dbus call failed: {0}")]
   Dbus(#[from] zbus::Error),
+  #[cfg(not(feature = "systemd"))]
   #[error("systemd cargo feature disabled; power control unavailable")]
-  #[allow(dead_code)]
   Disabled,
 }
 

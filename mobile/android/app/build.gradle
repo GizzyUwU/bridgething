@@ -69,8 +69,8 @@ android {
             ?: "com.bridgething.gateway")
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "0.8.0"
+        versionCode 9
+        versionName "0.9.0"
 
         manifestPlaceholders = [appAuthRedirectScheme: 'bridgething']
 
@@ -94,6 +94,8 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "String", "BRIDGETHING_DEV_GATEWAY",
+                "\"${System.getenv("BRIDGETHING_DEV_GATEWAY") ?: project.findProperty("BRIDGETHING_DEV_GATEWAY") ?: "ws://10.0.2.2:8892/"}\""
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -101,6 +103,7 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            buildConfigField "String", "BRIDGETHING_DEV_GATEWAY", "\"\""
         }
     }
 }
@@ -115,13 +118,6 @@ dependencies {
     }
 
     implementation project(":packages:companion:kotlin:companion")
-    implementation project(":packages:gateway:kotlin:gateway")
-    implementation project(":packages:glue:kotlin:glue")
-    implementation project(":packages:lyrics:kotlin:lyrics")
-    implementation project(":packages:spotify:kotlin:spotify")
-    implementation project(":packages:apple-music:kotlin:apple-music")
-    implementation project(":packages:nlu:kotlin:nlukit")
-    implementation project(":packages:asr:kotlin:whisper")
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "androidx.security:security-crypto:1.1.0"
     implementation "androidx.core:core:1.17.0"

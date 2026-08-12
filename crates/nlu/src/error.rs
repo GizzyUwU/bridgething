@@ -1,6 +1,6 @@
 pub type Result<T> = std::result::Result<T, NluError>;
 
-#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum NluError {
   #[error("bundle load failed: {msg}")]
   BundleLoad { msg: String },

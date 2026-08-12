@@ -1,58 +1,194 @@
-// mirror of global.css palette so react-navigation's theme can match nativewind.
-// NativeWind doesn't expose css vars to JS at runtime, so both must be kept in sync.
-//
-// charcoal:  #1B1F23 -> 210 14% 12%
-// off-white: #EFEFEF ->   0  0% 94%
-// blue:      #00A8E8 -> 199 100% 46%
-// soft-gray: #A7ADB5 -> 215  7% 68%
+import {
+  DarkTheme,
+  DefaultTheme,
+  type Theme as NavigationTheme,
+} from '@react-navigation/native';
+import { useColorScheme } from 'react-native';
 
-export const PALETTE = {
-  light: {
-    background: 'hsl(0 0% 96%)',
-    foreground: 'hsl(210 14% 12%)',
-    surface: 'hsl(0 0% 100%)',
-    surfaceForeground: 'hsl(210 14% 12%)',
-    surfaceSubtle: 'hsl(210 12% 94%)',
-    card: 'hsl(0 0% 100%)',
-    cardForeground: 'hsl(210 14% 12%)',
-    primary: 'hsl(199 100% 46%)',
-    primaryForeground: 'hsl(0 0% 100%)',
-    primarySoft: 'hsl(199 100% 94%)',
-    secondary: 'hsl(210 12% 92%)',
-    secondaryForeground: 'hsl(210 14% 14%)',
-    muted: 'hsl(210 12% 92%)',
-    mutedForeground: 'hsl(215 8% 46%)',
-    destructive: 'hsl(0 72% 50%)',
-    destructiveForeground: 'hsl(0 0% 100%)',
-    destructiveSoft: 'hsl(0 72% 96%)',
-    success: 'hsl(152 60% 38%)',
-    successForeground: 'hsl(0 0% 100%)',
-    successSoft: 'hsl(152 60% 95%)',
-    border: 'hsl(215 7% 86%)',
-    borderStrong: 'hsl(215 7% 78%)',
-  },
+import type { BoxSize, Tone } from '@bridgething/ui/tokens';
+
+export type { BoxSize, Tone };
+
+export type Scheme = 'light' | 'dark';
+
+export type Palette = {
+  bg: string;
+  screen: string;
+  fg: string;
+  muted: string;
+  accent: string;
+  ok: string;
+  err: string;
+  warn: string;
+  experimental: string;
+  rule: string;
+  ruleStrong: string;
+  edge: string;
+  dim: string;
+  soft: string;
+  near: string;
+  neutralSoft: string;
+  accentSoft: string;
+  okSoft: string;
+  errSoft: string;
+  warnSoft: string;
+  experimentalSoft: string;
+  scrim: string;
+};
+
+export const PALETTE: Record<Scheme, Palette> = {
   dark: {
-    background: 'hsl(210 14% 9%)',
-    foreground: 'hsl(0 0% 96%)',
-    surface: 'hsl(210 14% 13%)',
-    surfaceForeground: 'hsl(0 0% 96%)',
-    surfaceSubtle: 'hsl(210 14% 11%)',
-    card: 'hsl(210 14% 13%)',
-    cardForeground: 'hsl(0 0% 96%)',
-    primary: 'hsl(199 100% 56%)',
-    primaryForeground: 'hsl(210 14% 8%)',
-    primarySoft: 'hsl(199 80% 18%)',
-    secondary: 'hsl(210 12% 20%)',
-    secondaryForeground: 'hsl(0 0% 96%)',
-    muted: 'hsl(210 12% 20%)',
-    mutedForeground: 'hsl(215 7% 68%)',
-    destructive: 'hsl(0 80% 64%)',
-    destructiveForeground: 'hsl(0 0% 100%)',
-    destructiveSoft: 'hsl(0 60% 18%)',
-    success: 'hsl(152 60% 50%)',
-    successForeground: 'hsl(210 14% 8%)',
-    successSoft: 'hsl(152 50% 14%)',
-    border: 'hsl(210 14% 22%)',
-    borderStrong: 'hsl(210 14% 30%)',
+    bg: '#0a0c0e',
+    screen: '#060809',
+    fg: '#efefef',
+    muted: '#a7adb5',
+    accent: '#00a8e8',
+    ok: '#3ddc84',
+    err: '#dc3d3d',
+    warn: '#ff7070',
+    experimental: '#ffb066',
+    rule: 'rgba(239, 239, 239, 0.1)',
+    ruleStrong: 'rgba(239, 239, 239, 0.15)',
+    edge: 'rgba(239, 239, 239, 0.25)',
+    dim: 'rgba(239, 239, 239, 0.35)',
+    soft: 'rgba(239, 239, 239, 0.55)',
+    near: 'rgba(239, 239, 239, 0.8)',
+    neutralSoft: 'rgba(239, 239, 239, 0.08)',
+    accentSoft: 'rgba(0, 168, 232, 0.14)',
+    okSoft: 'rgba(61, 220, 132, 0.14)',
+    errSoft: 'rgba(220, 61, 61, 0.14)',
+    warnSoft: 'rgba(255, 112, 112, 0.14)',
+    experimentalSoft: 'rgba(255, 176, 102, 0.14)',
+    scrim: 'rgba(0, 0, 0, 0.55)',
+  },
+  light: {
+    bg: '#f2f4f6',
+    screen: '#ffffff',
+    fg: '#0a0c0e',
+    muted: '#5c6670',
+    accent: '#0072a3',
+    ok: '#106e3f',
+    err: '#b93030',
+    warn: '#a34848',
+    experimental: '#8a5210',
+    rule: 'rgba(10, 12, 14, 0.1)',
+    ruleStrong: 'rgba(10, 12, 14, 0.15)',
+    edge: 'rgba(10, 12, 14, 0.25)',
+    dim: 'rgba(10, 12, 14, 0.35)',
+    soft: 'rgba(10, 12, 14, 0.55)',
+    near: 'rgba(10, 12, 14, 0.8)',
+    neutralSoft: 'rgba(10, 12, 14, 0.06)',
+    accentSoft: 'rgba(0, 114, 163, 0.12)',
+    okSoft: 'rgba(16, 110, 63, 0.12)',
+    errSoft: 'rgba(185, 48, 48, 0.12)',
+    warnSoft: 'rgba(163, 72, 72, 0.12)',
+    experimentalSoft: 'rgba(138, 82, 16, 0.12)',
+    scrim: 'rgba(0, 0, 0, 0.55)',
   },
 };
+
+export const TYPE = {
+  eyebrow: 11,
+  hint: 12,
+  body: 14,
+  row: 15,
+  rowLg: 17,
+  title: 20,
+  hero: 22,
+  screenTitle: 34,
+} as const;
+
+export const SPACE = {
+  gutter: 16,
+  rowX: 16,
+  rowY: 12,
+  headingGap: 8,
+  section: 32,
+  screenHeader: 24,
+} as const;
+
+const EYEBROW_TRACKING = 2;
+
+export const TEXT = {
+  eyebrow: { fontSize: TYPE.eyebrow, letterSpacing: EYEBROW_TRACKING },
+  hint: { fontSize: TYPE.hint },
+  body: { fontSize: TYPE.body },
+  row: { fontSize: TYPE.row },
+  rowLg: { fontSize: TYPE.rowLg },
+  title: { fontSize: TYPE.title },
+  hero: { fontSize: TYPE.hero, lineHeight: Math.round(TYPE.hero * 1.2) },
+  screenTitle: {
+    fontSize: TYPE.screenTitle,
+    lineHeight: Math.round(TYPE.screenTitle * 1.1),
+    letterSpacing: TYPE.screenTitle * -0.03,
+  },
+} as const;
+
+export const BOX: Record<BoxSize, number> = { sm: 32, md: 44, lg: 56 };
+
+export const BOX_TEXT: Record<BoxSize, number> = {
+  sm: TYPE.body,
+  md: TYPE.rowLg,
+  lg: TYPE.title,
+};
+
+const TONE_KEY: Record<Tone, keyof Palette> = {
+  neutral: 'soft',
+  accent: 'accent',
+  ok: 'ok',
+  err: 'err',
+  warn: 'warn',
+  experimental: 'experimental',
+};
+
+const TONE_SOFT_KEY: Record<Tone, keyof Palette> = {
+  neutral: 'neutralSoft',
+  accent: 'accentSoft',
+  ok: 'okSoft',
+  err: 'errSoft',
+  warn: 'warnSoft',
+  experimental: 'experimentalSoft',
+};
+
+export function toneColor(palette: Palette, tone: Tone): string {
+  return palette[TONE_KEY[tone]];
+}
+
+export function toneSoftColor(palette: Palette, tone: Tone): string {
+  return palette[TONE_SOFT_KEY[tone]];
+}
+
+export function useScheme(): Scheme {
+  return useColorScheme() === 'dark' ? 'dark' : 'light';
+}
+
+export function usePalette(): Palette {
+  return PALETTE[useScheme()];
+}
+
+export function useToneColor(tone: Tone): string {
+  return toneColor(usePalette(), tone);
+}
+
+export const navTheme: Record<Scheme, NavigationTheme> = {
+  dark: navigationTheme('dark'),
+  light: navigationTheme('light'),
+};
+
+function navigationTheme(scheme: Scheme): NavigationTheme {
+  const palette = PALETTE[scheme];
+  const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
+  return {
+    ...base,
+    dark: scheme === 'dark',
+    colors: {
+      ...base.colors,
+      background: palette.bg,
+      card: palette.bg,
+      text: palette.fg,
+      border: palette.rule,
+      primary: palette.accent,
+      notification: palette.err,
+    },
+  };
+}

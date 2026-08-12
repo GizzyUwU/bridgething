@@ -23,32 +23,34 @@ export function Settings({ client, onClose }: { client: BridgethingClient; onClo
   const [section, setSection] = useState<Section>('bluetooth');
 
   return (
-    <div className="flex h-full w-full flex-col bg-bt-charcoal">
-      <header className="flex items-center gap-3 px-4 pt-3 pb-2">
+    <div className="flex h-full w-full flex-col bg-bg">
+      <header className="flex items-center gap-3 border-b border-rule px-4 pt-3 pb-2">
         <button
           type="button"
           onClick={onClose}
           aria-label="back to apps"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-bt-off-white transition active:scale-90">
+          className="flex size-9 items-center justify-center border border-rule text-near transition active:bg-neutral-soft">
           <BackIcon />
         </button>
-        <div className="bt-wordmark text-sm font-medium uppercase tracking-[0.25em] text-bt-soft-gray">settings</div>
+        <div className="font-mono text-eyebrow tracking-[0.25em] text-dim uppercase">settings</div>
       </header>
       <div className="flex flex-1 overflow-hidden">
-        <nav className="flex w-44 flex-col gap-1 px-3 py-2">
+        <nav className="flex w-44 shrink-0 flex-col border-r border-rule py-2">
           {SECTIONS.map(s => (
             <button
               key={s.id}
               type="button"
               onClick={() => setSection(s.id)}
-              className={`rounded-xl px-4 py-3 text-left text-sm font-medium transition active:scale-[0.98] ${
-                section === s.id ? 'bg-bt-blue/15 text-bt-blue' : 'text-bt-soft-gray active:bg-white/5'
+              className={`border-l-2 px-4 py-3 text-left font-mono text-row tracking-[0.06em] transition ${
+                section === s.id
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-transparent text-soft active:bg-neutral-soft'
               }`}>
               {s.label}
             </button>
           ))}
         </nav>
-        <main className="flex-1 overflow-y-auto px-5 py-2 pb-6">
+        <main className="flex-1 overflow-y-auto px-5 py-3 pb-6">
           {section === 'bluetooth' && <BluetoothPanel client={client} />}
           {section === 'display' && <DisplayPanel client={client} />}
           {section === 'system' && <SystemPanel client={client} />}
@@ -141,13 +143,13 @@ function BluetoothPanel({ client }: { client: BridgethingClient }) {
             value={alias}
             onChange={e => setAlias(e.target.value)}
             placeholder={aliasPlaceholder}
-            className="min-w-0 flex-1 rounded-lg bg-black/40 px-3 py-2 text-sm text-bt-off-white placeholder:text-bt-soft-gray/60 outline-none focus:ring-1 focus:ring-bt-blue"
+            className="min-w-0 flex-1 border border-edge bg-bg px-3 py-2 text-row text-off-white outline-none placeholder:text-dim focus:border-accent"
           />
           <button
             type="button"
             onClick={saveAlias}
             disabled={!alias.trim()}
-            className="rounded-lg bg-bt-blue px-4 py-2 text-sm font-medium text-bt-charcoal transition active:scale-95 disabled:bg-bt-soft-gray/20 disabled:text-bt-soft-gray">
+            className="border border-accent bg-accent px-5 py-2 font-mono text-hint text-screen transition active:opacity-80 disabled:border-rule disabled:bg-transparent disabled:text-dim">
             {aliasSaved ? 'saved' : 'save'}
           </button>
         </div>
@@ -157,8 +159,8 @@ function BluetoothPanel({ client }: { client: BridgethingClient }) {
         <button
           type="button"
           onClick={toggleDiscoverable}
-          className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
-            discoverable ? 'bg-bt-blue/20 text-bt-blue' : 'bg-white/5 text-bt-off-white'
+          className={`w-full border px-4 py-2.5 font-mono text-row transition ${
+            discoverable ? 'border-accent bg-accent-soft text-accent' : 'border-edge text-near active:bg-neutral-soft'
           }`}>
           {discoverable ? 'discoverable' : 'make discoverable'}
         </button>
@@ -166,28 +168,28 @@ function BluetoothPanel({ client }: { client: BridgethingClient }) {
 
       <Card title="paired devices">
         {devices.length === 0 ? (
-          <div className="py-2 text-sm text-bt-soft-gray">no paired devices.</div>
+          <div className="py-2 font-mono text-hint text-dim">no paired devices.</div>
         ) : (
           <div className="flex flex-col gap-2">
             {devices.map(d => (
-              <div key={d.mac} className="flex items-center gap-3 rounded-lg bg-black/30 px-3 py-2.5">
+              <div key={d.mac} className="flex items-center gap-3 border border-rule bg-bg px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-bt-off-white">{d.name || d.mac}</span>
+                    <span className="truncate text-row font-medium text-off-white">{d.name || d.mac}</span>
                     {connectedMac === d.mac && (
-                      <span className="rounded-full bg-bt-blue/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-bt-blue">
+                      <span className="border border-accent/30 bg-accent-soft px-2 py-0.5 font-mono text-eyebrow tracking-[0.12em] text-accent uppercase">
                         connected
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-bt-soft-gray">{deviceLabel(d)}</div>
+                  <div className="font-mono text-hint text-dim">{deviceLabel(d)}</div>
                 </div>
                 {connectedMac !== d.mac && (
                   <button
                     type="button"
                     onClick={() => reconnect(d.mac)}
                     disabled={busyMac === d.mac}
-                    className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-bt-off-white transition active:scale-95 disabled:opacity-50">
+                    className="border border-edge px-3 py-1.5 font-mono text-hint text-near transition active:bg-neutral-soft disabled:opacity-50">
                     reconnect
                   </button>
                 )}
@@ -195,7 +197,7 @@ function BluetoothPanel({ client }: { client: BridgethingClient }) {
                   type="button"
                   onClick={() => forget(d.mac)}
                   disabled={busyMac === d.mac}
-                  className="rounded-lg bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition active:scale-95 disabled:opacity-50">
+                  className="border border-err/40 bg-err-soft px-3 py-1.5 font-mono text-hint text-err transition active:opacity-80 disabled:opacity-50">
                   forget
                 </button>
               </div>
@@ -257,8 +259,8 @@ function DisplayPanel({ client }: { client: BridgethingClient }) {
               key={m}
               type="button"
               onClick={() => setMode(m)}
-              className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
-                mode === m ? 'bg-bt-blue/20 text-bt-blue' : 'bg-white/5 text-bt-soft-gray'
+              className={`flex-1 border px-4 py-2.5 font-mono text-row transition ${
+                mode === m ? 'border-accent bg-accent-soft text-accent' : 'border-rule text-soft active:bg-neutral-soft'
               }`}>
               {m}
             </button>
@@ -277,7 +279,7 @@ function DisplayPanel({ client }: { client: BridgethingClient }) {
             onChange={e => setLevel(Number(e.target.value))}
             onPointerUp={commitLevel}
             onTouchEnd={commitLevel}
-            className="h-2 w-full accent-bt-blue"
+            className="h-2 w-full accent-accent"
           />
         </Card>
       )}
@@ -424,22 +426,24 @@ function ConfirmAction({
   const danger = tone === 'danger';
 
   return (
-    <div className="rounded-2xl bg-black/30 p-4">
+    <div className="border border-rule bg-screen p-4">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className={`text-sm font-medium ${danger ? 'text-red-300' : 'text-bt-off-white'}`}>{label}</span>
+        <span className={`font-mono text-eyebrow tracking-[0.18em] uppercase ${danger ? 'text-err' : 'text-dim'}`}>
+          {label}
+        </span>
       </div>
-      <div className="mb-3 text-xs text-bt-soft-gray">{hint}</div>
+      <div className="mb-3 text-hint text-soft">{hint}</div>
       <button
         type="button"
         onClick={() => (armed ? onConfirm() : setArmed(true))}
-        className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
+        className={`w-full border px-4 py-2.5 font-mono text-row transition ${
           armed
             ? danger
-              ? 'bg-red-500 text-white'
-              : 'bg-bt-blue text-bt-charcoal'
+              ? 'border-err bg-err text-off-white'
+              : 'border-accent bg-accent text-screen'
             : danger
-              ? 'bg-red-500/10 text-red-300'
-              : 'bg-white/5 text-bt-off-white'
+              ? 'border-err/40 bg-err-soft text-err'
+              : 'border-edge text-near active:bg-neutral-soft'
         }`}>
         {armed ? confirmLabel : label}
       </button>
@@ -459,17 +463,17 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl bg-black/30 p-4">
+    <section className="border border-rule bg-screen p-4">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-2">
-          <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-bt-soft-gray">{title}</h2>
-          {hint && <span className="text-xs text-bt-soft-gray/70">{hint}</span>}
+          <h2 className="m-0 font-mono text-eyebrow tracking-[0.18em] text-dim uppercase">{title}</h2>
+          {hint && <span className="text-hint text-soft">{hint}</span>}
         </div>
         {action && (
           <button
             type="button"
             onClick={action.onClick}
-            className="text-xs font-medium text-bt-blue transition active:scale-95">
+            className="font-mono text-hint text-accent transition active:opacity-70">
             {action.label}
           </button>
         )}
@@ -484,8 +488,8 @@ function Rows({ rows }: { rows: [string, string | null | undefined][] }) {
     <div className="flex flex-col gap-1.5">
       {rows.map(([k, v]) => (
         <div key={k} className="flex items-baseline justify-between gap-4">
-          <span className="text-xs text-bt-soft-gray">{k}</span>
-          <span className="truncate text-right text-sm text-bt-off-white">{v ?? '...'}</span>
+          <span className="font-mono text-hint text-dim">{k}</span>
+          <span className="truncate text-right font-mono text-hint text-near">{v ?? '...'}</span>
         </div>
       ))}
     </div>
@@ -496,10 +500,10 @@ function Bar({ value, max, label }: { value: number; max: number; label: string 
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
   return (
     <div className="flex items-center gap-3">
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-bt-blue transition-[width] duration-200" style={{ width: `${pct}%` }} />
+      <div className="h-1.5 flex-1 border border-rule bg-bg">
+        <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${pct}%` }} />
       </div>
-      <span className="w-10 text-right text-xs text-bt-soft-gray">{label}</span>
+      <span className="w-12 text-right font-mono text-hint tabular-nums text-soft">{label}</span>
     </div>
   );
 }

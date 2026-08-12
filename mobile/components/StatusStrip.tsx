@@ -1,82 +1,47 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
 import { Press } from './Press';
-
-type Tone = 'good' | 'info' | 'warn';
-
-const toneStyles: Record<
-  Tone,
-  { bg: string; border: string; dot: string; text: string }
-> = {
-  good: {
-    bg: 'bg-success-soft',
-    border: 'border-success/30',
-    dot: 'bg-success',
-    text: 'text-success-soft-foreground',
-  },
-  info: {
-    bg: 'bg-secondary',
-    border: 'border-border',
-    dot: 'bg-muted-foreground',
-    text: 'text-foreground',
-  },
-  warn: {
-    bg: 'bg-warning/12',
-    border: 'border-warning/40',
-    dot: 'bg-warning',
-    text: 'text-foreground',
-  },
-};
+import { TEXT, type Tone } from '../lib/theme';
+import { TONE_BG, TONE_BORDER, TONE_DOT } from '../lib/tone';
 
 export function StatusStrip({
-  tone,
+  tone = 'neutral',
   title,
   subtitle,
-  icon: Icon,
   onPress,
 }: {
-  tone: Tone;
+  tone?: Tone;
   title: string;
   subtitle?: string;
-  icon?: LucideIcon;
   onPress?: () => void;
 }) {
-  const t = toneStyles[tone];
   const body = (
     <View
-      className={`flex-row items-center gap-3 rounded-2xl border px-4 py-3 ${t.bg} ${t.border}`}
+      className={`flex-row items-center gap-3 border px-4 py-3 ${TONE_BG[tone]} ${TONE_BORDER[tone]}`}
     >
-      <View className={`h-2 w-2 rounded-full ${t.dot}`} />
-      <View className="flex-1">
-        <Text
-          className={`text-[14px] font-semibold ${t.text}`}
-          numberOfLines={1}
-        >
+      <View className={`h-2 w-2 ${TONE_DOT[tone]}`} />
+      <View className="min-w-0 flex-1">
+        <Text className="font-sans text-fg" style={TEXT.body} numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
           <Text
-            className="mt-0.5 text-[12px] text-muted-foreground"
+            className="mt-0.5 font-sans text-muted"
+            style={TEXT.hint}
             numberOfLines={1}
           >
             {subtitle}
           </Text>
         ) : null}
       </View>
-      {Icon ? (
-        <Icon size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
-      ) : null}
       {onPress ? (
-        <ChevronRight size={16} color="hsl(215 14% 60%)" strokeWidth={2.4} />
+        <Text className="font-mono text-dim" style={TEXT.body}>
+          ›
+        </Text>
       ) : null}
     </View>
   );
 
   if (!onPress) return body;
-  return (
-    <Press onPress={onPress} fade={false} scaleTo={0.99}>
-      {body}
-    </Press>
-  );
+  return <Press onPress={onPress}>{body}</Press>;
 }

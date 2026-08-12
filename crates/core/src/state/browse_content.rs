@@ -1,16 +1,14 @@
 use std::{future::Future, num::NonZeroUsize};
 
 use libbridgething::BrowseResult;
-use lru::LruCache;
-use tokio::{
-  sync::Mutex,
-  time::{Duration, Instant},
-};
+use tokio::time::Duration;
+
+use super::cache::GenerationCache;
 
 const IMMUTABLE_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 const CATALOG_TTL: Duration = Duration::from_secs(60 * 60);
 const MUTABLE_TTL: Duration = Duration::from_secs(120);
-const MAX_ENTRIES: usize = 64;
+const MAX_ENTRIES: NonZeroUsize = NonZeroUsize::new(64).expect("nonzero cap");
 
 #[derive(Clone, Copy)]
 enum BrowseKind {
@@ -43,34 +41,22 @@ impl BrowseKind {
   }
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 struct Key {
   node_id: String,
   offset: u32,
   limit: u32,
 }
 
-struct Entry {
-  generation: Option<u64>,
-  expires_at: Instant,
-  result: BrowseResult,
-}
-
-impl Entry {
-  fn is_fresh(&self, generation: u64) -> bool {
-    Instant::now() < self.expires_at && self.generation.is_none_or(|g| g == generation)
-  }
-}
-
 #[derive(Debug)]
 pub struct BrowseContentCache {
-  inner: Mutex<LruCache<Key, Entry>>,
+  inner: GenerationCache<Key, BrowseResult>,
 }
 
 impl Default for BrowseContentCache {
   fn default() -> Self {
     Self {
-      inner: Mutex::new(LruCache::new(NonZeroUsize::new(MAX_ENTRIES).expect("nonzero cap"))),
+      inner: GenerationCache::new(MAX_ENTRIES),
     }
   }
 }
@@ -94,27 +80,10 @@ impl BrowseContentCache {
       offset,
       limit,
     };
-
-    {
-      let mut cache = self.inner.lock().await;
-      let stale = match cache.get(&key) {
-        Some(entry) if entry.is_fresh(generation) => return Ok(entry.result.clone()),
-        Some(_) => true,
-        None => false,
-      };
-      if stale {
-        cache.pop(&key);
-      }
-    }
-
-    let result = fetch().await?;
-    let entry = Entry {
-      generation: kind.gen_keyed().then_some(generation),
-      expires_at: Instant::now() + kind.ttl(),
-      result: result.clone(),
-    };
-    self.inner.lock().await.put(key, entry);
-    Ok(result)
+    self
+      .inner
+      .get_or_fetch(key, kind.gen_keyed().then_some(generation), Some(kind.ttl()), fetch)
+      .await
   }
 }
 
@@ -253,19 +222,19 @@ mod tests {
     let cache = BrowseContentCache::default();
     let calls = AtomicU32::new(0);
 
-    for i in 0..MAX_ENTRIES {
+    for i in 0..MAX_ENTRIES.get() {
       fetch_count(&cache, &format!("spotify:album:{i}"), 0, &calls).await;
     }
     assert_eq!(
       calls.load(Ordering::SeqCst),
-      MAX_ENTRIES as u32,
+      MAX_ENTRIES.get() as u32,
       "cold-fill misses every entry"
     );
 
     fetch_count(&cache, "spotify:album:0", 0, &calls).await;
     assert_eq!(
       calls.load(Ordering::SeqCst),
-      MAX_ENTRIES as u32,
+      MAX_ENTRIES.get() as u32,
       "entry 0 was still cached"
     );
     fetch_count(&cache, "spotify:album:overflow", 0, &calls).await;
@@ -273,13 +242,13 @@ mod tests {
     fetch_count(&cache, "spotify:album:0", 0, &calls).await;
     assert_eq!(
       calls.load(Ordering::SeqCst),
-      MAX_ENTRIES as u32 + 1,
+      MAX_ENTRIES.get() as u32 + 1,
       "the recently-used entry is retained"
     );
     fetch_count(&cache, "spotify:album:1", 0, &calls).await;
     assert_eq!(
       calls.load(Ordering::SeqCst),
-      MAX_ENTRIES as u32 + 2,
+      MAX_ENTRIES.get() as u32 + 2,
       "the least-recently-used entry was evicted"
     );
   }

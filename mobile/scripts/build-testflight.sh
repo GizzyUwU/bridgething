@@ -3,7 +3,7 @@ set -euo pipefail
 
 [ "$(uname -s)" = Darwin ] || { echo "testflight build requires macos" >&2; exit 1; }
 
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.." # mobile root
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 
 WORKSPACE="ios/bridgething.xcworkspace"
 SCHEME="bridgething"
@@ -66,8 +66,6 @@ if [ -z "${ASC_PRIVATE_KEY_PATH:-}" ] && [ -n "${ASC_OP_ITEM:-}" ] && command -v
   export ASC_PRIVATE_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID
 fi
 
-# xcode 26 keys compile artifacts by content hash instead of path, so unlike deriveddata the cache
-# survives the trip between ephemeral runners. off locally: it suppresses the index datastore.
 CACHE_FLAGS=()
 if [ "${XCODE_COMPILATION_CACHE:-0}" = "1" ]; then
   CACHE_FLAGS=(--xcodebuild-flag=COMPILATION_CACHE_ENABLE_CACHING=YES)
@@ -81,6 +79,9 @@ if [ -n "${ASC_PRIVATE_KEY_PATH:-}" ]; then
     --xcodebuild-flag=-authenticationKeyIssuerID --xcodebuild-flag="${ASC_ISSUER_ID:?ASC_ISSUER_ID is required alongside ASC_PRIVATE_KEY_PATH}"
   )
 fi
+
+source scripts/rn-prebuilt-markers.sh
+trap reset_rn_prebuilt_markers EXIT
 
 echo "== asc xcode archive (signed, app-store) =="
 asc xcode archive \

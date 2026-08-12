@@ -1,8 +1,11 @@
+#![cfg(feature = "chrome")]
+
 use std::time::Duration;
 
 use bridgething_test_harness::Harness;
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use futures::StreamExt;
+use libbridgething::OverlayProfile;
 use uuid::Uuid;
 
 const HOST_PROBE: &str = "!!document.querySelector('bridgething-overlay')";
@@ -16,11 +19,24 @@ fn free_port() -> u16 {
     .port()
 }
 
-async fn plant(harness: &Harness, id: Uuid, overlays: Option<&str>) {
+fn all_surfaces_off() -> OverlayProfile {
+  OverlayProfile {
+    notifications: false,
+    call: false,
+    pairing: false,
+    connection: false,
+    volume: false,
+    voice: false,
+  }
+}
+
+async fn plant(harness: &Harness, id: Uuid, overlays: Option<OverlayProfile>) {
   let dir = harness.state_dir().join("webapps").join(id.simple().to_string());
   std::fs::create_dir_all(&dir).expect("bundle dir");
   std::fs::write(dir.join("index.html"), b"<html><body><h1>app</h1></body></html>").expect("index");
-  let overlays_field = overlays.map(|o| format!(r#","overlays":{o}"#)).unwrap_or_default();
+  let overlays_field = overlays
+    .map(|o| format!(r#","overlays":{}"#, serde_json::to_string(&o).expect("overlay json")))
+    .unwrap_or_default();
   let manifest = format!(r#"{{"id":"{id}","name":"planted","version":"0.1.0"{overlays_field}}}"#);
   std::fs::write(dir.join("manifest.json"), manifest).expect("manifest");
   harness.state().webapps.rescan().await;
@@ -102,12 +118,7 @@ async fn t2_overlay_injection_follows_the_active_manifest() {
   let on_id = Uuid::now_v7();
   let off_id = Uuid::now_v7();
   plant(&harness, on_id, None).await;
-  plant(
-    &harness,
-    off_id,
-    Some(r#"{"notifications":false,"call":false,"pairing":false,"connection":false,"volume":false}"#),
-  )
-  .await;
+  plant(&harness, off_id, Some(all_surfaces_off())).await;
 
   harness.state().set_active_webapp(on_id).await.expect("activate on-app");
   assert!(

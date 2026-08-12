@@ -1,4 +1,4 @@
-import type { AppEntry, AppVersion, Catalog, RecommendedSource, SourceCatalog } from './types.ts';
+import type { AppEntry, AppVersion, Catalog, InstallCount, RecommendedSource, SourceCatalog } from './types.ts';
 import { sortNewestFirst } from './versions.ts';
 
 export type InstalledWebapp = {
@@ -16,6 +16,7 @@ export type CatalogAppListing = {
   installedVersion: string | null;
   updateAvailable: boolean;
   alsoAvailableFrom: string[];
+  installs: number;
 };
 
 export type CatalogAppUpdate = {
@@ -34,7 +35,7 @@ export function isUpgrade(candidate: string, installed: string): boolean {
   return compareVersions(candidate, installed) > 0;
 }
 
-function compareVersions(a: string, b: string): number {
+export function compareVersions(a: string, b: string): number {
   const pa = versionComponents(a);
   const pb = versionComponents(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
@@ -64,39 +65,62 @@ export function pinsFrom(installed: InstalledWebapp[]): Map<string, string> {
   return out;
 }
 
+export function versionCompatible(version: AppVersion, deviceLibVersion: string | null): boolean {
+  return deviceLibVersion === null || satisfies(deviceLibVersion, version.min_libbridgething_version);
+}
+
 export function newestCompatible(app: AppEntry, deviceLibVersion: string | null): AppVersion | null {
-  const ordered = sortNewestFirst(app.versions);
-  if (deviceLibVersion === null) return ordered[0] ?? null;
-  return ordered.find(v => satisfies(deviceLibVersion, v.min_libbridgething_version)) ?? null;
+  return sortNewestFirst(app.versions).find(v => versionCompatible(v, deviceLibVersion)) ?? null;
+}
+
+export function isListedWebapp(webapp: { role: string; source: string }): boolean {
+  return webapp.role !== 'launcher' || webapp.source === 'installed';
+}
+
+export function listedWebapps<T extends { role: string; source: string }>(list: T[]): T[] {
+  return list.filter(isListedWebapp);
+}
+
+function installsById(counts: InstallCount[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const entry of counts) {
+    const tally = Number(entry.count);
+    if (!Number.isFinite(tally) || tally <= 0) continue;
+    const id = entry.app_id.toLowerCase();
+    out.set(id, (out.get(id) ?? 0) + tally);
+  }
+  return out;
 }
 
 export function aggregate(args: {
   orderedCatalogs: SourceCatalog[];
   installed: InstalledWebapp[];
   deviceLibVersion: string | null;
+  installs?: InstallCount[];
 }): CatalogAppListing[] {
   const { orderedCatalogs, installed, deviceLibVersion } = args;
   const installedById = new Map(installed.map(i => [i.id.toLowerCase(), i]));
+  const tallies = installsById(args.installs ?? []);
   const pins = pinsFrom(installed);
 
   const offerings = new Map<string, { url: string; app: AppEntry }[]>();
   for (const { url, catalog } of orderedCatalogs) {
     for (const app of catalog.apps) {
-      const list = offerings.get(app.id);
+      const list = offerings.get(app.id.toLowerCase());
       if (list) list.push({ url, app });
-      else offerings.set(app.id, [{ url, app }]);
+      else offerings.set(app.id.toLowerCase(), [{ url, app }]);
     }
   }
 
   const listings: CatalogAppListing[] = [];
   for (const [id, offers] of offerings) {
     if (offers.length === 0) continue;
-    const pinned = pins.get(id.toLowerCase());
+    const pinned = pins.get(id);
     const primary = offers.find(o => o.url === pinned) ?? offers[0]!;
     const alsoAvailableFrom = offers.filter(o => o.url !== primary.url).map(o => o.url);
 
     const newest = newestCompatible(primary.app, deviceLibVersion);
-    const installedVersion = installedById.get(id.toLowerCase())?.version ?? null;
+    const installedVersion = installedById.get(id)?.version ?? null;
 
     listings.push({
       app: primary.app,
@@ -105,10 +129,13 @@ export function aggregate(args: {
       installedVersion,
       updateAvailable: installedVersion !== null && newest !== null && isUpgrade(newest.version, installedVersion),
       alsoAvailableFrom,
+      installs: tallies.get(id) ?? 0,
     });
   }
 
-  return listings.sort((a, b) => a.app.name.localeCompare(b.app.name) || a.app.id.localeCompare(b.app.id));
+  return listings.sort(
+    (a, b) => b.installs - a.installs || a.app.name.localeCompare(b.app.name) || a.app.id.localeCompare(b.app.id),
+  );
 }
 
 export function updates(args: {

@@ -6,8 +6,10 @@ import {
   type BridgethingProviderInfo,
   type BridgethingSessionPeer,
   type BridgethingVoiceModelState,
+  type BridgethingVoiceTurn,
 } from '@bridgething/session-react-native';
-import { Alert, Platform } from 'react-native';
+import { describeError } from '@bridgething/ui/errors';
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -20,6 +22,7 @@ import {
 import { startDiagnostics } from './diagnostics';
 import { registerOtaDomain } from './ota';
 import { requestBluetoothConnect } from './permissions';
+import type { Tone } from './theme';
 import { registerWebappsDomain } from './webapps';
 import {
   DEFAULT_CAPABILITY_FLAGS,
@@ -48,6 +51,7 @@ export type SessionState = {
   ledger: Record<string, DeviceLedgerEntry>;
   capabilityFlags: typeof DEFAULT_CAPABILITY_FLAGS;
   voiceModel: BridgethingVoiceModelState;
+  lastVoiceTurn: BridgethingVoiceTurn | null;
   otaPollConfig: typeof DEFAULT_OTA_POLL_CONFIG | null;
 };
 
@@ -71,6 +75,7 @@ const initial: SessionState = {
   ledger: getLedger(),
   capabilityFlags: { ...DEFAULT_CAPABILITY_FLAGS },
   voiceModel: VOICE_MODEL_ABSENT,
+  lastVoiceTurn: null,
   otaPollConfig: null,
 };
 
@@ -122,6 +127,9 @@ export function registerSessionDomain(): void {
           return;
         case 'voiceModelStateChanged':
           set({ voiceModel: event.state });
+          return;
+        case 'voiceTurnChanged':
+          set({ lastVoiceTurn: event.turn });
           return;
         case 'deviceMetaChanged':
           set(s => ({
@@ -216,11 +224,30 @@ export async function updateCapabilityFlags(
   await getSession().setCapabilityFlags(flags);
 }
 
+export async function downloadVoiceModel(): Promise<void> {
+  await getSession().downloadVoiceModel();
+}
+
 export async function updateOtaPollConfig(
   config: typeof DEFAULT_OTA_POLL_CONFIG | null,
 ): Promise<void> {
   useSessionStore.setState({ otaPollConfig: config });
   await getSession().setOtaPollConfig(config);
+}
+
+export async function patchOtaPollConfig(
+  partial: Partial<typeof DEFAULT_OTA_POLL_CONFIG>,
+): Promise<void> {
+  const held = useSessionStore.getState().otaPollConfig;
+  await updateOtaPollConfig({
+    intervalSeconds:
+      partial.intervalSeconds ??
+      held?.intervalSeconds ??
+      DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
+    autoPush:
+      partial.autoPush ?? held?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush,
+    rootUrl: 'rootUrl' in partial ? partial.rootUrl : held?.rootUrl,
+  });
 }
 
 export async function setDeviceName(
@@ -237,15 +264,31 @@ export function forgetKnownDevice(deviceId: string): void {
   useSessionStore.setState({ ledger: persistForget(deviceId) });
 }
 
-export async function presentPairWithGuidance(): Promise<boolean> {
+export type PairAction = { kind: 'openSettings'; label: string };
+
+export type PairNotice = {
+  tone: Tone;
+  title: string;
+  body: string;
+  action?: PairAction;
+};
+
+export type PairPickerResult = { picked: boolean; notice: PairNotice | null };
+
+export function describePairPickerDismissed(): PairNotice | null {
+  if (Platform.OS !== 'ios') return null;
+  return {
+    tone: 'warn',
+    title: 'pairing did not finish',
+    body: 'if this car thing was paired to this phone before, forget it under settings > bluetooth, then pair again.',
+    action: { kind: 'openSettings', label: 'open settings' },
+  };
+}
+
+export async function presentPairWithGuidance(): Promise<PairPickerResult> {
   const picked = await getSession().presentPairPicker();
-  if (picked == null && Platform.OS === 'ios') {
-    Alert.alert(
-      'pairing did not finish',
-      `if your Car Thing was paired to this phone before, forget it first: open Settings > Bluetooth, tap your Car Thing, choose "Forget This Device", then pair again.`,
-    );
-  }
-  return picked != null;
+  if (picked != null) return { picked: true, notice: null };
+  return { picked: false, notice: describePairPickerDismissed() };
 }
 
 export type PairOutcome =
@@ -269,7 +312,7 @@ export async function runPairFlow(): Promise<PairOutcome> {
         ? { kind: 'connected' }
         : { kind: 'timeout' };
     }
-    if (!(await presentPairWithGuidance())) return { kind: 'cancelled' };
+    if (!(await presentPairWithGuidance()).picked) return { kind: 'cancelled' };
     if (!(await waitForPeer(20000))) return { kind: 'timeout' };
     const paired = useSessionStore
       .getState()
@@ -291,41 +334,44 @@ export async function runPairFlow(): Promise<PairOutcome> {
   }
 }
 
-export function alertPairOutcome(outcome: PairOutcome): void {
+export function describePairOutcome(outcome: PairOutcome): PairNotice | null {
   switch (outcome.kind) {
     case 'permissionDenied':
-      Alert.alert(
-        'bluetooth permission needed',
-        'bridgething needs Bluetooth access to connect to your Car Thing. enable it in settings, then try pairing again.',
-      );
-      return;
+      return {
+        tone: 'warn',
+        title: 'bluetooth permission needed',
+        body: 'bridgething reaches your car thing over bluetooth. allow it in settings, then pair again.',
+        action: { kind: 'openSettings', label: 'open settings' },
+      };
     case 'pairingFailed':
-      Alert.alert(
-        'pairing failed',
-        'your Car Thing did not finish pairing. make sure it is powered on and nearby, then try again.',
-      );
-      return;
+      return {
+        tone: 'err',
+        title: 'pairing failed',
+        body: 'your car thing did not finish pairing. make sure it is powered on and nearby, then try again.',
+      };
     case 'timeout':
-      Alert.alert(
-        Platform.OS === 'android' ? 'still connecting' : 'could not connect',
-        Platform.OS === 'android'
-          ? 'your Car Thing paired but has not connected yet. make sure it is on and nearby - it can take a few seconds.'
-          : 'pairing finished but your Car Thing did not connect. make sure it is powered on and nearby, then try again.',
-      );
-      return;
+      return {
+        tone: 'warn',
+        title: 'not connected yet',
+        body: 'pairing finished but your car thing has not connected. make sure it is powered on and nearby, then try again.',
+      };
     case 'notificationsFailed':
-      Alert.alert(
-        'notifications setup failed',
-        outcome.message ??
-          'pairing worked, but enabling notifications did not.',
-      );
-      return;
+      return {
+        tone: 'warn',
+        title: 'notifications not set up',
+        body: outcome.message
+          ? describeError(outcome.message)
+          : 'pairing worked, but turning on notifications did not.',
+      };
     case 'error':
-      Alert.alert('pairing failed', outcome.message);
-      return;
+      return {
+        tone: 'err',
+        title: 'pairing failed',
+        body: describeError(outcome.message),
+      };
     case 'connected':
     case 'cancelled':
-      return;
+      return null;
   }
 }
 
@@ -352,6 +398,26 @@ export function connectedPeers(
   peers: BridgethingSessionPeer[],
 ): BridgethingSessionPeer[] {
   return peers.filter(p => p.status === 'connected');
+}
+
+export type VoiceIntroState = 'waiting' | 'listening' | 'heard' | 'missed';
+
+const INERT_INTENTS = ['NO_INTENT', 'CLARIFY'];
+
+export function voiceIntroState(
+  turn: BridgethingVoiceTurn | null,
+): VoiceIntroState {
+  if (turn == null || turn.trigger !== 'wakeWord') return 'waiting';
+  switch (turn.phase) {
+    case 'listening':
+      return 'listening';
+    case 'cancelled':
+      return 'missed';
+    case 'resolved':
+      return turn.intent != null && !INERT_INTENTS.includes(turn.intent)
+        ? 'heard'
+        : 'missed';
+  }
 }
 
 export function peerDisplayName(
@@ -406,6 +472,14 @@ export function knownDevices(
 
 export function useSession<T>(selector: (state: SessionState) => T): T {
   return useSessionStore(useShallow(selector));
+}
+
+export function usePeer(
+  deviceId: string | null,
+): BridgethingSessionPeer | null {
+  return useSession(s =>
+    deviceId ? (s.peers.find(p => p.id === deviceId) ?? null) : null,
+  );
 }
 
 function omit<T extends object>(obj: T, key: keyof T | string): T {

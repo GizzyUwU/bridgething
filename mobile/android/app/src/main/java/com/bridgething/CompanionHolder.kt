@@ -3,25 +3,21 @@ package com.bridgething
 import android.app.Activity
 import android.app.Application
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
 import android.content.ComponentName
-import android.util.Log
 import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
-import com.bridgething.companion.AndroidMediaSessionGateway
-import com.bridgething.companion.AndroidNotificationBackend
-import com.bridgething.companion.AndroidPhoneBackend
+import android.util.Log
 import com.bridgething.companion.BridgethingCompanion
-import com.bridgething.companion.CompanionCapabilityFlags
-import com.bridgething.companion.HostInfo
-import com.bridgething.gateway.BluetoothSocketAdapter
+import com.bridgething.companion.shell.BtLinkTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import uniffi.bridgething_companion.HostInfo
+import uniffi.bridgething_companion.SessionEvent
 
 public object CompanionHolder {
     private const val TAG = "BridgethingBT"
@@ -33,8 +29,11 @@ public object CompanionHolder {
         private set
 
     @Volatile
-    public var adapter: BluetoothSocketAdapter? = null
+    public var transport: BtLinkTransport? = null
         private set
+
+    @Volatile
+    public var eventSink: ((SessionEvent) -> Unit)? = null
 
     @Volatile
     public var foreground: Boolean = false
@@ -54,45 +53,31 @@ public object CompanionHolder {
         companion?.let { return it }
         val appCtx = context.applicationContext
         BondWatcher.register(appCtx)
-        val transport = BluetoothSocketAdapter(
-            bluetooth = (appCtx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter,
-        )
-        val notificationBackend = AndroidNotificationBackend(
-            resolveAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
-        )
-        val voiceNlu = VoiceModels.inference(appCtx)
         val c = BridgethingCompanion(
             context = appCtx,
-            adapter = transport,
-            lyricsResolver = HybridBridgethingSessionImpl.lyricsResolver,
             host = makeHostInfo(appCtx),
-            capabilities = CompanionCapabilityFlags(),
-            notifications = notificationBackend,
-            phone = AndroidPhoneBackend(appCtx),
-            mediaSessions = AndroidMediaSessionGateway(
-                appCtx,
-                ComponentName(appCtx, BridgethingNotificationListener::class.java),
-            ),
-            voiceRecognizer = VoiceModels.recognizer(appCtx),
-            nlu = voiceNlu?.client,
-            nluRejection = voiceNlu?.rejection,
+            capabilities = toCoreCapabilityFlags(HybridBridgethingSessionImpl.capabilityFlags(appCtx)),
+            resolveNotificationAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
+            notificationListener = ComponentName(appCtx, BridgethingNotificationListener::class.java),
+            spotify = HybridBridgethingSessionImpl.spotifyConfig,
+            events = { event -> eventSink?.invoke(event) },
         )
         c.start()
         companion = c
-        adapter = transport
+        transport = c.transport
         NotificationBridgeRegistry.companion = c
-        NotificationBridgeRegistry.backend = notificationBackend
+        NotificationBridgeRegistry.backend = c.notifications
         reconnectAssociated(appCtx)
         c
     }
 
     public fun reconnectAssociated(context: Context) {
-        val transport = adapter
-        if (transport == null) {
-            Log.w(TAG, "reconnectAssociated: no adapter yet")
+        val link = transport
+        if (link == null) {
+            Log.w(TAG, "reconnectAssociated: no transport yet")
             return
         }
-        val ba = (context.applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        val ba = (context.applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter
         if (ba == null) {
             Log.w(TAG, "reconnectAssociated: bluetooth adapter unavailable")
             return
@@ -112,26 +97,26 @@ public object CompanionHolder {
             }
             Log.i(TAG, "reconnectAssociated: connecting $mac")
             scope.launch {
-                runCatching { transport.connect(device) }
+                runCatching { link.connect(device) }
                     .onFailure { Log.w(TAG, "reconnectAssociated: connect($mac) failed: ${it.message}") }
             }
         }
     }
 
     public suspend fun connectBonded(context: Context, device: BluetoothDevice) {
-        if (adapter == null) runCatching { ensureStarted(context) }
-        val transport = adapter ?: run {
-            Log.w(TAG, "connectBonded: no adapter for ${device.address}")
+        if (transport == null) runCatching { ensureStarted(context) }
+        val link = transport ?: run {
+            Log.w(TAG, "connectBonded: no transport for ${device.address}")
             return
         }
         Log.i(TAG, "connectBonded: ${device.address} bonded, connecting")
-        runCatching { transport.connect(device) }
+        runCatching { link.connect(device) }
             .onFailure { Log.w(TAG, "connectBonded: connect(${device.address}) failed: ${it.message}") }
     }
 
     public suspend fun forgetDevice(mac: String) {
-        val transport = adapter ?: return
-        runCatching { transport.forget(mac.uppercase()) }
+        val link = transport ?: return
+        runCatching { link.forget(mac.uppercase()) }
             .onFailure { Log.w(TAG, "forgetDevice($mac) failed: ${it.message}") }
     }
 
@@ -170,12 +155,8 @@ public object CompanionHolder {
     }
 
     @Suppress("HardwareIds")
-    internal fun makeHostInfo(context: Context): HostInfo = HostInfo(
-        appName = HybridBridgethingSessionImpl.hostInfo.appName,
-        appVersion = HybridBridgethingSessionImpl.hostInfo.appVersion,
-        osName = "Android",
+    internal fun makeHostInfo(context: Context): HostInfo = HybridBridgethingSessionImpl.hostInfo.copy(
         osVersion = android.os.Build.VERSION.RELEASE ?: "",
-        address = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "",
-        adapterVersion = "rfcomm",
+        hostIdentifier = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "",
     )
 }

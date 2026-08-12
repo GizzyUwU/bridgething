@@ -16,10 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use typeshare::typeshare;
 use uuid::Uuid;
 
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "UPPERCASE")]
 #[ts(export, export_to = "shared.ts")]
@@ -35,7 +33,6 @@ pub enum HttpMethod {
 
 /// One header on an HTTP request or response. Key order is preserved
 /// across serialize/deserialize.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -44,7 +41,6 @@ pub struct HttpHeader {
   pub value: String,
 }
 
-#[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -58,7 +54,6 @@ pub enum RedirectPolicy {
   Error,
 }
 
-#[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -75,7 +70,6 @@ pub struct NetFetchRequest {
   pub redirect: RedirectPolicy,
 }
 
-#[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -93,14 +87,12 @@ pub struct NetFetchResponse {
 /// and (when known) total payload size so the consumer can preallocate
 /// or display progress. Subsequent `StreamChunk` and `StreamEnd` events
 /// for the same `stream_id` follow.
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct StreamBegin {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub status: u16,
   pub headers: Vec<HttpHeader>,
@@ -109,14 +101,12 @@ pub struct StreamBegin {
 
 /// One body chunk. Chunks arrive in order; `offset` is the byte
 /// position of `bytes[0]` within the full body.
-#[typeshare]
 #[serde_with::serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct StreamChunk {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub offset: u32,
   #[serde_as(as = "serde_with::Bytes")]
@@ -126,31 +116,26 @@ pub struct StreamChunk {
 
 /// Terminates a stream. After `End` no further chunks for `stream_id`
 /// are valid and the daemon clears its routing entry.
-#[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct StreamEnd {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
 }
 
 /// Stream failed mid-flight (or before the first byte). Terminal - the
 /// daemon clears its routing entry. The `error` shape is shared with
 /// `fetch` since the failure modes are identical.
-#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct StreamError {
   #[ts(type = "string")]
-  #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub error: NetError,
 }
 
-#[typeshare]
 #[serde_with::serde_as]
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -178,7 +163,6 @@ impl std::fmt::Debug for WsFrame {
   }
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -190,7 +174,6 @@ pub enum WsError {
   ProtocolError { reason: String },
 }
 
-#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]

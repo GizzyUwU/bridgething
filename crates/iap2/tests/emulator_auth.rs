@@ -1,11 +1,11 @@
 #![cfg(feature = "emulator")]
 
-mod emu;
-
 use std::time::Duration;
 
-use bridgething_iap2::SessionEvent;
-use emu::recv_with_timeout;
+use bridgething_iap2::{
+  SessionEvent,
+  emulator::harness::{self as emu, recv_with_timeout},
+};
 
 #[tokio::test]
 async fn emulator_drives_accessory_to_identified() {

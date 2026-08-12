@@ -9,7 +9,9 @@ export const storage = createMMKV({ id: 'bridgething' });
 
 const KEY = {
   setupCompleted: 'setup.completed',
-  ledger: 'device.ledger', // JSON { [deviceId]: DeviceLedgerEntry }
+  voiceIntroSettled: 'setup.voiceIntro',
+  ledger: 'device.ledger',
+  nativeTabs: 'ui.nativeTabs',
 } as const;
 
 export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
@@ -21,9 +23,12 @@ export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
   voiceModel: true,
 };
 
+export const DEFAULT_OTA_ROOT_URL = 'https://ota.bridgething.com';
+
 export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
   intervalSeconds: 3600,
   autoPush: true,
+  rootUrl: DEFAULT_OTA_ROOT_URL,
 };
 
 export function getSetupCompleted(): boolean {
@@ -32,6 +37,25 @@ export function getSetupCompleted(): boolean {
 
 export function setSetupCompleted(value: boolean): void {
   storage.set(KEY.setupCompleted, value);
+}
+
+export function getNativeTabs(): boolean {
+  return storage.getBoolean(KEY.nativeTabs) ?? false;
+}
+
+export function setNativeTabs(value: boolean): void {
+  storage.set(KEY.nativeTabs, value);
+}
+
+export type VoiceIntroOutcome = 'heard' | 'skipped';
+
+export function getVoiceIntroOutcome(): VoiceIntroOutcome | null {
+  const held = storage.getString(KEY.voiceIntroSettled);
+  return held === 'heard' || held === 'skipped' ? held : null;
+}
+
+export function setVoiceIntroOutcome(outcome: VoiceIntroOutcome): void {
+  storage.set(KEY.voiceIntroSettled, outcome);
 }
 
 export type DeviceLedgerEntry = {
