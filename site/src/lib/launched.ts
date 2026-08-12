@@ -1,1 +1,1 @@
-export const LAUNCHED = process.env['BRIDGETHING_LAUNCHED'] === '1';
+export const LAUNCHED = true;
