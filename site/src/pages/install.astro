@@ -194,8 +194,7 @@ const defaultChannel = channels.find(channel => channel.default)?.slug;
       </SchematicSection>
 
       <SchematicSection refdes="u4 - already running bridgething">
-        <p class="m-0 mb-8 max-w-[60ch] text-lg text-pretty text-white/70">how to get the latest goodies</p>
-
+        <p class="m-0 mb-8 max-w-[60ch] text-lg text-pretty text-white/70">how to get the latest features</p>
         <div>
           <InstallRoute
             name="the companion app"
@@ -204,18 +203,12 @@ const defaultChannel = channels.find(channel => channel.default)?.slug;
             status="ready"
           />
           <InstallRoute
-            name="over the cable, from this browser"
+            name="over the cable, from your browser"
             detail="plug the thing in and update it straight from here. much faster than bluetooth."
             note="chromium only, and it asks for local network access the first time."
             status="ready"
             href="/install/update"
             cta="open updater"
-          />
-          <InstallRoute
-            name="updater cli"
-            detail="same as above but in the terminal."
-            status="ready"
-            command="bunx @bridgething/updater"
           />
         </div>
       </SchematicSection>
