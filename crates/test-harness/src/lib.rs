@@ -254,6 +254,15 @@ impl FrameObserver {
   }
 }
 
+pub fn extract_substring_starting_with(haystack: &str, prefix: &str) -> Option<String> {
+  let start = haystack.find(prefix)?;
+  let tail = &haystack[start..];
+  let end = tail
+    .find(|c: char| c == '"' || c == '\\' || c.is_whitespace())
+    .unwrap_or(tail.len());
+  Some(tail[..end].to_string())
+}
+
 pub struct Iap2OutboundObserver {
   rx: broadcast::Receiver<Iap2TransportCommand>,
 }

@@ -422,7 +422,7 @@ export type MediaItem = {
  * per-platform identifier (iAP2 sends u64; we hex-encode it on the
  * wire). `artwork_id` is an opaque asset id - webapps pass this value
  * to `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace
- * is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
+ * is producer-defined: iAP2 emits `iap2/art/<track_key>/<content_hash>`, the
  * companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
  * Webapps treat the value as opaque.
  */

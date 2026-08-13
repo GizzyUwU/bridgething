@@ -72,6 +72,8 @@ impl Projection {
 #[derive(Debug, Clone, Default)]
 pub struct Model {
   last_pid_hex: Option<String>,
+  last_title: Option<String>,
+  last_app_bundle: Option<String>,
   pending_art: Option<(u8, String)>,
   assets: HashSet<String>,
 
@@ -117,7 +119,7 @@ impl Model {
   pub fn apply(&mut self, event: &ModelEvent) {
     match event {
       ModelEvent::Iap2NowPlaying(update) => self.apply_iap2_now_playing(update),
-      ModelEvent::Iap2Artwork { transfer_id, .. } => self.apply_iap2_artwork(*transfer_id),
+      ModelEvent::Iap2Artwork { transfer_id, bytes_len } => self.apply_iap2_artwork(*transfer_id, *bytes_len),
       ModelEvent::CompanionSnapshot(snapshot) => self.apply_companion_snapshot(snapshot),
       ModelEvent::AuthorityClaim(scope) => {
         self.authority.insert(*scope);
@@ -184,37 +186,60 @@ impl Model {
   }
 
   fn apply_iap2_now_playing(&mut self, update: &Iap2NowPlaying) {
-    let pid_hex = match delta_track_key(update.media_item.as_ref(), self.last_pid_hex.as_deref()) {
-      Some(key) => {
-        if self.last_pid_hex.as_deref() != Some(&key) {
-          self.pending_art = None;
+    if let Some(bundle) = update
+      .playback
+      .as_ref()
+      .and_then(|p| p.app_bundle.as_deref())
+      .filter(|b| !b.is_empty())
+    {
+      if self.last_app_bundle.as_deref().is_some_and(|held| held != bundle) {
+        self.last_pid_hex = None;
+        self.last_title = None;
+      }
+      self.last_app_bundle = Some(bundle.to_string());
+    }
+    let pid_hex = match track_delta(
+      update.media_item.as_ref(),
+      self.last_pid_hex.as_deref(),
+      self.last_title.as_deref(),
+    ) {
+      TrackDelta::Unchanged => self.last_pid_hex.clone(),
+      TrackDelta::Idle => Some(IDLE_PID_HEX.to_string()),
+      TrackDelta::Same { title } => {
+        if title.is_some() {
+          self.last_title = title;
         }
+        self.last_pid_hex.clone()
+      }
+      TrackDelta::Change { key, title } => {
+        self.pending_art = None;
         self.last_pid_hex = Some(key.clone());
+        self.last_title = title;
         Some(key)
       }
-      None => self.last_pid_hex.clone(),
     };
 
     if let Some(hex) = pid_hex.as_deref()
       && hex != IDLE_PID_HEX
       && let Some(transfer_id) = update.media_item.as_ref().and_then(|m| m.artwork_id)
     {
-      self.pending_art = Some((transfer_id, format!("iap2/art/{hex}/{transfer_id}")));
+      self.pending_art = Some((transfer_id, hex.to_string()));
     }
 
     let lib_update = translate_now_playing(update, pid_hex.as_deref());
     self.player_apply_now_playing(lib_update);
   }
 
-  fn apply_iap2_artwork(&mut self, transfer_id: u8) {
-    let asset_id = match &self.pending_art {
-      Some((tid, asset_id)) if *tid == transfer_id => {
-        let asset_id = asset_id.clone();
+  fn apply_iap2_artwork(&mut self, transfer_id: u8, bytes_len: usize) {
+    let track_key = match &self.pending_art {
+      Some((tid, track_key)) if *tid == transfer_id => {
+        let track_key = track_key.clone();
         self.pending_art = None;
-        asset_id
+        track_key
       }
       _ => return,
     };
+    let asset_id = iap2_art_asset_id(&track_key, &vec![0u8; bytes_len]);
     self.assets.insert(asset_id.clone());
     self.player_apply_artwork_id(asset_id);
   }
@@ -477,16 +502,57 @@ fn translate_now_playing(
   )
 }
 
-fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
-  let media = media?;
+#[derive(Debug, PartialEq)]
+enum TrackDelta {
+  Unchanged,
+  Idle,
+  Same { title: Option<String> },
+  Change { key: String, title: Option<String> },
+}
+
+fn track_delta(
+  media: Option<&MediaItemAttributes>,
+  current_key: Option<&str>,
+  current_title: Option<&str>,
+) -> TrackDelta {
+  let Some(media) = media else {
+    return TrackDelta::Unchanged;
+  };
   let title = media.title.as_deref().filter(|t| !t.is_empty());
-  match media.persistent_id {
-    Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
-    _ if title.is_some() && current.is_some_and(is_real_pid_key) => current.map(str::to_string),
-    _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
-    Some(0) => Some(IDLE_PID_HEX.to_string()),
-    _ => None,
+  match (media.persistent_id, title) {
+    (Some(pid), _) if pid != 0 => {
+      let key = format!("{pid:016x}");
+      let title = title.map(str::to_string);
+      if current_key == Some(key.as_str()) {
+        TrackDelta::Same { title }
+      } else {
+        TrackDelta::Change { key, title }
+      }
+    }
+    (pid, Some(t)) => {
+      if current_title == Some(t) {
+        TrackDelta::Same { title: None }
+      } else if pid.is_none() && current_key.is_some_and(is_real_pid_key) && current_title.is_none() {
+        TrackDelta::Same {
+          title: Some(t.to_string()),
+        }
+      } else {
+        TrackDelta::Change {
+          key: nonmusic_key(t, media.artist.as_deref()),
+          title: Some(t.to_string()),
+        }
+      }
+    }
+    (Some(0), None) => TrackDelta::Idle,
+    _ => TrackDelta::Unchanged,
   }
+}
+
+fn iap2_art_asset_id(track_key: &str, bytes: &[u8]) -> String {
+  use std::hash::{DefaultHasher, Hash, Hasher};
+  let mut hasher = DefaultHasher::new();
+  bytes.hash(&mut hasher);
+  format!("iap2/art/{track_key}/{:016x}", hasher.finish())
 }
 
 fn is_real_pid_key(key: &str) -> bool {

@@ -90,8 +90,8 @@ export type AssetCleared = { id: string };
  */
 export type AssetGet = {
   /**
-   * Opaque asset id, e.g. `iap2/art/<persistent-hex>/<n>` for iAP2 art or a
-   * companion-defined shape like `spotify/img/<id>`.
+   * Opaque asset id, e.g. `iap2/art/<track-key>/<content-hash>` for iAP2 art
+   * or a companion-defined shape like `spotify/img/<id>`.
    */
   id: string;
   /**

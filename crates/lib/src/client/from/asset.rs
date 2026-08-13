@@ -18,8 +18,8 @@ use uuid::Uuid;
   error_variant = NotFound,
 )]
 pub struct AssetGet {
-  /// Opaque asset id, e.g. `iap2/art/<persistent-hex>/<n>` for iAP2 art or a
-  /// companion-defined shape like `spotify/img/<id>`.
+  /// Opaque asset id, e.g. `iap2/art/<track-key>/<content-hash>` for iAP2 art
+  /// or a companion-defined shape like `spotify/img/<id>`.
   pub id: String,
   /// Correlates the `Got` or `NotFound` reply back to this request.
   #[ts(type = "string")]

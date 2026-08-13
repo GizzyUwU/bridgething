@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "surfaces": [
     {
       "name": "asset",
@@ -1184,7 +1184,7 @@
         {
           "name": "id",
           "type": "string",
-          "description": "Opaque asset id, e.g. `iap2/art/<persistent-hex>/<n>` for iAP2 art or a\ncompanion-defined shape like `spotify/img/<id>`."
+          "description": "Opaque asset id, e.g. `iap2/art/<track-key>/<content-hash>` for iAP2 art\nor a companion-defined shape like `spotify/img/<id>`."
         },
         {
           "name": "requestId",
@@ -3119,7 +3119,7 @@
     },
     "MediaItemUpdate": {
       "kind": "struct",
-      "description": "Per-track attributes that vary per song. `persistent_id` is a stable\nper-platform identifier (iAP2 sends u64; we hex-encode it on the\nwire). `artwork_id` is an opaque asset id - webapps pass this value\nto `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace\nis producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the\ncompanion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).\nWebapps treat the value as opaque.",
+      "description": "Per-track attributes that vary per song. `persistent_id` is a stable\nper-platform identifier (iAP2 sends u64; we hex-encode it on the\nwire). `artwork_id` is an opaque asset id - webapps pass this value\nto `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace\nis producer-defined: iAP2 emits `iap2/art/<track_key>/<content_hash>`, the\ncompanion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).\nWebapps treat the value as opaque.",
       "fields": [
         {
           "name": "persistentId",
