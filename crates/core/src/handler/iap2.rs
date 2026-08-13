@@ -32,6 +32,8 @@ const NONMUSIC_PREFIX: &str = "nonmusic-";
 #[derive(Debug, Default, Clone)]
 struct NowPlayingCheckpoint {
   track_pid_hex: Option<String>,
+  track_title: Option<String>,
+  app_bundle: Option<String>,
 }
 
 type NowPlayingCheckpointMap = Mutex<HashMap<Address, NowPlayingCheckpoint>>;
@@ -39,7 +41,7 @@ type NowPlayingCheckpointMap = Mutex<HashMap<Address, NowPlayingCheckpoint>>;
 #[derive(Debug, Clone)]
 struct PendingArtEntry {
   transfer_id: u8,
-  asset_id: String,
+  track_key: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -52,18 +54,18 @@ impl Iap2PendingArt {
     Self::default()
   }
 
-  async fn mark(&self, address: Address, transfer_id: u8, asset_id: String) {
+  async fn mark(&self, address: Address, transfer_id: u8, track_key: String) {
     self
       .inner
       .lock()
       .await
-      .insert(address, PendingArtEntry { transfer_id, asset_id });
+      .insert(address, PendingArtEntry { transfer_id, track_key });
   }
 
   async fn take_if_matches(&self, address: Address, transfer_id: u8) -> Option<String> {
     let mut guard = self.inner.lock().await;
     match guard.get(&address) {
-      Some(entry) if entry.transfer_id == transfer_id => guard.remove(&address).map(|e| e.asset_id),
+      Some(entry) if entry.transfer_id == transfer_id => guard.remove(&address).map(|e| e.track_key),
       _ => None,
     }
   }
@@ -73,8 +75,25 @@ impl Iap2PendingArt {
   }
 
   pub async fn is_pending(&self, asset_id: &str) -> bool {
-    self.inner.lock().await.values().any(|e| e.asset_id == asset_id)
+    self
+      .inner
+      .lock()
+      .await
+      .values()
+      .any(|e| iap2_art_prefix_of(asset_id) == Some(e.track_key.as_str()))
   }
+}
+
+fn iap2_art_prefix_of(asset_id: &str) -> Option<&str> {
+  let rest = asset_id.strip_prefix("iap2/art/")?;
+  rest.rsplit_once('/').map(|(key, _)| key)
+}
+
+fn iap2_art_asset_id(track_key: &str, bytes: &[u8]) -> String {
+  use std::hash::{DefaultHasher, Hash, Hasher};
+  let mut hasher = DefaultHasher::new();
+  bytes.hash(&mut hasher);
+  format!("iap2/art/{track_key}/{:016x}", hasher.finish())
 }
 
 #[derive(Debug)]
@@ -172,25 +191,41 @@ impl Iap2EventRouter {
         let pid_hex = {
           let mut guard = self.np_checkpoint.lock().await;
           let entry = guard.entry(address).or_default();
-          let current = entry.track_pid_hex.clone();
-          if let Some(key) = delta_track_key(update.media_item.as_ref(), current.as_deref()) {
-            let track_changed = entry.track_pid_hex.as_deref() != Some(&key);
-            entry.track_pid_hex = Some(key.clone());
-            drop(guard);
-            if track_changed {
-              self.pending_art.clear(address).await;
+          if let Some(bundle) = update
+            .playback
+            .as_ref()
+            .and_then(|p| p.app_bundle.as_deref())
+            .filter(|b| !b.is_empty())
+          {
+            if entry.app_bundle.as_deref().is_some_and(|held| held != bundle) {
+              entry.track_pid_hex = None;
+              entry.track_title = None;
             }
-            Some(key)
-          } else {
-            entry.track_pid_hex.clone()
+            entry.app_bundle = Some(bundle.to_string());
+          }
+          match track_delta(update.media_item.as_ref(), entry) {
+            TrackDelta::Unchanged => entry.track_pid_hex.clone(),
+            TrackDelta::Idle => Some(IDLE_PID_HEX.to_string()),
+            TrackDelta::Same { title } => {
+              if title.is_some() {
+                entry.track_title = title;
+              }
+              entry.track_pid_hex.clone()
+            }
+            TrackDelta::Change { key, title } => {
+              entry.track_pid_hex = Some(key.clone());
+              entry.track_title = title;
+              drop(guard);
+              self.pending_art.clear(address).await;
+              Some(key)
+            }
           }
         };
         if let Some(pid_hex) = pid_hex.as_deref()
           && pid_hex != IDLE_PID_HEX
           && let Some(transfer_id) = update.media_item.as_ref().and_then(|m| m.artwork_id)
         {
-          let asset_id = format!("iap2/art/{pid_hex}/{transfer_id}");
-          self.pending_art.mark(address, transfer_id, asset_id).await;
+          self.pending_art.mark(address, transfer_id, pid_hex.to_string()).await;
         }
         let lib_update = translate_now_playing(update, pid_hex.as_deref());
         tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
@@ -203,7 +238,7 @@ impl Iap2EventRouter {
           tracing::debug!(%address, transfer_id, "iAP2 0-byte artwork; retaining pending entry");
           return;
         }
-        let Some(asset_id) = self.pending_art.take_if_matches(address, transfer_id).await else {
+        let Some(track_key) = self.pending_art.take_if_matches(address, transfer_id).await else {
           tracing::debug!(
             %address,
             transfer_id,
@@ -211,6 +246,7 @@ impl Iap2EventRouter {
           );
           return;
         };
+        let asset_id = iap2_art_asset_id(&track_key, &bytes);
         tracing::debug!(%address, asset_id = %asset_id, bytes = bytes.len(), "iAP2 artwork bytes -> AssetCache");
         if let Err(err) = self
           .state
@@ -370,15 +406,46 @@ fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, activity: EaActivit
   })
 }
 
-fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
-  let media = media?;
+#[derive(Debug, PartialEq)]
+enum TrackDelta {
+  Unchanged,
+  Idle,
+  Same { title: Option<String> },
+  Change { key: String, title: Option<String> },
+}
+
+fn track_delta(media: Option<&MediaItemAttributes>, current: &NowPlayingCheckpoint) -> TrackDelta {
+  let Some(media) = media else {
+    return TrackDelta::Unchanged;
+  };
   let title = media.title.as_deref().filter(|t| !t.is_empty());
-  match media.persistent_id {
-    Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
-    _ if title.is_some() && current.is_some_and(is_real_pid_key) => current.map(str::to_string),
-    _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
-    Some(0) => Some(IDLE_PID_HEX.to_string()),
-    _ => None,
+  let current_key = current.track_pid_hex.as_deref();
+  match (media.persistent_id, title) {
+    (Some(pid), _) if pid != 0 => {
+      let key = format!("{pid:016x}");
+      let title = title.map(str::to_string);
+      if current_key == Some(key.as_str()) {
+        TrackDelta::Same { title }
+      } else {
+        TrackDelta::Change { key, title }
+      }
+    }
+    (pid, Some(t)) => {
+      if current.track_title.as_deref() == Some(t) {
+        TrackDelta::Same { title: None }
+      } else if pid.is_none() && current_key.is_some_and(is_real_pid_key) && current.track_title.is_none() {
+        TrackDelta::Same {
+          title: Some(t.to_string()),
+        }
+      } else {
+        TrackDelta::Change {
+          key: nonmusic_key(t, media.artist.as_deref()),
+          title: Some(t.to_string()),
+        }
+      }
+    }
+    (Some(0), None) => TrackDelta::Idle,
+    _ => TrackDelta::Unchanged,
   }
 }
 
@@ -481,44 +548,67 @@ mod tests {
     "AA:BB:CC:DD:EE:FF".parse().unwrap()
   }
 
+  fn checkpoint(key: Option<&str>, title: Option<&str>) -> NowPlayingCheckpoint {
+    NowPlayingCheckpoint {
+      track_pid_hex: key.map(str::to_string),
+      track_title: title.map(str::to_string),
+      app_bundle: None,
+    }
+  }
+
+  fn changed_key(delta: TrackDelta) -> String {
+    match delta {
+      TrackDelta::Change { key, .. } => key,
+      other => panic!("expected a track change, got {other:?}"),
+    }
+  }
+
   #[tokio::test]
   async fn pending_take_matches_transfer_id() {
     let pending = Iap2PendingArt::new();
-    let id = "iap2/art/abcd/5".to_string();
-    pending.mark(addr(), 5, id.clone()).await;
-    assert!(pending.is_pending(&id).await);
-    assert_eq!(pending.take_if_matches(addr(), 5).await, Some(id));
-    assert!(!pending.is_pending("iap2/art/abcd/5").await);
+    pending.mark(addr(), 5, "abcd".to_string()).await;
+    assert!(pending.is_pending("iap2/art/abcd/00ff00ff00ff00ff").await);
+    assert_eq!(pending.take_if_matches(addr(), 5).await, Some("abcd".to_string()));
+    assert!(!pending.is_pending("iap2/art/abcd/00ff00ff00ff00ff").await);
   }
 
   #[tokio::test]
   async fn pending_rejects_mismatched_transfer_id() {
     let pending = Iap2PendingArt::new();
-    pending.mark(addr(), 5, "iap2/art/abcd/5".to_string()).await;
+    pending.mark(addr(), 5, "abcd".to_string()).await;
     assert_eq!(pending.take_if_matches(addr(), 4).await, None);
-    assert!(pending.is_pending("iap2/art/abcd/5").await);
+    assert!(pending.is_pending("iap2/art/abcd/1").await);
+    assert!(
+      !pending.is_pending("iap2/art/abcdef/1").await,
+      "prefix must match a whole key"
+    );
   }
 
   #[tokio::test]
   async fn mark_replaces_prior_entry_for_same_address() {
     let pending = Iap2PendingArt::new();
-    pending.mark(addr(), 5, "iap2/art/old/5".to_string()).await;
-    pending.mark(addr(), 7, "iap2/art/new/7".to_string()).await;
+    pending.mark(addr(), 5, "old".to_string()).await;
+    pending.mark(addr(), 7, "new".to_string()).await;
     assert!(!pending.is_pending("iap2/art/old/5").await);
     assert!(pending.is_pending("iap2/art/new/7").await);
-    assert_eq!(
-      pending.take_if_matches(addr(), 7).await,
-      Some("iap2/art/new/7".to_string())
-    );
+    assert_eq!(pending.take_if_matches(addr(), 7).await, Some("new".to_string()));
   }
 
   #[tokio::test]
   async fn clear_drops_all_for_address() {
     let pending = Iap2PendingArt::new();
-    pending.mark(addr(), 5, "iap2/art/abcd/5".to_string()).await;
+    pending.mark(addr(), 5, "abcd".to_string()).await;
     pending.clear(addr()).await;
     assert!(!pending.is_pending("iap2/art/abcd/5").await);
     assert_eq!(pending.take_if_matches(addr(), 5).await, None);
+  }
+
+  #[test]
+  fn asset_id_is_track_key_plus_content_hash() {
+    let a = iap2_art_asset_id("abcd", &[1, 2, 3]);
+    assert!(a.starts_with("iap2/art/abcd/"));
+    assert_eq!(a, iap2_art_asset_id("abcd", &[1, 2, 3]), "same bytes, same id");
+    assert_ne!(a, iap2_art_asset_id("abcd", &[4, 5, 6]), "new bytes, new id");
   }
 
   #[test]
@@ -528,7 +618,7 @@ mod tests {
       title: Some("Side of Town".to_string()),
       ..Default::default()
     };
-    let key = delta_track_key(Some(&media), None).expect("real pid yields a key");
+    let key = changed_key(track_delta(Some(&media), &checkpoint(None, None)));
     assert_eq!(key, "32425b9c9dd628f8", "key is bare hex, no prefix");
 
     let lib_update = translate_now_playing(
@@ -551,7 +641,7 @@ mod tests {
       track_number: Some(1),
       ..Default::default()
     };
-    let key1 = delta_track_key(Some(&pid_frag), None).expect("real pid yields a key");
+    let key1 = changed_key(track_delta(Some(&pid_frag), &checkpoint(None, None)));
     assert_eq!(key1, "bdf2f6b363a49759");
 
     let title_frag = MediaItemAttributes {
@@ -560,8 +650,76 @@ mod tests {
       artist: Some("Pretty".to_string()),
       ..Default::default()
     };
-    let key2 = delta_track_key(Some(&title_frag), Some(&key1)).expect("title fragment yields a key");
-    assert_eq!(key2, key1, "pid-less title fragment sticks to the active real pid");
+    let delta = track_delta(Some(&title_frag), &checkpoint(Some(&key1), None));
+    assert_eq!(
+      delta,
+      TrackDelta::Same {
+        title: Some("Feel Real Pretty".to_string())
+      },
+      "pid-less title fragment sticks to the active real pid while its title is unknown"
+    );
+  }
+
+  #[test]
+  fn pidless_title_change_after_titled_pid_track_is_a_new_track() {
+    let title_frag = MediaItemAttributes {
+      persistent_id: None,
+      title: Some("Sanguirush".to_string()),
+      artist: Some("Cult of the Sun".to_string()),
+      ..Default::default()
+    };
+    let key = changed_key(track_delta(
+      Some(&title_frag),
+      &checkpoint(Some("bdf2f6b363a49759"), Some("Feel Real Pretty")),
+    ));
+    assert!(
+      key.starts_with(NONMUSIC_PREFIX),
+      "a differing title is a track change, not sticky"
+    );
+  }
+
+  #[test]
+  fn pid_zero_with_title_never_attaches_to_real_pid() {
+    let media = MediaItemAttributes {
+      persistent_id: Some(0),
+      title: Some("Big Buck Bunny".to_string()),
+      ..Default::default()
+    };
+    let key = changed_key(track_delta(Some(&media), &checkpoint(Some("bdf2f6b363a49759"), None)));
+    assert!(key.starts_with(NONMUSIC_PREFIX), "pid 0 declares a non-library source");
+  }
+
+  #[test]
+  fn same_title_with_artist_arriving_later_keeps_the_key() {
+    let first = MediaItemAttributes {
+      title: Some("Some Episode".to_string()),
+      ..Default::default()
+    };
+    let key = changed_key(track_delta(Some(&first), &checkpoint(None, None)));
+
+    let second = MediaItemAttributes {
+      title: Some("Some Episode".to_string()),
+      artist: Some("Host".to_string()),
+      ..Default::default()
+    };
+    let delta = track_delta(Some(&second), &checkpoint(Some(&key), Some("Some Episode")));
+    assert_eq!(
+      delta,
+      TrackDelta::Same { title: None },
+      "a re-sent title is not a new track"
+    );
+  }
+
+  #[test]
+  fn idle_shaped_delta_leaves_the_checkpoint_alone() {
+    let idle = MediaItemAttributes {
+      persistent_id: Some(0),
+      title: Some(String::new()),
+      duration_ms: Some(596_000),
+      ..Default::default()
+    };
+    let delta = track_delta(Some(&idle), &checkpoint(Some("nonmusic-abc"), Some("Big Buck Bunny")));
+    assert_eq!(delta, TrackDelta::Idle);
   }
 
   #[test]
@@ -572,50 +730,46 @@ mod tests {
       artist: Some("Host".to_string()),
       ..Default::default()
     };
-    let key = delta_track_key(Some(&title_frag), None).expect("title yields a key");
+    let key = changed_key(track_delta(Some(&title_frag), &checkpoint(None, None)));
     assert!(key.starts_with(NONMUSIC_PREFIX), "no active pid -> nonmusic identity");
   }
 
   #[test]
   fn pidless_source_distinguishes_tracks_by_title() {
-    let first = delta_track_key(
+    let first = changed_key(track_delta(
       Some(&MediaItemAttributes {
         title: Some("Ep 1".to_string()),
         ..Default::default()
       }),
-      None,
-    )
-    .unwrap();
-    let second = delta_track_key(
+      &checkpoint(None, None),
+    ));
+    let second = changed_key(track_delta(
       Some(&MediaItemAttributes {
         title: Some("Ep 2".to_string()),
         ..Default::default()
       }),
-      Some(&first),
-    )
-    .unwrap();
+      &checkpoint(Some(&first), Some("Ep 1")),
+    ));
     assert_ne!(first, second, "pid-less title change is a new track, not sticky");
   }
 
   #[test]
   fn real_pid_change_overrides_active_pid() {
-    let a = delta_track_key(
+    let a = changed_key(track_delta(
       Some(&MediaItemAttributes {
         persistent_id: Some(0xaaaa),
         ..Default::default()
       }),
-      None,
-    )
-    .unwrap();
-    let b = delta_track_key(
+      &checkpoint(None, None),
+    ));
+    let b = changed_key(track_delta(
       Some(&MediaItemAttributes {
         persistent_id: Some(0xbbbb),
         title: Some("New".to_string()),
         ..Default::default()
       }),
-      Some(&a),
-    )
-    .unwrap();
+      &checkpoint(Some(&a), None),
+    ));
     assert_ne!(a, b, "a genuine new pid is always a track change");
   }
 
@@ -626,7 +780,7 @@ mod tests {
       title: Some("After Idle".to_string()),
       ..Default::default()
     };
-    let key = delta_track_key(Some(&title_frag), Some(IDLE_PID_HEX)).unwrap();
+    let key = changed_key(track_delta(Some(&title_frag), &checkpoint(Some(IDLE_PID_HEX), None)));
     assert!(
       key.starts_with(NONMUSIC_PREFIX),
       "idle is not a real-pid anchor to stick to"

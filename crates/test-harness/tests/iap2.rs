@@ -5,7 +5,7 @@ use bridgething_iap2::{
   SessionEvent,
   csm::now_playing::{MediaItemAttributes, NowPlayingUpdate, PlaybackAttributes, PlaybackState},
 };
-use bridgething_test_harness::Harness;
+use bridgething_test_harness::{Harness, extract_substring_starting_with};
 use libbridgething::{
   CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlayerState, gateway::AuthorityClaim,
 };
@@ -93,14 +93,17 @@ async fn iap2_artwork_resolves_and_appears_in_broadcast() {
     .await
     .expect("inject artwork");
 
-  let art_id = "iap2/art/0000000000001234/7";
+  let art_prefix = "iap2/art/0000000000001234/";
 
   let observed = frames
-    .wait_for(CONVERGE, |f| f.mode == ClientMode::Modern && f.json().contains(art_id))
+    .wait_for(CONVERGE, |f| {
+      f.mode == ClientMode::Modern && f.json().contains(art_prefix)
+    })
     .await;
-  assert!(observed.is_some(), "no modern broadcast carried the art id");
+  let frame = observed.expect("no modern broadcast carried the art id");
+  let art_id = extract_substring_starting_with(frame.json(), art_prefix).expect("frame had no art id");
 
-  let cached = harness.state().assets.get(art_id).await.expect("asset get");
+  let cached = harness.state().assets.get(&art_id).await.expect("asset get");
   assert!(
     cached.is_some(),
     "iap2 artwork bytes never resolved into the asset cache"
@@ -111,7 +114,6 @@ async fn iap2_artwork_resolves_and_appears_in_broadcast() {
 async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
   let harness = Harness::start().await.expect("harness start");
   let phone = harness.iap2_peer();
-  let art_id = "iap2/art/0000000000001234/7";
 
   harness
     .inject_iap2(
@@ -141,7 +143,15 @@ async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
 
   let deadline = std::time::Instant::now() + CONVERGE;
   let landed = loop {
-    if let Some(asset) = harness.state().assets.get(art_id).await.expect("asset get") {
+    if let Some(art_id) = harness
+      .state()
+      .player
+      .state_reply()
+      .state
+      .track
+      .and_then(|t| t.artwork_id)
+      && let Some(asset) = harness.state().assets.get(&art_id).await.expect("asset get")
+    {
       break Some(asset);
     }
     if std::time::Instant::now() >= deadline {

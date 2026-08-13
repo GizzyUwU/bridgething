@@ -10,7 +10,7 @@ use bridgething_iap2::{
 };
 use bridgething_test_harness::{
   CommandDriver, FrameObserve, FrameObserver, GatewayDriver, Harness, Iap2OutboundObserve, Iap2Source,
-  Iap2SourceDriver, ModernClientDriver, WebappProvision,
+  Iap2SourceDriver, ModernClientDriver, WebappProvision, extract_substring_starting_with,
 };
 #[cfg(target_os = "linux")]
 use bridgething_test_harness::{DeviceHarness, DeviceTier, OverAirTransport};
@@ -180,7 +180,7 @@ where
   let source = tier.iap2_source().await?;
   let pid = 0x5EA3u64;
   let transfer_id = 9u8;
-  let art_id = format!("iap2/art/{pid:016x}/{transfer_id}");
+  let art_id = format!("iap2/art/{pid:016x}/");
 
   source
     .push_now_playing(Iap2NowPlaying {
@@ -784,6 +784,9 @@ lift!(idle_sentinel_never_broadcasts_art_url, [t1, t3_emulator]);
 lift!(non_music_pid_zero_with_title_surfaces, [t1, t3_emulator]);
 lift!(non_music_artwork_reaches_frame_tap, [t1, t3_emulator]);
 lift!(spotify_pid_none_two_tracks_get_distinct_art_keys, [t1, t3_emulator]);
+lift!(pid_less_track_change_after_pid_track_is_a_new_track, [t1, t3_emulator]);
+lift!(re_sent_artwork_for_the_same_track_keeps_one_art_key, [t1, t3_emulator]);
+lift!(idle_shaped_duration_delta_does_not_drop_pending_art, [t1, t3_emulator]);
 lift!(position_resets_across_track_change, [t1, t3_emulator]);
 
 async fn spotify_pid_none_two_tracks_get_distinct_art_keys<T>(tier: &T) -> anyhow::Result<()>
@@ -849,6 +852,195 @@ where
   Ok(())
 }
 
+async fn pid_less_track_change_after_pid_track_is_a_new_track<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
+{
+  let mut frames = observe_with_registered_client(tier).await?;
+  let source = tier.iap2_source().await?;
+  let pid = 0x51DEu64;
+  let pid_track_id = format!("iap2:track:{pid:016x}");
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(pid),
+        title: Some("Side of Town".into()),
+        artist: Some("Capital Soiree".into()),
+        duration_ms: Some(177_280),
+        artwork_id: Some(40),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(40, vec![0xAA; 1024]).await?;
+  let frame_a = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Side of Town") && j.contains("iap2/art/")
+    })
+    .await
+    .ok_or_else(|| anyhow::anyhow!("the pid track's art never reached the frame-tap"))?;
+  let art_a = extract_substring_starting_with(frame_a.json(), "iap2/art/")
+    .ok_or_else(|| anyhow::anyhow!("the pid track's frame had no iap2/art/ url"))?;
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: None,
+        title: Some("Sanguirush".into()),
+        artist: Some("The Destruction Of The Cult Of The Sun".into()),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        artwork_id: Some(41),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(41, vec![0xBB; 1024]).await?;
+
+  let frame_b = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Sanguirush") && j.contains("iap2/art/")
+    })
+    .await
+    .ok_or_else(|| anyhow::anyhow!("the pid-less track's art never reached the frame-tap"))?;
+  let art_b = extract_substring_starting_with(frame_b.json(), "iap2/art/")
+    .ok_or_else(|| anyhow::anyhow!("the pid-less track's frame had no iap2/art/ url"))?;
+  anyhow::ensure!(
+    !frame_b.json().contains(&pid_track_id),
+    "a pid-less track change kept the previous track's pid identity ({pid_track_id}) - the accumulator never resets and the new track wears the old track's state"
+  );
+  anyhow::ensure!(
+    art_b != art_a,
+    "the first artful frame for the pid-less track still carried the previous track's art ({art_a}) - stale art flashes on every track change"
+  );
+  Ok(())
+}
+
+async fn re_sent_artwork_for_the_same_track_keeps_one_art_key<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
+{
+  let mut frames = observe_with_registered_client(tier).await?;
+  let source = tier.iap2_source().await?;
+  let art_bytes = vec![0xCC; 1024];
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(0xA57u64),
+        title: Some("Coil".into()),
+        artist: Some("Saint Blonde".into()),
+        artwork_id: Some(129),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(129, art_bytes.clone()).await?;
+  let resolved = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Coil") && j.contains("iap2/art/")
+    })
+    .await
+    .ok_or_else(|| anyhow::anyhow!("cover art never reached the frame-tap"))?;
+  let art_key = extract_substring_starting_with(resolved.json(), "iap2/art/")
+    .ok_or_else(|| anyhow::anyhow!("resolved frame had no iap2/art/ url"))?;
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: None,
+        title: Some("Coil".into()),
+        artist: Some("Saint Blonde".into()),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  for transfer_id in [130u8, 131u8] {
+    source
+      .push_now_playing(Iap2NowPlaying {
+        media_item: Some(Iap2MediaItem {
+          artwork_id: Some(transfer_id),
+          ..Default::default()
+        }),
+        playback: None,
+      })
+      .await?;
+    source.push_artwork(transfer_id, art_bytes.clone()).await?;
+  }
+
+  let rekeyed = frames
+    .wait_for(Duration::from_secs(3), |f| {
+      let j = f.json();
+      extract_substring_starting_with(j, "iap2/art/").is_some_and(|id| id != art_key)
+    })
+    .await;
+  anyhow::ensure!(
+    rekeyed.is_none(),
+    "a re-sent artwork transfer for the same track minted a new art key (was {art_key}, saw {:?}) - every re-key flashes the webapp back to placeholder",
+    rekeyed.and_then(|f| extract_substring_starting_with(f.json(), "iap2/art/"))
+  );
+  Ok(())
+}
+
+async fn idle_shaped_duration_delta_does_not_drop_pending_art<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
+{
+  let mut frames = observe_with_registered_client(tier).await?;
+  let source = tier.iap2_source().await?;
+  let transfer_id = 50u8;
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(0),
+        title: Some("Big Buck Bunny".into()),
+        artwork_id: Some(transfer_id),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(0),
+        title: Some(String::new()),
+        duration_ms: Some(596_000),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(transfer_id, vec![0xDD; 1024]).await?;
+
+  let art = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Big Buck Bunny") && j.contains("iap2/art/") && !j.contains("iap2/art/0000000000000000")
+    })
+    .await;
+  anyhow::ensure!(
+    art.is_some(),
+    "the idle-shaped duration delta dropped the pending artwork - the track's art never resolved"
+  );
+  Ok(())
+}
+
 async fn position_resets_across_track_change<T>(tier: &T) -> anyhow::Result<()>
 where
   T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
@@ -901,15 +1093,6 @@ where
     "new track surfaced at {position} ms (carried over from the prior track at 180000 ms)"
   );
   Ok(())
-}
-
-fn extract_substring_starting_with(haystack: &str, prefix: &str) -> Option<String> {
-  let start = haystack.find(prefix)?;
-  let tail = &haystack[start..];
-  let end = tail
-    .find(|c: char| c == '"' || c == '\\' || c.is_whitespace())
-    .unwrap_or(tail.len());
-  Some(tail[..end].to_string())
 }
 
 fn position_ms_from_frame_json(json: &str) -> Option<u64> {
