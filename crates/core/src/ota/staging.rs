@@ -69,14 +69,18 @@ pub(crate) async fn sweep_orphans() {
     return;
   }
   remove_any(&PathBuf::from(DAEMON_DIR).join(DAEMON_INCOMING)).await;
-  let webapps = PathBuf::from(WEBAPPS_DIR);
-  let Ok(mut rd) = fs::read_dir(&webapps).await else {
+  sweep_prefixed(&PathBuf::from(DAEMON_DIR), &["bridgething.broken."]).await;
+  sweep_prefixed(&PathBuf::from(WEBAPPS_DIR), &[".incoming.", ".tmp."]).await;
+}
+
+async fn sweep_prefixed(dir: &Path, prefixes: &[&str]) {
+  let Ok(mut rd) = fs::read_dir(dir).await else {
     return;
   };
   while let Ok(Some(entry)) = rd.next_entry().await {
     let name = entry.file_name();
     let name = name.to_string_lossy();
-    if name.starts_with(".incoming.") || name.starts_with(".tmp.") {
+    if prefixes.iter().any(|prefix| name.starts_with(prefix)) {
       remove_any(&entry.path()).await;
     }
   }
@@ -157,6 +161,22 @@ mod tests {
 
     discard(&p).await;
     assert!(!fs::try_exists(&paths.incoming).await.unwrap());
+  }
+
+  #[tokio::test]
+  async fn sweep_prefixed_removes_only_matching_entries() {
+    let root = temp_root();
+    write_file(&root.join("bridgething.broken.20260810T203357Z"), "carcass").await;
+    write_file(&root.join("bridgething.broken.20260812T053758Z"), "carcass").await;
+    write_file(&root.join("bridgething.current"), "live").await;
+    write_file(&root.join("bridgething.previous"), "rollback").await;
+
+    sweep_prefixed(&root, &["bridgething.broken."]).await;
+
+    assert!(!fs::try_exists(&root.join("bridgething.broken.20260810T203357Z")).await.unwrap());
+    assert!(!fs::try_exists(&root.join("bridgething.broken.20260812T053758Z")).await.unwrap());
+    assert!(fs::try_exists(&root.join("bridgething.current")).await.unwrap());
+    assert!(fs::try_exists(&root.join("bridgething.previous")).await.unwrap());
   }
 
   #[tokio::test]

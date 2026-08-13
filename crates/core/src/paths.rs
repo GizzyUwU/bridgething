@@ -100,6 +100,20 @@ pub fn bandaid_transfers_dir() -> PathBuf {
   PathBuf::from("/opt/bridgething/.transfers")
 }
 
+pub fn partition_free_bytes(path: &Path) -> u64 {
+  use std::os::unix::ffi::OsStrExt;
+  let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+    return u64::MAX;
+  };
+  // SAFETY: statvfs takes a NUL-terminated path and writes a POSIX struct into our stack allocation; both pointers are valid for the duration of the call
+  let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+  let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+  if rc != 0 {
+    return u64::MAX;
+  }
+  (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
+}
+
 pub fn assets_blobs_dir() -> PathBuf {
   state_dir().join("assets")
 }
