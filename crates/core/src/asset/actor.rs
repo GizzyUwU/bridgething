@@ -1,6 +1,5 @@
 use std::{
   collections::{HashMap, HashSet},
-  os::unix::ffi::OsStrExt,
   path::{Path, PathBuf},
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -637,7 +636,7 @@ impl AssetActor {
   }
 
   async fn enforce_disk_limits(&mut self, min_free: u64) {
-    let mut free = partition_free_bytes(&self.blobs_dir);
+    let mut free = crate::paths::partition_free_bytes(&self.blobs_dir);
     while disk_over_limit(self.disk_byte_total as u64, free, DISK_BUDGET_BYTES as u64, min_free) {
       let Some(victim) = self.pick_disk_evictable_victim() else {
         break;
@@ -802,19 +801,6 @@ fn safe_blob_name(id: &str) -> String {
 
 fn disk_over_limit(current_bytes: u64, free_bytes: u64, budget: u64, headroom: u64) -> bool {
   current_bytes > budget || free_bytes < headroom
-}
-
-fn partition_free_bytes(path: &Path) -> u64 {
-  let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
-    return u64::MAX;
-  };
-  // SAFETY: statvfs takes a NUL-terminated path and writes a POSIX struct into our stack allocation; both pointers are valid for the duration of the call
-  let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-  let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
-  if rc != 0 {
-    return u64::MAX;
-  }
-  (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
 }
 
 async fn rename_or_copy(source: &Path, dest: &Path) -> Result<(), AssetError> {
