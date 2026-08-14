@@ -135,6 +135,12 @@ impl BluetoothManager {
     (manager, bootstrap)
   }
 
+  #[cfg(test)]
+  pub(crate) fn capturing() -> (BluetoothMan, GatewaySendRx) {
+    let (manager, bootstrap) = Self::create(['0'; 4]);
+    (manager, bootstrap.gateway.outbound_rx)
+  }
+
   pub(crate) fn spawn(
     self: &BluetoothMan,
     bootstrap: BluetoothBootstrap,

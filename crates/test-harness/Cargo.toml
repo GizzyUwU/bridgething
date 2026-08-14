@@ -38,7 +38,10 @@ chrome = ["dep:chromiumoxide"]
 
 [dev-dependencies]
 base64 = "0.22.1"
+bridgething-delivery = { path = "../delivery/core" }
+bridgething-host-gateway = { path = "../host-gateway" }
 hex = "0.4.3"
 proptest = "1.11.0"
+reqwest = { version = "0.13.4", default-features = false }
 sha2 = "0.11.0"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

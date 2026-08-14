@@ -112,6 +112,7 @@ mod tests {
       clock: TestClock::new(),
       fetch: fetch.clone(),
       cache_dir: spool.path().to_path_buf(),
+      data_dir: Some(spool.path().join("state")),
     });
     let events = service.events();
     let (gateway, device) = linked_gateway();

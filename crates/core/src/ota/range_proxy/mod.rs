@@ -1,11 +1,14 @@
 use std::{
-  collections::{HashMap, HashSet},
+  collections::HashSet,
+  net::SocketAddr,
+  path::PathBuf,
   sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
   },
 };
 
+use cache::{AssetLog, RangeCache};
 use libbridgething::RangePart;
 use tokio::{
   sync::{mpsc, oneshot},
@@ -15,13 +18,14 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
+  asset::AssetCache,
   bluetooth::{Address, BluetoothMan},
   transfer::sinks::TransferSinks,
 };
 
+mod cache;
 mod layout;
 mod server;
-mod spool;
 
 const BROKER_MAILBOX: usize = 64;
 
@@ -68,21 +72,31 @@ impl std::fmt::Debug for RangeProxy {
 pub struct RangeProxyHandle {
   pub proxy: RangeProxy,
   pub cancel: CancellationToken,
+  #[cfg(feature = "test-tap")]
+  pub bound_addr: Option<SocketAddr>,
   _broker: JoinHandle<()>,
   _server: Option<JoinHandle<()>>,
 }
 
 impl RangeProxy {
-  pub async fn spawn(bluetooth: BluetoothMan, sinks: TransferSinks, port: u16) -> RangeProxyHandle {
+  pub async fn spawn(
+    bluetooth: BluetoothMan,
+    sinks: TransferSinks,
+    assets: AssetCache,
+    cache_dir: PathBuf,
+    bind: SocketAddr,
+  ) -> RangeProxyHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel(BROKER_MAILBOX);
     let cancel = CancellationToken::new();
 
     let broker = BrokerActor {
       cmd_rx,
       sinks: sinks.clone(),
+      assets,
+      cache_dir,
       active: None,
+      cache: None,
       inflight: Default::default(),
-      last_ranges: Default::default(),
     };
     let _broker = tokio::spawn(broker.run());
 
@@ -90,12 +104,12 @@ impl RangeProxy {
       cmd_tx,
       tally: Arc::new(RangeTally::default()),
     };
-    let _server = match server::spawn(proxy.clone(), bluetooth, sinks, port, cancel.clone()).await {
-      Ok(handle) => Some(handle),
+    let bound = match server::spawn(proxy.clone(), bluetooth, sinks, bind, cancel.clone()).await {
+      Ok((addr, handle)) => Some((addr, handle)),
       Err(err) => {
         tracing::error!(
           ?err,
-          "ota range proxy failed to bind 127.0.0.1:{port}; delta OTA over wire unavailable until restart",
+          "ota range proxy failed to bind {bind}; delta OTA over wire unavailable until restart",
         );
         None
       }
@@ -104,8 +118,10 @@ impl RangeProxy {
     RangeProxyHandle {
       proxy,
       cancel,
+      #[cfg(feature = "test-tap")]
+      bound_addr: bound.as_ref().map(|(addr, _)| *addr),
       _broker,
-      _server,
+      _server: bound.map(|(_, handle)| handle),
     }
   }
 
@@ -126,12 +142,25 @@ impl RangeProxy {
     }
   }
 
-  pub(crate) async fn begin_range_active(&self, request_id: Uuid) -> Result<RangeBegin, BeginRangeError> {
+  pub async fn clear_cache(&self, update_id: String) {
+    if let Err(err) = self.cmd_tx.send(BrokerCmd::ClearCache { update_id }).await {
+      tracing::error!(?err, "range proxy mailbox closed; cache clear dropped");
+    }
+  }
+
+  pub async fn note_write_failure(&self, update_id: String) {
+    if let Err(err) = self.cmd_tx.send(BrokerCmd::NoteWriteFailure { update_id }).await {
+      tracing::error!(?err, "range proxy mailbox closed; write failure not counted");
+    }
+  }
+
+  async fn begin_range_active(&self, request_id: Uuid, asset: String) -> Result<RangeBegin, BeginRangeError> {
     let (reply_tx, reply_rx) = oneshot::channel();
     self
       .cmd_tx
       .send(BrokerCmd::BeginRange {
         request_id,
+        asset,
         reply: reply_tx,
       })
       .await
@@ -139,15 +168,15 @@ impl RangeProxy {
     reply_rx.await.map_err(|_| BeginRangeError::ProxyDown)?
   }
 
-  pub(crate) async fn end_range(&self, request_id: Uuid) {
+  async fn end_range(&self, request_id: Uuid) {
     let _ = self.cmd_tx.send(BrokerCmd::EndRange { request_id }).await;
   }
 
-  pub(crate) async fn store_ranges(&self, asset: String, parts: Vec<RangePart>, total: u32) {
+  async fn store_ranges(&self, asset: String, parts: Vec<RangePart>, total: u32) {
     let _ = self.cmd_tx.send(BrokerCmd::StoreRanges { asset, parts, total }).await;
   }
 
-  pub(crate) async fn load_ranges(&self, asset: String) -> Option<(Vec<RangePart>, u32)> {
+  async fn load_ranges(&self, asset: String) -> Option<(Vec<RangePart>, u32)> {
     let (reply_tx, reply_rx) = oneshot::channel();
     self
       .cmd_tx
@@ -159,15 +188,17 @@ impl RangeProxy {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RangeBegin {
+struct RangeBegin {
   pub update_id: String,
   pub peer: Option<Address>,
+  pub log: Arc<AssetLog>,
 }
 
 #[derive(Debug)]
-pub(crate) enum BeginRangeError {
+enum BeginRangeError {
   NoActiveOta,
   ProxyDown,
+  Cache(String),
 }
 
 #[derive(Debug)]
@@ -177,8 +208,15 @@ enum BrokerCmd {
     peer: Option<Address>,
   },
   Deactivate,
+  ClearCache {
+    update_id: String,
+  },
+  NoteWriteFailure {
+    update_id: String,
+  },
   BeginRange {
     request_id: Uuid,
+    asset: String,
     reply: oneshot::Sender<Result<RangeBegin, BeginRangeError>>,
   },
   EndRange {
@@ -204,9 +242,11 @@ struct ActiveOta {
 struct BrokerActor {
   cmd_rx: mpsc::Receiver<BrokerCmd>,
   sinks: TransferSinks,
+  assets: AssetCache,
+  cache_dir: PathBuf,
   active: Option<ActiveOta>,
+  cache: Option<RangeCache>,
   inflight: HashSet<Uuid>,
-  last_ranges: HashMap<String, (Vec<RangePart>, u32)>,
 }
 
 impl BrokerActor {
@@ -216,28 +256,38 @@ impl BrokerActor {
       match cmd {
         BrokerCmd::Activate { update_id, peer } => {
           tracing::info!(%update_id, ?peer, "range proxy activated");
+          self.cache = match RangeCache::open(&self.cache_dir, &update_id, self.assets.clone()).await {
+            Ok(cache) => Some(cache),
+            Err(err) => {
+              tracing::error!(?err, %update_id, "range cache unavailable; delta ranges cannot be served");
+              None
+            }
+          };
           self.active = Some(ActiveOta { update_id, peer });
         }
         BrokerCmd::Deactivate => {
           if let Some(active) = self.active.take() {
-            tracing::info!(update_id = %active.update_id, "range proxy deactivated");
+            tracing::info!(update_id = %active.update_id, "range proxy deactivated; cache retained");
           }
-          self.last_ranges.clear();
+          self.cache = None;
           for request_id in self.inflight.drain() {
             self.sinks.unbind(request_id);
           }
         }
-        BrokerCmd::BeginRange { request_id, reply } => {
-          let result = match &self.active {
-            None => Err(BeginRangeError::NoActiveOta),
-            Some(active) => {
-              self.inflight.insert(request_id);
-              Ok(RangeBegin {
-                update_id: active.update_id.clone(),
-                peer: active.peer,
-              })
-            }
-          };
+        BrokerCmd::ClearCache { update_id } => {
+          self.close_cache_for(&update_id);
+          cache::clear(&self.cache_dir, &update_id).await;
+        }
+        BrokerCmd::NoteWriteFailure { update_id } => {
+          self.close_cache_for(&update_id);
+          cache::note_write_failure(&self.cache_dir, &update_id).await;
+        }
+        BrokerCmd::BeginRange {
+          request_id,
+          asset,
+          reply,
+        } => {
+          let result = self.begin_range(request_id, &asset).await;
           let _ = reply.send(result);
         }
         BrokerCmd::EndRange { request_id } => {
@@ -245,14 +295,44 @@ impl BrokerActor {
           self.sinks.unbind(request_id);
         }
         BrokerCmd::StoreRanges { asset, parts, total } => {
-          self.last_ranges.insert(asset, (parts, total));
+          if let Some(cache) = &self.cache {
+            cache.store_ranges(asset, parts, total).await;
+          }
         }
         BrokerCmd::LoadRanges { asset, reply } => {
-          let _ = reply.send(self.last_ranges.get(&asset).cloned());
+          let remembered = match &self.cache {
+            Some(cache) => cache.load_ranges(&asset).await,
+            None => None,
+          };
+          let _ = reply.send(remembered);
         }
       }
     }
     tracing::info!("ota range proxy broker exiting");
+  }
+
+  fn close_cache_for(&mut self, update_id: &str) {
+    if self.cache.as_ref().is_some_and(|c| c.update_id() == update_id) {
+      self.cache = None;
+    }
+  }
+
+  async fn begin_range(&mut self, request_id: Uuid, asset: &str) -> Result<RangeBegin, BeginRangeError> {
+    let active = self.active.as_ref().ok_or(BeginRangeError::NoActiveOta)?;
+    let cache = self
+      .cache
+      .as_ref()
+      .ok_or_else(|| BeginRangeError::Cache("range cache is not open".into()))?;
+    let log = cache
+      .asset_log(asset)
+      .await
+      .map_err(|err| BeginRangeError::Cache(err.to_string()))?;
+    self.inflight.insert(request_id);
+    Ok(RangeBegin {
+      update_id: active.update_id.clone(),
+      peer: active.peer,
+      log,
+    })
   }
 }
 
@@ -273,14 +353,16 @@ mod tests {
   use super::*;
   use crate::transfer::sinks::{AckPolicy, TransferEvent};
 
-  fn spawn_broker_only(sinks: TransferSinks) -> RangeProxy {
+  pub(super) async fn spawn_broker_only(sinks: TransferSinks, cache_dir: PathBuf) -> RangeProxy {
     let (cmd_tx, cmd_rx) = mpsc::channel(16);
     let broker = BrokerActor {
       cmd_rx,
       sinks,
+      assets: cache::tests::assets().await,
+      cache_dir,
       active: None,
+      cache: None,
       inflight: Default::default(),
-      last_ranges: Default::default(),
     };
     tokio::spawn(broker.run());
     RangeProxy {
@@ -289,19 +371,25 @@ mod tests {
     }
   }
 
+  async fn broker() -> (RangeProxy, PathBuf) {
+    let dir = cache::tests::temp_dir();
+    let proxy = spawn_broker_only(TransferSinks::default(), dir.clone()).await;
+    (proxy, dir)
+  }
+
   #[tokio::test]
   async fn begin_range_with_no_active_returns_no_active_ota() {
-    let proxy = spawn_broker_only(TransferSinks::default());
-    let result = proxy.begin_range_active(Uuid::now_v7()).await;
+    let (proxy, _dir) = broker().await;
+    let result = proxy.begin_range_active(Uuid::now_v7(), "a.zck".into()).await;
     assert!(matches!(result, Err(BeginRangeError::NoActiveOta)));
   }
 
   #[tokio::test]
   async fn begin_range_returns_active_update_id_and_peer() {
-    let proxy = spawn_broker_only(TransferSinks::default());
+    let (proxy, _dir) = broker().await;
     proxy.activate("expected-id".into(), None).await;
     let begin = proxy
-      .begin_range_active(Uuid::now_v7())
+      .begin_range_active(Uuid::now_v7(), "a.zck".into())
       .await
       .expect("begin should succeed");
     assert_eq!(begin.update_id, "expected-id");
@@ -310,12 +398,13 @@ mod tests {
 
   #[tokio::test]
   async fn deactivate_unbinds_inflight_sinks() {
+    let dir = cache::tests::temp_dir();
     let sinks = TransferSinks::default();
-    let proxy = spawn_broker_only(sinks.clone());
+    let proxy = spawn_broker_only(sinks.clone(), dir).await;
     proxy.activate("a".into(), None).await;
     let req_id = Uuid::now_v7();
     let mut rx = sinks.bind_forward(req_id, AckPolicy::OnReceipt);
-    proxy.begin_range_active(req_id).await.unwrap();
+    proxy.begin_range_active(req_id, "a.zck".into()).await.unwrap();
 
     sinks.fragment(req_id, 0, Bytes::from_static(b"x"));
     assert!(matches!(rx.recv().await, Some(TransferEvent::Fragment { .. })));
@@ -325,5 +414,102 @@ mod tests {
       .await
       .expect("recv should resolve once broker unbinds");
     assert!(res.is_none(), "expected channel closed, got event: {res:?}");
+  }
+
+  async fn cached_bytes(proxy: &RangeProxy, asset: &str) -> u64 {
+    let request_id = Uuid::now_v7();
+    let begin = proxy
+      .begin_range_active(request_id, asset.into())
+      .await
+      .expect("begin should succeed");
+    let bytes = begin.log.index().cached_bytes();
+    proxy.end_range(request_id).await;
+    bytes
+  }
+
+  async fn seed(proxy: &RangeProxy, asset: &str, zck_start: u32, bytes: &[u8]) {
+    let request_id = Uuid::now_v7();
+    let begin = proxy
+      .begin_range_active(request_id, asset.into())
+      .await
+      .expect("begin should succeed");
+    begin.log.append(zck_start, bytes).await.unwrap();
+    proxy.end_range(request_id).await;
+    proxy
+      .store_ranges(
+        asset.into(),
+        vec![RangePart {
+          start: zck_start,
+          length: bytes.len() as u32,
+        }],
+        4096,
+      )
+      .await;
+  }
+
+  #[tokio::test]
+  async fn deactivate_keeps_the_cache_for_the_next_attempt() {
+    let (proxy, _dir) = broker().await;
+    proxy.activate("u1".into(), None).await;
+    seed(&proxy, "a.zck", 0, b"cached").await;
+
+    proxy.deactivate().await;
+    assert!(
+      proxy.load_ranges("a.zck".into()).await.is_none(),
+      "closed cache reads nothing"
+    );
+
+    proxy.activate("u1".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 6);
+    assert!(proxy.load_ranges("a.zck".into()).await.is_some());
+  }
+
+  #[tokio::test]
+  async fn activating_a_different_update_clears_the_cache() {
+    let (proxy, _dir) = broker().await;
+    proxy.activate("u1".into(), None).await;
+    seed(&proxy, "a.zck", 0, b"cached").await;
+
+    proxy.activate("u2".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 0);
+    assert!(proxy.load_ranges("a.zck".into()).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn abandon_clears_the_cache() {
+    let (proxy, _dir) = broker().await;
+    proxy.activate("u1".into(), None).await;
+    seed(&proxy, "a.zck", 0, b"cached").await;
+
+    proxy.clear_cache("u1".into()).await;
+    proxy.activate("u1".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 0);
+  }
+
+  #[tokio::test]
+  async fn one_write_failure_keeps_the_cache_and_two_clear_it() {
+    let (proxy, _dir) = broker().await;
+    proxy.activate("u1".into(), None).await;
+    seed(&proxy, "a.zck", 0, b"cached").await;
+
+    proxy.note_write_failure("u1".into()).await;
+    proxy.activate("u1".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 6, "one failure keeps the cache");
+
+    proxy.note_write_failure("u1".into()).await;
+    proxy.activate("u1".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 0, "two in a row clear it");
+  }
+
+  #[tokio::test]
+  async fn a_write_failure_for_another_update_leaves_the_cache_alone() {
+    let (proxy, _dir) = broker().await;
+    proxy.activate("u1".into(), None).await;
+    seed(&proxy, "a.zck", 0, b"cached").await;
+
+    proxy.note_write_failure("other".into()).await;
+    proxy.note_write_failure("other".into()).await;
+    proxy.activate("u1".into(), None).await;
+    assert_eq!(cached_bytes(&proxy, "a.zck").await, 6);
   }
 }

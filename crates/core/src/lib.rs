@@ -40,7 +40,8 @@ use capabilities::CapabilitiesRegistry;
 pub use handler::client::{ClientMode, PossibleSendMsg};
 use handler::{ClientHandler, GatewayHandler};
 use libbridgething::{
-  BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_SOCKS_PROXY_PORT, BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT,
+  BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_OTA_RANGE_PROXY_PORT, BRIDGETHING_SOCKS_PROXY_PORT,
+  BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT,
 };
 use mic::{MicConfig, MicManager};
 #[cfg(feature = "test-tap")]
@@ -75,6 +76,7 @@ pub struct ServerAddrs {
   pub modern: SocketAddr,
   pub frame_tap: SocketAddr,
   pub proxy: Option<SocketAddr>,
+  pub range_proxy: Option<SocketAddr>,
 }
 
 impl Daemon {
@@ -164,7 +166,12 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     .expect("failed to initialize asset cache");
   let (assets, asset_cache_handle) = asset_pending.spawn();
 
-  let transfer_pending = ChunkedTransfer::init(transfers_dir)
+  let bandaid_sweep = if paths::is_on_device() {
+    vec![paths::bandaid_transfers_dir()]
+  } else {
+    Vec::new()
+  };
+  let transfer_pending = ChunkedTransfer::init(transfers_dir, bandaid_sweep)
     .await
     .expect("failed to initialize chunked transfer manager");
   let (transfers, transfer_handle) = transfer_pending.spawn();
@@ -240,7 +247,13 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let range_proxy_handle = RangeProxy::spawn(
     bluetooth.clone(),
     transfer_sinks.clone(),
-    libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT,
+    assets.clone(),
+    config
+      .state_dir
+      .clone()
+      .unwrap_or_else(paths::state_dir)
+      .join("range-cache"),
+    config.range_proxy_bind,
   )
   .await;
 
@@ -349,6 +362,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     modern: listeners.modern_addr(),
     frame_tap: listeners.frame_tap_addr(),
     proxy: proxy_listener.as_ref().and_then(|l| l.local_addr().ok()),
+    range_proxy: range_proxy_handle.bound_addr,
   };
   if let Some(listener) = proxy_listener {
     proxy::spawn(listener, state.clone(), bluetooth.clone());
@@ -478,6 +492,7 @@ pub struct DaemonConfig {
   pub stock_bind: SocketAddr,
   pub modern_bind: SocketAddr,
   pub proxy_bind: SocketAddr,
+  pub range_proxy_bind: SocketAddr,
   #[cfg(feature = "test-tap")]
   pub frame_tap_bind: SocketAddr,
   pub handle_signals: bool,
@@ -496,6 +511,7 @@ impl DaemonConfig {
       stock_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_STOCK_WS_PORT)),
       modern_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_WS_MODERN_PORT)),
       proxy_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_SOCKS_PROXY_PORT)),
+      range_proxy_bind: SocketAddr::from(([127, 0, 0, 1], BRIDGETHING_OTA_RANGE_PROXY_PORT)),
       #[cfg(feature = "test-tap")]
       frame_tap_bind: SocketAddr::from(([0, 0, 0, 0], FRAME_TAP_PORT)),
       handle_signals: true,
@@ -527,6 +543,7 @@ impl DaemonConfig {
       stock_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       modern_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       proxy_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+      range_proxy_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       frame_tap_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       handle_signals: false,
       install_logger: false,
