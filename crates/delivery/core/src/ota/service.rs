@@ -141,6 +141,7 @@ pub struct OtaServiceDeps {
   pub clock: Arc<dyn Clock>,
   pub fetch: Arc<dyn ArtifactFetch>,
   pub cache_dir: PathBuf,
+  pub data_dir: Option<PathBuf>,
 }
 
 struct Feed {
@@ -369,7 +370,7 @@ pub struct OtaService {
 impl OtaService {
   pub fn new(deps: OtaServiceDeps) -> Arc<Self> {
     let feed = Feed {
-      store: Mutex::new(OtaRunStore::new(deps.clock.clone())),
+      store: Mutex::new(OtaRunStore::new(deps.clock.clone(), deps.data_dir.clone())),
       events: broadcast::channel(256).0,
       store_changes: broadcast::channel(256).0,
     };
@@ -1680,6 +1681,7 @@ mod tests {
         route_into, sha256_hex,
       },
       manifest::{OtaArtifactUrls, OtaPatchDigest, OtaReleaseArtifacts},
+      run_store::RUNS_FILE,
       stream::FileSource,
       watchdog::stalled_reason,
     },
@@ -1693,19 +1695,26 @@ mod tests {
   struct Rig {
     service: Arc<OtaService>,
     spool: Spool,
+    _data: Spool,
     device: FakeDevice,
     fetch: Arc<FakeFetch>,
     events: broadcast::Receiver<OtaPollEvent>,
   }
 
+  fn launch(cache_dir: &std::path::Path, data_dir: &std::path::Path, fetch: Arc<FakeFetch>) -> Arc<OtaService> {
+    OtaService::new(OtaServiceDeps {
+      clock: TestClock::new(),
+      fetch,
+      cache_dir: cache_dir.to_path_buf(),
+      data_dir: Some(data_dir.to_path_buf()),
+    })
+  }
+
   async fn rig() -> Rig {
     let spool = Spool::new();
+    let data = Spool::new();
     let fetch = FakeFetch::new();
-    let service = OtaService::new(OtaServiceDeps {
-      clock: TestClock::new(),
-      fetch: fetch.clone(),
-      cache_dir: spool.path().to_path_buf(),
-    });
+    let service = launch(spool.path(), data.path(), fetch.clone());
     let events = service.events();
     let (gateway, device) = linked_gateway();
     service.adopt(DEVICE, gateway.clone()).await;
@@ -1713,6 +1722,7 @@ mod tests {
     Rig {
       service,
       spool,
+      _data: data,
       device,
       fetch,
       events,
@@ -2541,11 +2551,8 @@ mod tests {
   #[tokio::test]
   async fn a_drive_with_no_adopted_link_fails_rather_than_waiting_for_one() {
     let spool = Spool::new();
-    let service = OtaService::new(OtaServiceDeps {
-      clock: TestClock::new(),
-      fetch: FakeFetch::new(),
-      cache_dir: spool.path().to_path_buf(),
-    });
+    let data = Spool::new();
+    let service = launch(spool.path(), data.path(), FakeFetch::new());
     let artifact = spool.write("daemon", &pattern(4 * 1024));
 
     let terminal = tokio::time::timeout(
@@ -2820,13 +2827,11 @@ mod tests {
 
   // MARK: resume over a reconnect
 
-  fn publish_daemon_release(rig: &Rig, body: &[u8]) {
+  fn publish_daemon_release(fetch: &FakeFetch, body: &[u8]) {
     let mut fixture = ManifestFixture::new(CHANNEL, TO_RELEASE);
     fixture.daemon = Some(digest_of(body));
-    rig.fetch.serve_text(&format!("{ROOT}/manifest.json"), fixture.json());
-    rig
-      .fetch
-      .serve_artifact(&format!("{ROOT}/daemon/{CHANNEL}/0.9.1/bridgething"), body.to_vec());
+    fetch.serve_text(&format!("{ROOT}/manifest.json"), fixture.json());
+    fetch.serve_artifact(&format!("{ROOT}/daemon/{CHANNEL}/0.9.1/bridgething"), body.to_vec());
   }
 
   fn drive_apply(service: &Arc<OtaService>) {
@@ -2847,7 +2852,7 @@ mod tests {
   async fn a_link_that_drops_mid_transfer_keeps_what_it_takes_to_re_drive() {
     let mut rig = rig().await;
     let body = pattern(64 * 1024);
-    publish_daemon_release(&rig, &body);
+    publish_daemon_release(&rig.fetch, &body);
     rig.service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
 
     drive_apply(&rig.service);
@@ -2869,7 +2874,7 @@ mod tests {
   async fn a_reconnect_re_drives_the_interrupted_run_with_the_same_parameters() {
     let mut rig = rig().await;
     let body = pattern(64 * 1024);
-    publish_daemon_release(&rig, &body);
+    publish_daemon_release(&rig.fetch, &body);
     rig.service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
 
     drive_apply(&rig.service);
@@ -2916,7 +2921,7 @@ mod tests {
   async fn a_flap_while_the_device_is_writing_is_still_resumable() {
     let mut rig = rig().await;
     let body = pattern(64 * 1024);
-    publish_daemon_release(&rig, &body);
+    publish_daemon_release(&rig.fetch, &body);
     rig.service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
 
     drive_apply(&rig.service);
@@ -2949,7 +2954,7 @@ mod tests {
   async fn a_run_the_device_finished_is_left_alone_by_a_later_flap() {
     let mut rig = rig().await;
     let body = pattern(64 * 1024);
-    publish_daemon_release(&rig, &body);
+    publish_daemon_release(&rig.fetch, &body);
     rig.service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
 
     drive_apply(&rig.service);
@@ -2966,6 +2971,102 @@ mod tests {
     assert!(
       !run.resumable,
       "the reboot is the run asking the device to go away, not the link dropping under it"
+    );
+  }
+
+  // MARK: resume over an app death
+
+  fn snapshot_runs(from: &std::path::Path, to: &std::path::Path) {
+    let dest = to.join(RUNS_FILE);
+    std::fs::create_dir_all(dest.parent().expect("the runs file is under a directory"))
+      .expect("the scratch directory is writable");
+    std::fs::copy(from.join(RUNS_FILE), dest).expect("an open run was persisted before the process died");
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn an_update_the_app_died_under_re_drives_on_the_next_launch() {
+    let cache = Spool::new();
+    let killed = Spool::new();
+    let relaunched = Spool::new();
+    let fetch = FakeFetch::new();
+    let body = pattern(64 * 1024);
+    publish_daemon_release(&fetch, &body);
+
+    let first = {
+      let service = launch(cache.path(), killed.path(), fetch.clone());
+      let (gateway, mut device) = linked_gateway();
+      service.adopt(DEVICE, gateway.clone()).await;
+      route_into(&gateway, &service, DEVICE);
+      service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
+
+      drive_apply(&service);
+      let (request_id, begin) = device.await_ota_begin().await;
+      device.ack_begin(request_id, 0);
+      device.next_fragment(begin.transfer.id).await;
+      snapshot_runs(killed.path(), relaunched.path());
+      begin.update_id
+    };
+
+    let service = launch(cache.path(), relaunched.path(), fetch.clone());
+    let (gateway, mut device) = linked_gateway();
+    service.adopt(DEVICE, gateway.clone()).await;
+    route_into(&gateway, &service, DEVICE);
+    service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
+
+    let (_, second) = device.await_ota_begin_within(Duration::from_secs(60)).await;
+
+    assert_eq!(
+      second.update_id, first,
+      "a relaunch re-drives the same artifact, so the daemon's partial is still worth keeping"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn a_launch_with_nothing_interrupted_drives_nothing_on_its_own() {
+    let mut rig = rig().await;
+    publish_daemon_release(&rig.fetch, &pattern(64 * 1024));
+    rig.service.device_meta(DEVICE, meta(FROM_VERSION, "1.0.0", CHANNEL));
+
+    assert!(
+      rig.device.no_ota_begin(Duration::from_secs(30)).await,
+      "an empty store must not manufacture a run out of a link arriving"
+    );
+  }
+
+  // MARK: an artifact the daemon already holds
+
+  #[tokio::test]
+  async fn a_full_offset_ack_streams_nothing_and_still_completes_on_the_device() {
+    let mut rig = rig().await;
+    let artifact = rig.spool.write("daemon", &pattern(64 * 1024));
+
+    let driving = {
+      let service = rig.service.clone();
+      tokio::spawn(async move {
+        service
+          .push_daemon(DEVICE, Arc::new(FileSource::open(artifact)), None)
+          .await
+      })
+    };
+
+    let (request_id, begin) = rig.device.await_ota_begin().await;
+    rig.device.ack_begin(request_id, begin.transfer.total_size);
+    assert!(
+      rig
+        .device
+        .no_fragment(begin.transfer.id, Duration::from_millis(300))
+        .await,
+      "an artifact the daemon already holds costs zero bytes on the link"
+    );
+
+    rig.device.progress(OtaPhase::Writing, 100);
+    rig.device.await_activate().await;
+    rig.device.progress(OtaPhase::Reboot, 100);
+
+    assert_eq!(
+      driving.await.expect("the drive task"),
+      OtaPhaseSnapshot::Completed,
+      "the drive still rides the device's own signals to a terminal"
     );
   }
 

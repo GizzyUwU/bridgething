@@ -37,6 +37,7 @@ fn deps() -> SessionDeps {
     clock: Arc::new(SystemClock),
     fetch: Arc::new(HttpArtifactFetch::new(HttpExecutor::new(transport))),
     cache_dir: std::env::temp_dir().join("bridgething-host-gateway"),
+    data_dir: Some(std::env::temp_dir().join("bridgething-host-gateway-state")),
     info: gateway_info(DEVICE_ID, "linux", env!("CARGO_PKG_VERSION")),
   }
 }

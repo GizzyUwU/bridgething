@@ -570,7 +570,7 @@ impl OtaRunStore {
   #[uniffi::constructor]
   pub fn new() -> Arc<Self> {
     Arc::new(Self {
-      inner: Mutex::new(ota::run_store::OtaRunStore::new(Arc::new(SystemClock))),
+      inner: Mutex::new(ota::run_store::OtaRunStore::new(Arc::new(SystemClock), None)),
     })
   }
 

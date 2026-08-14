@@ -34,9 +34,6 @@ pub struct OtaBegin {
   pub transfer: TransferRef,
   pub patch: Option<OtaPatch>,
   pub provenance: Option<String>,
-  /// What the pusher believes this artifact's version is. Only kinds whose payload does not carry
-  /// its own version need it: a daemon knows its own, a webapp zip has a manifest, an image has
-  /// /etc/superbird, but a .btww model container has no version field at all.
   pub version: Option<String>,
 }
 

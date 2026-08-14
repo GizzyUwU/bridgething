@@ -173,8 +173,16 @@ mod tests {
 
     sweep_prefixed(&root, &["bridgething.broken."]).await;
 
-    assert!(!fs::try_exists(&root.join("bridgething.broken.20260810T203357Z")).await.unwrap());
-    assert!(!fs::try_exists(&root.join("bridgething.broken.20260812T053758Z")).await.unwrap());
+    assert!(
+      !fs::try_exists(&root.join("bridgething.broken.20260810T203357Z"))
+        .await
+        .unwrap()
+    );
+    assert!(
+      !fs::try_exists(&root.join("bridgething.broken.20260812T053758Z"))
+        .await
+        .unwrap()
+    );
     assert!(fs::try_exists(&root.join("bridgething.current")).await.unwrap());
     assert!(fs::try_exists(&root.join("bridgething.previous")).await.unwrap());
   }

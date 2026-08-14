@@ -33,6 +33,7 @@ pub struct SessionDeps {
   pub clock: Arc<dyn Clock>,
   pub fetch: Arc<dyn ArtifactFetch>,
   pub cache_dir: std::path::PathBuf,
+  pub data_dir: Option<std::path::PathBuf>,
   pub info: GatewayInfo,
 }
 
@@ -80,6 +81,7 @@ impl DeliverySession {
       clock: deps.clock.clone(),
       fetch: deps.fetch,
       cache_dir: deps.cache_dir,
+      data_dir: deps.data_dir,
     });
     ota.adopt(&deps.device_id, gateway.clone()).await;
 

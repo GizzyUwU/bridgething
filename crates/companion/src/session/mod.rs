@@ -174,6 +174,7 @@ impl Session {
       clock: clock.clone(),
       fetch: fetch.clone(),
       cache_dir: std::path::PathBuf::from(&config.cache_dir),
+      data_dir: Some(std::path::PathBuf::from(&config.state_dir)),
     });
     let models = config
       .model_platform

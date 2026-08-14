@@ -35,6 +35,7 @@ const DEFAULT_DEVICE_ID: &str = "core-node";
 pub struct ConnectOptions {
   pub device_id: Option<String>,
   pub cache_dir: Option<String>,
+  pub data_dir: Option<String>,
   pub app_name: Option<String>,
   pub app_version: Option<String>,
 }
@@ -60,6 +61,7 @@ impl DeliveryClient {
     let options = options.unwrap_or(ConnectOptions {
       device_id: None,
       cache_dir: None,
+      data_dir: None,
       app_name: None,
       app_version: None,
     });
@@ -75,6 +77,12 @@ impl DeliveryClient {
         .cache_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("bridgething-core-node")),
+      data_dir: Some(
+        options
+          .data_dir
+          .map(PathBuf::from)
+          .unwrap_or_else(|| std::env::temp_dir().join("bridgething-core-node-state")),
+      ),
       info: gateway_info(&name, std::env::consts::OS, &version),
     };
 
