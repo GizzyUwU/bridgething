@@ -13,7 +13,9 @@ use tokio::{
 };
 use tokio_util::bytes::Bytes;
 
-use super::{ChunkOutcome, STALE_TIMEOUT, SWEEP_INTERVAL, TRANSFER_DISK_BUDGET_BYTES, TransferError, safe_filename};
+use super::{
+  BeginOutcome, ChunkOutcome, STALE_TIMEOUT, SWEEP_INTERVAL, TRANSFER_DISK_BUDGET_BYTES, TransferError, safe_filename,
+};
 
 #[derive(Debug)]
 pub(super) enum Command {
@@ -22,7 +24,7 @@ pub(super) enum Command {
     expected_size: u64,
     expected_sha256: Option<String>,
     target_dir: Option<PathBuf>,
-    ack: oneshot::Sender<Result<u64, TransferError>>,
+    ack: oneshot::Sender<Result<BeginOutcome, TransferError>>,
   },
   AcceptChunk {
     id: String,
@@ -39,6 +41,10 @@ pub(super) enum Command {
     id: String,
     result: Result<String, TransferError>,
   },
+  BeginVerified {
+    id: String,
+    result: Result<String, TransferError>,
+  },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,12 +54,22 @@ struct Meta {
   #[serde(skip_serializing_if = "Option::is_none")]
   expected_sha256: Option<String>,
   partial_path: PathBuf,
+  #[serde(default)]
+  complete: bool,
 }
 
 #[derive(Debug)]
 enum WriteOutcome {
   Continue { received: u64 },
   HashPending { partial_path: PathBuf },
+}
+
+#[derive(Debug)]
+enum FastPath {
+  Reject(TransferError),
+  Resume(u64),
+  VerifyComplete(PathBuf),
+  Fresh,
 }
 
 #[derive(Debug)]
@@ -66,6 +82,7 @@ struct Transfer {
   partial_path: PathBuf,
   meta_path: PathBuf,
   file: Option<File>,
+  complete: bool,
 }
 
 pub(super) struct ChunkedTransferActor {
@@ -75,11 +92,13 @@ pub(super) struct ChunkedTransferActor {
   cmd_rx: mpsc::Receiver<Command>,
   self_tx: mpsc::Sender<Command>,
   pending_completions: HashMap<String, oneshot::Sender<Result<ChunkOutcome, TransferError>>>,
+  pending_begin_verifies: HashMap<String, oneshot::Sender<Result<BeginOutcome, TransferError>>>,
 }
 
 impl ChunkedTransferActor {
   pub(super) async fn bootstrap(
     transfers_dir: PathBuf,
+    sweep_dirs: Vec<PathBuf>,
     cmd_rx: mpsc::Receiver<Command>,
     self_tx: mpsc::Sender<Command>,
   ) -> Result<Self, TransferError> {
@@ -98,12 +117,15 @@ impl ChunkedTransferActor {
             id = %transfer.id,
             received = transfer.received,
             expected = transfer.expected_size,
-            "transfer: recovered partial on bootstrap",
+            complete = transfer.complete,
+            "transfer: recovered on bootstrap",
           );
           total = total.saturating_add(transfer.received);
           transfers.insert(transfer.id.clone(), transfer);
         }
-        Ok(None) => {}
+        Ok(None) => {
+          let _ = tokio::fs::remove_file(&path).await;
+        }
         Err(err) => {
           tracing::warn!(?err, meta = %path.display(), "transfer: failed to recover; deleting");
           let _ = tokio::fs::remove_file(&path).await;
@@ -115,7 +137,7 @@ impl ChunkedTransferActor {
       }
     }
 
-    sweep_orphan_partials(&transfers_dir, &transfers).await;
+    sweep_unreferenced(&transfers_dir, &sweep_dirs, &transfers).await;
 
     tracing::info!(
       transfers = transfers.len(),
@@ -130,6 +152,7 @@ impl ChunkedTransferActor {
       cmd_rx,
       self_tx,
       pending_completions: HashMap::new(),
+      pending_begin_verifies: HashMap::new(),
     })
   }
 
@@ -160,8 +183,9 @@ impl ChunkedTransferActor {
         target_dir,
         ack,
       } => {
-        let result = self.handle_begin(id, expected_size, expected_sha256, target_dir).await;
-        let _ = ack.send(result);
+        self
+          .handle_begin(id, expected_size, expected_sha256, target_dir, ack)
+          .await
       }
       Command::AcceptChunk {
         id,
@@ -175,6 +199,7 @@ impl ChunkedTransferActor {
         let _ = ack.send(result);
       }
       Command::HashCompleted { id, result } => self.handle_hash_completed(id, result).await,
+      Command::BeginVerified { id, result } => self.handle_begin_verified(id, result).await,
     }
   }
 
@@ -184,26 +209,111 @@ impl ChunkedTransferActor {
     expected_size: u64,
     expected_sha256: Option<String>,
     target_dir: Option<PathBuf>,
-  ) -> Result<u64, TransferError> {
+    ack: oneshot::Sender<Result<BeginOutcome, TransferError>>,
+  ) {
+    match self.begin_fast_path(&id, expected_size, &expected_sha256) {
+      FastPath::Reject(err) => {
+        let _ = ack.send(Err(err));
+      }
+      FastPath::Resume(offset) => {
+        let _ = ack.send(Ok(BeginOutcome::Resume { offset }));
+      }
+      FastPath::VerifyComplete(partial_path) => {
+        self.pending_begin_verifies.insert(id.clone(), ack);
+        let self_tx = self.self_tx.clone();
+        tokio::spawn(async move {
+          let result = hash_file(&partial_path).await;
+          let _ = self_tx.send(Command::BeginVerified { id, result }).await;
+        });
+      }
+      FastPath::Fresh => {
+        let result = self.begin_fresh(id, expected_size, expected_sha256, target_dir).await;
+        let _ = ack.send(result.map(|offset| BeginOutcome::Resume { offset }));
+      }
+    }
+  }
+
+  fn begin_fast_path(&mut self, id: &str, expected_size: u64, expected_sha256: &Option<String>) -> FastPath {
     if expected_size > TRANSFER_DISK_BUDGET_BYTES {
-      return Err(TransferError::TooLarge {
-        id,
+      return FastPath::Reject(TransferError::TooLarge {
+        id: id.to_string(),
         size: expected_size,
       });
     }
 
-    if self.pending_completions.contains_key(&id) {
-      return Err(TransferError::ConflictingBegin { id });
+    if self.pending_completions.contains_key(id) || self.pending_begin_verifies.contains_key(id) {
+      return FastPath::Reject(TransferError::ConflictingBegin { id: id.to_string() });
     }
 
-    if let Some(existing) = self.transfers.get_mut(&id) {
-      if existing.expected_size != expected_size || existing.expected_sha256 != expected_sha256 {
-        return Err(TransferError::ConflictingBegin { id });
+    if let Some(existing) = self.transfers.get_mut(id) {
+      if existing.expected_size != expected_size || &existing.expected_sha256 != expected_sha256 {
+        return FastPath::Reject(TransferError::ConflictingBegin { id: id.to_string() });
       }
       existing.last_touched_unix = unix_now();
-      return Ok(existing.received);
+      if existing.complete || existing.received == existing.expected_size {
+        return FastPath::VerifyComplete(existing.partial_path.clone());
+      }
+      return FastPath::Resume(existing.received);
     }
 
+    FastPath::Fresh
+  }
+
+  async fn handle_begin_verified(&mut self, id: String, result: Result<String, TransferError>) {
+    let Some(ack) = self.pending_begin_verifies.remove(&id) else {
+      tracing::debug!(%id, "begin verify arrived after abandon; discarding");
+      return;
+    };
+
+    let Some(transfer) = self.transfers.get_mut(&id) else {
+      let _ = ack.send(Err(TransferError::UnknownTransfer { id }));
+      return;
+    };
+
+    let verified = match result {
+      Ok(actual) => match transfer.expected_sha256.as_deref() {
+        Some(expected) => actual.eq_ignore_ascii_case(expected),
+        None => true,
+      },
+      Err(err) => {
+        let _ = ack.send(Err(err));
+        return;
+      }
+    };
+
+    if verified {
+      transfer.file = None;
+      let path = transfer.partial_path.clone();
+      if !transfer.complete {
+        transfer.complete = true;
+        if let Err(err) = write_meta(&transfer.meta_path.clone(), &meta_from(transfer)).await {
+          tracing::warn!(%id, ?err, "failed to persist complete marker; artifact re-verifies after a restart");
+        }
+      }
+      let _ = ack.send(Ok(BeginOutcome::AlreadyComplete { path }));
+      return;
+    }
+
+    tracing::warn!(%id, "retained complete artifact failed re-verification; restarting fresh");
+    let expected_size = transfer.expected_size;
+    let expected_sha256 = transfer.expected_sha256.clone();
+    let target_dir = transfer
+      .partial_path
+      .parent()
+      .filter(|dir| *dir != self.transfers_dir)
+      .map(Path::to_path_buf);
+    let _ = self.handle_abandon(id.clone()).await;
+    let result = self.begin_fresh(id, expected_size, expected_sha256, target_dir).await;
+    let _ = ack.send(result.map(|offset| BeginOutcome::Resume { offset }));
+  }
+
+  async fn begin_fresh(
+    &mut self,
+    id: String,
+    expected_size: u64,
+    expected_sha256: Option<String>,
+    target_dir: Option<PathBuf>,
+  ) -> Result<u64, TransferError> {
     let projected = self.total_disk_bytes.saturating_add(expected_size);
     if projected > TRANSFER_DISK_BUDGET_BYTES {
       self.evict_until_under(expected_size).await;
@@ -240,6 +350,7 @@ impl ChunkedTransferActor {
       partial_path,
       meta_path: meta_path.clone(),
       file: Some(file),
+      complete: false,
     };
     write_meta(&meta_path, &meta_from(&transfer)).await?;
     self.transfers.insert(id, transfer);
@@ -363,16 +474,21 @@ impl ChunkedTransferActor {
       return;
     }
 
-    let transfer = self.transfers.remove(&id).expect("present above");
-    self.total_disk_bytes = self.total_disk_bytes.saturating_sub(transfer.received);
-    let _ = tokio::fs::remove_file(&transfer.meta_path).await;
-    let _ = ack.send(Ok(ChunkOutcome::Completed {
-      path: transfer.partial_path,
-    }));
+    let transfer = self.transfers.get_mut(&id).expect("present above");
+    transfer.complete = true;
+    transfer.last_touched_unix = unix_now();
+    let path = transfer.partial_path.clone();
+    if let Err(err) = write_meta(&transfer.meta_path.clone(), &meta_from(transfer)).await {
+      tracing::warn!(%id, ?err, "failed to persist complete marker; artifact re-transfers after a restart");
+    }
+    let _ = ack.send(Ok(ChunkOutcome::Completed { path }));
   }
 
   async fn handle_abandon(&mut self, id: String) -> Result<(), TransferError> {
     if let Some(ack) = self.pending_completions.remove(&id) {
+      let _ = ack.send(Err(TransferError::UnknownTransfer { id: id.clone() }));
+    }
+    if let Some(ack) = self.pending_begin_verifies.remove(&id) {
       let _ = ack.send(Err(TransferError::UnknownTransfer { id: id.clone() }));
     }
     if let Some(transfer) = self.transfers.remove(&id) {
@@ -407,7 +523,7 @@ impl ChunkedTransferActor {
     let stale: Vec<String> = self
       .transfers
       .iter()
-      .filter(|(_, t)| (now - t.last_touched_unix) as u64 >= STALE_TIMEOUT.as_secs())
+      .filter(|(_, t)| is_stale(now, t.last_touched_unix))
       .map(|(id, _)| id.clone())
       .collect();
     for id in stale {
@@ -415,6 +531,10 @@ impl ChunkedTransferActor {
       let _ = self.handle_abandon(id).await;
     }
   }
+}
+
+fn is_stale(now: i64, last_touched: i64) -> bool {
+  now.saturating_sub(last_touched) >= STALE_TIMEOUT.as_secs() as i64
 }
 
 async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, TransferError> {
@@ -448,33 +568,28 @@ async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, T
     partial_path,
     meta_path: meta_path.to_path_buf(),
     file: None,
+    complete: meta.complete && received == meta.expected_size,
   }))
 }
 
-async fn sweep_orphan_partials(transfers_dir: &Path, transfers: &HashMap<String, Transfer>) {
-  let known_partials: std::collections::HashSet<PathBuf> = transfers.values().map(|t| t.partial_path.clone()).collect();
-  let Ok(mut entries) = tokio::fs::read_dir(transfers_dir).await else {
-    return;
-  };
-  while let Ok(Some(entry)) = entries.next_entry().await {
-    let path = entry.path();
-    if path.extension().and_then(|s| s.to_str()) != Some("partial") {
+async fn sweep_unreferenced(transfers_dir: &Path, sweep_dirs: &[PathBuf], transfers: &HashMap<String, Transfer>) {
+  let known: std::collections::HashSet<PathBuf> = transfers
+    .values()
+    .flat_map(|t| [t.partial_path.clone(), t.meta_path.clone()])
+    .collect();
+  let mut dirs: Vec<&Path> = vec![transfers_dir];
+  dirs.extend(sweep_dirs.iter().map(PathBuf::as_path));
+  dirs.dedup();
+  for dir in dirs {
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
       continue;
-    }
-    if known_partials.contains(&path) {
-      continue;
-    }
-    let stale = match tokio::fs::metadata(&path).await {
-      Ok(m) => m
-        .modified()
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d > STALE_TIMEOUT)
-        .unwrap_or(true),
-      Err(_) => true,
     };
-    if stale {
-      tracing::info!(path = %path.display(), "transfer: removing orphan partial on bootstrap");
+    while let Ok(Some(entry)) = entries.next_entry().await {
+      let path = entry.path();
+      if path.extension().and_then(|s| s.to_str()) == Some("meta") || known.contains(&path) {
+        continue;
+      }
+      tracing::info!(path = %path.display(), "transfer: removing unreferenced file on bootstrap");
       let _ = tokio::fs::remove_file(&path).await;
     }
   }
@@ -507,6 +622,7 @@ fn meta_from(t: &Transfer) -> Meta {
     expected_size: t.expected_size,
     expected_sha256: t.expected_sha256.clone(),
     partial_path: t.partial_path.clone(),
+    complete: t.complete,
   }
 }
 
@@ -515,4 +631,21 @@ fn unix_now() -> i64 {
     .duration_since(UNIX_EPOCH)
     .map(|d| d.as_secs() as i64)
     .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_future_touched_transfer_is_never_stale() {
+    let now = 1_700_000_000i64;
+    assert!(
+      !is_stale(now, now + 300),
+      "clock behind mtime must read fresh, not wrapped"
+    );
+    assert!(!is_stale(now, now));
+    assert!(!is_stale(now, now - STALE_TIMEOUT.as_secs() as i64 + 1));
+    assert!(is_stale(now, now - STALE_TIMEOUT.as_secs() as i64));
+  }
 }

@@ -199,6 +199,10 @@ impl Harness {
     self.server_addrs.modern
   }
 
+  pub fn range_proxy_addr(&self) -> Option<std::net::SocketAddr> {
+    self.server_addrs.range_proxy
+  }
+
   pub fn proxy_addr(&self) -> std::net::SocketAddr {
     self.server_addrs.proxy.expect("SOCKS proxy bound")
   }

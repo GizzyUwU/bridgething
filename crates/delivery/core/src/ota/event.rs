@@ -2,7 +2,8 @@ use libbridgething::{OtaKind, OtaPhase};
 
 pub const CANCELLED_REASON: &str = "cancelled";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum OtaStepKind {
   Download,
   Stream,
@@ -43,7 +44,8 @@ pub fn parse_ota_kind(slug: &str) -> Option<OtaKind> {
   .find(|kind| ota_kind_slug(*kind) == slug)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OtaPlanStep {
   pub id: u32,
   pub kind: OtaStepKind,

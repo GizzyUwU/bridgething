@@ -110,7 +110,7 @@ fn run_corpus() -> Value {
 
 fn emit_run_store(steps: &[Value]) -> Vec<Value> {
   let clock = TestClock::at(0);
-  let mut store = OtaRunStore::new(clock.clone());
+  let mut store = OtaRunStore::new(clock.clone(), None);
   let mut run_ids: Vec<String> = Vec::new();
   let mut out = Vec::new();
 

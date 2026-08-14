@@ -504,6 +504,7 @@ fn deps(device_id: Option<String>) -> SessionDeps {
       FetchTransport::new(),
     )))),
     cache_dir: std::path::PathBuf::new(),
+    data_dir: None,
     info: gateway_info(&device_id, "browser", env!("CARGO_PKG_VERSION")),
     device_id,
   }

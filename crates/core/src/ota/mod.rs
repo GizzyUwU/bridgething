@@ -38,7 +38,7 @@ use crate::{
   bluetooth::{Address, GatewayMan},
   peer::{PeerSnapshot, PeerTracker},
   transfer::{
-    ChunkOutcome, ChunkedTransfer, TransferError,
+    BeginOutcome, ChunkOutcome, ChunkedTransfer, TransferError,
     sinks::{AckPolicy, ForwardStream, TransferEvent, TransferSinks},
   },
 };
@@ -397,6 +397,7 @@ impl OtaActor {
         );
         for piece in std::mem::take(&mut self.staged) {
           staging::discard(&piece).await;
+          let _ = self.transfers.abandon(piece.update_id.clone()).await;
         }
         self.staged_peer = None;
       } else {
@@ -482,6 +483,18 @@ impl OtaActor {
       }
     };
     let expected_size = req.transfer.total_size as u64;
+
+    if let Some(piece) = self.staged.iter().find(|p| p.update_id == req.update_id) {
+      tracing::info!(update_id = %piece.update_id, kind = ?piece.kind, "OtaBegin for an already-staged piece; nothing to transfer");
+      let _ = ack.send(Ok(OtaBeginAck {
+        resume_from_offset: expected_size as u32,
+      }));
+      emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
+      emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
+      emit_progress(&self.events_tx, OtaPhase::Writing, 100, None).await;
+      return;
+    }
+
     if target_dir.is_none()
       && let Err(err) = self.assets.reserve_disk(expected_size).await
     {
@@ -489,10 +502,48 @@ impl OtaActor {
     }
     let result = self
       .transfers
-      .begin(req.update_id.clone(), expected_size, Some(expected_sha256), target_dir.clone())
+      .begin(
+        req.update_id.clone(),
+        expected_size,
+        Some(expected_sha256),
+        target_dir.clone(),
+      )
       .await;
     match result {
-      Ok(resume_from_offset) => {
+      Ok(BeginOutcome::AlreadyComplete { path }) => {
+        if let Some(dir) = &target_dir {
+          let free = crate::paths::partition_free_bytes(dir);
+          let needed = bandaid_bytes_needed(expected_size, expected_size, req.patch.as_ref());
+          if free < needed {
+            let _ = ack.send(Err(OtaBeginRejected {
+              reason: format!("insufficient bandaid space: {free} bytes free, {needed} needed"),
+            }));
+            return;
+          }
+        }
+        tracing::info!(update_id = %req.update_id, ?kind, "OtaBegin found a verified retained artifact; skipping transfer");
+        let update_id = req.update_id.clone();
+        let _ = ack.send(Ok(OtaBeginAck {
+          resume_from_offset: expected_size as u32,
+        }));
+        emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
+        emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
+        self.last_streaming_emit_at = None;
+        self.last_streaming_percent = None;
+        if matches!(kind, OtaKind::Image) {
+          self.range_proxy.activate(update_id.clone(), peer).await;
+        }
+        let begin_meta = BeginMeta {
+          provenance: req.provenance.clone(),
+          version: req.version.clone(),
+        };
+        self
+          .spawn_write(kind, update_id, peer, path, req.patch.clone(), begin_meta)
+          .await;
+      }
+      Ok(BeginOutcome::Resume {
+        offset: resume_from_offset,
+      }) => {
         if let Some(dir) = &target_dir {
           let free = crate::paths::partition_free_bytes(dir);
           let needed = bandaid_bytes_needed(expected_size, resume_from_offset, req.patch.as_ref());
@@ -625,6 +676,7 @@ impl OtaActor {
 
   async fn handle_abandon(&mut self, update_id: String) {
     let _ = self.transfers.abandon(update_id.clone()).await;
+    self.range_proxy.clear_cache(update_id.clone()).await;
     if let Some(pos) = self.staged.iter().position(|p| p.update_id == update_id) {
       let piece = self.staged.remove(pos);
       staging::discard(&piece).await;
@@ -720,17 +772,21 @@ impl OtaActor {
 
         let terminator = self.terminators.reboot.clone();
         let tally = self.range_proxy.tally();
+        let transfers = self.transfers.clone();
+        let range_proxy = self.range_proxy.clone();
         tokio::spawn(async move {
           let outcome = run_image_write(&events_tx, &payload, tally, cancel_rx).await;
-          let _ = tokio::fs::remove_file(&payload).await;
           match outcome {
             Ok(()) => {
+              let _ = transfers.abandon(update_id.clone()).await;
+              range_proxy.clear_cache(update_id.clone()).await;
               tracing::info!(%update_id, "image write complete; rebooting");
               emit_finished(&events_tx, OtaKind::Image, update_id.clone()).await;
               (terminator)();
             }
             Err(err) => {
-              tracing::warn!(?err, "image write terminated with error");
+              tracing::warn!(?err, "image write terminated with error; artifact retained for retry");
+              range_proxy.note_write_failure(update_id.clone()).await;
               emit_error(&events_tx, err.code, err.msg).await;
             }
           }
@@ -740,7 +796,6 @@ impl OtaActor {
       OtaKind::Daemon | OtaKind::BuiltinWebapp => {
         tokio::spawn(async move {
           let result = run_stage(&events_tx, kind, &payload, update_id, patch, cancel_rx).await;
-          let _ = tokio::fs::remove_file(&payload).await;
           let _ = self_tx.send(Command::StageFinished { result, peer }).await;
         });
       }
@@ -755,10 +810,9 @@ impl OtaActor {
               .map(|()| dest),
             None => Err(wakeword_swap::ApplyError::NoTarget),
           };
-          let _ = transfers.abandon(update_id.clone()).await;
-          let _ = tokio::fs::remove_file(&payload).await;
           match result {
             Ok(path) => {
+              let _ = transfers.abandon(update_id.clone()).await;
               (reload)().await;
               tracing::info!(%update_id, model = %path.display(), "wake word model applied and reloaded");
               emit_finished(&events_tx, OtaKind::WakewordModel, update_id.clone()).await;
@@ -782,10 +836,9 @@ impl OtaActor {
         tokio::spawn(async move {
           emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
           let result = (apply)(payload.clone(), begin_meta.provenance).await;
-          let _ = transfers.abandon(update_id.clone()).await;
-          let _ = tokio::fs::remove_file(&payload).await;
           match result {
             Ok(info) => {
+              let _ = transfers.abandon(update_id.clone()).await;
               tracing::info!(%update_id, id = %info.id, name = %info.name, "installed webapp applied");
               emit_finished(&events_tx, OtaKind::InstalledWebapp, update_id.clone()).await;
             }
@@ -810,6 +863,7 @@ impl OtaActor {
     match result {
       Ok(piece) => {
         tracing::info!(update_id = %piece.update_id, kind = ?piece.kind, "ota piece staged; awaiting activate");
+        self.staged.retain(|p| p.update_id != piece.update_id);
         self.staged.push(piece);
         self.staged_peer = peer;
         emit_progress(&self.events_tx, OtaPhase::Writing, 100, None).await;
@@ -884,6 +938,7 @@ impl OtaActor {
     tracing::info!(pieces = batch.len(), "bandaid batch committed; restarting service");
     emit_progress(&self.events_tx, OtaPhase::Reboot, 0, None).await;
     for piece in &batch {
+      let _ = self.transfers.abandon(piece.update_id.clone()).await;
       emit_finished(&self.events_tx, piece.kind, piece.update_id.clone()).await;
     }
     drain_events(&self.events_tx).await;
@@ -1019,24 +1074,29 @@ async fn run_stage(
   emit_progress(events_tx, OtaPhase::Writing, 0, None).await;
   let piece = match kind {
     OtaKind::Daemon => {
-      let reconstructed = match patch {
-        Some(spec) => Some(
-          patch::apply(daemon_swap::patch_source_path(), payload.to_path_buf(), spec)
-            .await
-            .map_err(|err| WriteError {
-              code: OtaErrorCode::WriteFailed,
-              msg: format!("daemon patch apply failed: {err}"),
-            })?,
-        ),
-        None => None,
+      let staged = match patch {
+        Some(spec) => patch::apply(daemon_swap::patch_source_path(), payload.to_path_buf(), spec)
+          .await
+          .map_err(|err| WriteError {
+            code: OtaErrorCode::WriteFailed,
+            msg: format!("daemon patch apply failed: {err}"),
+          })?,
+        None if crate::paths::is_on_device() => {
+          let copy = payload.with_extension("stage");
+          tokio::fs::copy(payload, &copy).await.map_err(|err| WriteError {
+            code: OtaErrorCode::WriteFailed,
+            msg: format!("daemon stage copy failed: {err}"),
+          })?;
+          copy
+        }
+        None => payload.to_path_buf(),
       };
-      let staged = reconstructed.as_deref().unwrap_or(payload);
-      let result = daemon_swap::stage(staged, update_id).await.map_err(|err| WriteError {
+      let result = daemon_swap::stage(&staged, update_id).await.map_err(|err| WriteError {
         code: OtaErrorCode::WriteFailed,
         msg: format!("daemon stage failed: {err}"),
       });
-      if let Some(reconstructed) = &reconstructed {
-        let _ = tokio::fs::remove_file(reconstructed).await;
+      if result.is_err() && staged != payload {
+        let _ = tokio::fs::remove_file(&staged).await;
       }
       result?
     }
@@ -1208,7 +1268,7 @@ mod tests {
     installed_apply_provenance: Arc<std::sync::Mutex<Option<Option<String>>>>,
     wakeword_reload_calls: Arc<AtomicUsize>,
     captured_acks: Arc<std::sync::Mutex<Vec<TransferAck>>>,
-    _root: PathBuf,
+    root: PathBuf,
   }
 
   async fn boot() -> Harness {
@@ -1216,8 +1276,11 @@ mod tests {
   }
 
   async fn boot_with_peers(peers: PeerTracker) -> Harness {
-    let root = temp_root();
-    let pending = ChunkedTransfer::init(root.clone()).await.unwrap();
+    boot_on(temp_root(), peers).await
+  }
+
+  async fn boot_on(root: PathBuf, peers: PeerTracker) -> Harness {
+    let pending = ChunkedTransfer::init(root.clone(), Vec::new()).await.unwrap();
     let (transfers, _xfer_handle) = pending.spawn();
     let (events_tx, events) = mpsc::channel(64);
     let reboot_calls = Arc::new(AtomicUsize::new(0));
@@ -1298,7 +1361,7 @@ mod tests {
       installed_apply_provenance,
       wakeword_reload_calls,
       captured_acks,
-      _root: root,
+      root,
     }
   }
 
@@ -2200,6 +2263,157 @@ mod tests {
       .expect("resume begin ok");
     assert_eq!(ack.resume_from_offset, 10, "partial should survive cancel");
     assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
+  }
+
+  fn begin_req(kind: OtaKind, sha: &str, size: u32) -> OtaBegin {
+    OtaBegin {
+      kind,
+      update_id: sha.to_string(),
+      update_url_base: None,
+      transfer: TransferRef {
+        id: tid_for(sha),
+        total_size: size,
+        sha256: Some(sha.to_string()),
+      },
+      patch: None,
+      provenance: None,
+      version: None,
+    }
+  }
+
+  #[tokio::test]
+  async fn a_cancelled_image_write_retains_the_artifact_for_a_no_transfer_retry() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(begin_req(OtaKind::Image, &sha, size), None)
+      .await
+      .expect("begin ok");
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
+
+    let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing)
+      )
+    })
+    .await;
+    h.ota.cancel().await;
+    let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaError(e) if matches!(e.code, OtaErrorCode::Cancelled)
+      )
+    })
+    .await;
+    assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
+
+    let ack = h
+      .ota
+      .begin(begin_req(OtaKind::Image, &sha, size), None)
+      .await
+      .expect("retry begin ok");
+    assert_eq!(
+      ack.resume_from_offset, size,
+      "a retained artifact answers with the full offset"
+    );
+
+    let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)
+      )
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+      h.reboot_calls.load(Ordering::SeqCst),
+      1,
+      "retry completes with zero re-transfer"
+    );
+  }
+
+  #[tokio::test]
+  async fn a_reboot_between_stage_and_activate_re_stages_from_the_retained_payload() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(begin_req(OtaKind::Daemon, &sha, size), None)
+      .await
+      .expect("begin ok");
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
+    let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing) && p.percent == 100
+      )
+    })
+    .await;
+
+    let root = h.root.clone();
+    drop(h);
+    let mut h2 = boot_on(root, PeerTracker::noop()).await;
+
+    let ack = h2
+      .ota
+      .begin(begin_req(OtaKind::Daemon, &sha, size), None)
+      .await
+      .expect("re-begin after reboot ok");
+    assert_eq!(
+      ack.resume_from_offset, size,
+      "the retained payload makes the re-drive transfer-free"
+    );
+
+    let _ = wait_for(&mut h2.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing) && p.percent == 100
+      )
+    })
+    .await;
+    h2.ota.activate(vec![sha.clone()]).await;
+    let events = drain_until_restart(&mut h2.events, &h2.restart_self_calls, Duration::from_secs(10)).await;
+    assert_eq!(h2.restart_self_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(count_finished(&events), 1);
+  }
+
+  #[tokio::test]
+  async fn a_streaming_partial_survives_a_reboot_and_resumes_at_its_offset() {
+    let h = boot().await;
+    let (bytes, sha, size) = sized_fixture(8 * 1024);
+
+    h.ota
+      .begin(begin_req(OtaKind::Image, &sha, size), None)
+      .await
+      .expect("begin ok");
+    h.sinks
+      .fragment(tid_for(&sha), 0, Bytes::copy_from_slice(&bytes[..4096]));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let root = h.root.clone();
+    drop(h);
+    let mut h2 = boot_on(root, PeerTracker::noop()).await;
+
+    let ack = h2
+      .ota
+      .begin(begin_req(OtaKind::Image, &sha, size), None)
+      .await
+      .expect("re-begin after reboot ok");
+    assert_eq!(ack.resume_from_offset, 4096, "the partial survives the power cut");
+
+    h2.sinks
+      .fragment(tid_for(&sha), 4096, Bytes::copy_from_slice(&bytes[4096..]));
+    let _ = wait_for(&mut h2.events, Duration::from_secs(10), |ev| {
+      matches!(
+        ev,
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)
+      )
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(h2.reboot_calls.load(Ordering::SeqCst), 1);
   }
 
   #[tokio::test]

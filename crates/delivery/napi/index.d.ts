@@ -42,6 +42,7 @@ export interface CompositeVersion {
 export interface ConnectOptions {
   deviceId?: string;
   cacheDir?: string;
+  dataDir?: string;
   appName?: string;
   appVersion?: string;
 }

@@ -19,7 +19,7 @@ fn at(seconds: u64) -> u64 {
 
 fn store_at(millis: u64) -> (Arc<TestClock>, OtaRunStore) {
   let clock = TestClock::at(millis);
-  let store = OtaRunStore::new(clock.clone());
+  let store = OtaRunStore::new(clock.clone(), None);
   (clock, store)
 }
 
