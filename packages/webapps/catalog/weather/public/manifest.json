@@ -1,7 +1,7 @@
 {
   "id": "019e6701-13f8-71b5-ba04-81f347137de2",
   "name": "Weather",
-  "version": "0.9.0",
+  "version": "0.9.3",
   "description": "Current conditions and a short forecast.",
   "icon": "icon.svg",
   "config": [
