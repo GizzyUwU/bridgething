@@ -47,9 +47,11 @@ export default function App() {
     };
 
     load();
+    const intervalId = window.setInterval(load, 15 * 60 * 1000);
     const offChanged = client.config.onChanged(() => load());
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
       offChanged();
     };
   }, [client]);
